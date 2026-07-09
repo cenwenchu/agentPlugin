@@ -1126,7 +1126,6 @@ function addContextSnippet(snippet) {
   }
 
   STATE.contexts.unshift(item);
-  if (STATE.contexts.length > 50) STATE.contexts.length = 50;
   STATE.open = true;
   render();
 }
