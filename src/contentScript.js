@@ -570,21 +570,26 @@ function extractTableHeaders(container) {
 /**
  * 首次对话且用户不知道问什么时，只传表头让大模型引导用户提问。
  */
-function buildHeaderGuidePrompt(headers) {
+function buildHeaderGuidePrompt(headers, sampleRowText) {
   let colSection = "";
   if (headers.length) {
     const cols = headers[0];
     colSection = `\n${cols.map((c, i) => `  ${i + 1}. ${c}`).join("\n")}`;
   }
 
-  return `用户选中了表格数据，但还没有想好具体要问什么。以下是用户选中的数据列：${colSection}
+  let sampleSection = "";
+  if (sampleRowText) {
+    sampleSection = `\n数据样例（第一行）：${sampleRowText}`;
+  }
 
-请根据以上数据列，给用户提供 3-5 个可以直接点击使用的分析方向建议，每个建议用一句话描述，格式如：
+  return `用户选中了表格数据，但还没有想好具体要问什么。以下是用户选中的数据列：${colSection}${sampleSection}
+
+请根据以上数据列和数据样例，给用户提供 3-5 个可以直接点击使用的分析方向建议，每个建议用一句话描述，格式如：
 - 📊 建议标题：具体分析内容说明
 
 要求：
 1. 每个建议必须具体、可执行，用户复制粘贴就能直接提问
-2. 覆盖不同的分析角度（如概览、对比、异常、趋势等）
+2. 覆盖不同的分析角度（如概览、对比、异常、趋势等），并且要贴合实际数据的含义（从列名和数据样例推断）
 3. 语气轻松友好，降低用户的使用门槛
 4. 不要反问用户问题，而是直接给出可用的分析方向
 
@@ -1714,9 +1719,12 @@ async function onSend() {
     }
     // 场景1：首次 + 空输入 + 有上下文
     const headers = extractTableHeadersFromContexts(STATE.contexts);
+    // 取第一条数据行作为样例
+    const sampleRow = STATE.contexts.find(c => c.kind === "table-row");
+    const sampleRowText = sampleRow ? compactOneLine(sampleRow.text).slice(0, 200) : "";
     if (headers.length) {
       // 有表头 → 只传表头，引导用户提问
-      const prompt = buildHeaderGuidePrompt(headers);
+      const prompt = buildHeaderGuidePrompt(headers, sampleRowText);
       await sendText(prompt, { headersOnly: true });
     } else {
       // 没有表头 → 提示用户去选择添加表头
