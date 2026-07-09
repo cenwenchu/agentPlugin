@@ -1,0 +1,101 @@
+.container {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  max-width: 720px;
+  margin: 24px auto;
+  padding: 0 16px 48px;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 6px;
+}
+
+.sub {
+  margin: 0 0 18px;
+  color: #555;
+  line-height: 1.5;
+}
+
+.form {
+  border: 1px solid #e6e6e6;
+  border-radius: 12px;
+  padding: 16px;
+  background: #fff;
+}
+
+label {
+  display: block;
+  margin: 0 0 12px;
+}
+
+label > span {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  margin: 0 0 6px;
+}
+
+input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #d9d9d9;
+  padding: 0 10px;
+  outline: none;
+}
+
+input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+button {
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #1f2937;
+  background: #111827;
+  color: #fff;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+button.secondary {
+  border-color: #d1d5db;
+  background: #fff;
+  color: #111827;
+}
+
+.status {
+  font-size: 12px;
+  color: #666;
+  flex: 1;
+  min-height: 16px;
+}
+
+.tips {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+
+.tip-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #374151;
+  line-height: 1.7;
+}

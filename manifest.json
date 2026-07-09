@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Web-to-AI Context Chat",
+  "version": "0.1.0",
+  "description": "Select any webpage content and bring it into an AI chat overlay as context.",
+  "permissions": ["storage", "contextMenus", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "options_page": "src/options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/contentScript.js"],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

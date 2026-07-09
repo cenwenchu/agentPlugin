@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web-to-AI Context Chat - 设置</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Web-to-AI Context Chat</h1>
+      <p class="sub">配置 DeepSeek（OpenAI 兼容）接口参数（API Key 只保存在你的浏览器 storage 中）。</p>
+
+      <div class="form">
+        <label>
+          <span>Base URL</span>
+          <input id="baseUrl" type="text" placeholder="https://api.deepseek.com 或 https://你的域名/v1" />
+        </label>
+
+        <label>
+          <span>Model</span>
+          <input id="model" type="text" placeholder="deepseek-v4-flash" />
+        </label>
+
+        <label>
+          <span>API Key</span>
+          <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+        </label>
+
+        <div class="row">
+          <button id="save">保存</button>
+          <button id="test" class="secondary">测试连接</button>
+          <div id="status" class="status" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <div class="tips">
+        <div class="tip-title">使用提示</div>
+        <ul>
+          <li>网页内选中文本后会出现一个小图标，点击即可打开浮层并把内容加入上下文。</li>
+          <li>右键菜单也可以把选中内容/整页内容加入上下文。</li>
+          <li>浮层支持持续对话；每次发送会带上你当前的上下文片段。</li>
+        </ul>
+      </div>
+    </div>
+
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>
