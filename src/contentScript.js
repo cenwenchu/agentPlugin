@@ -1,3 +1,4 @@
+const DEBUG = false;
 const IS_TOP_FRAME = window.top === window;
 
 const STATE = {
@@ -18,11 +19,24 @@ function uid() {
 }
 
 let renderScheduled = false;
+let streamingMsgRef = null; // 当前流式输出的消息引用
 function scheduleRender() {
   if (renderScheduled) return;
   renderScheduled = true;
   requestAnimationFrame(() => {
     renderScheduled = false;
+    // 流式输出时尝试增量更新，避免全量重建
+    if (streamingMsgRef && overlayShadow) {
+      const chatList = overlayShadow.getElementById("web2ai_chat_list");
+      if (chatList) {
+        const lastBubble = chatList.lastElementChild;
+        if (lastBubble && lastBubble.classList.contains("assistant")) {
+          lastBubble.innerHTML = renderMarkdown(streamingMsgRef.content);
+          chatList.scrollTop = chatList.scrollHeight;
+          return;
+        }
+      }
+    }
     render();
   });
 }
@@ -143,12 +157,14 @@ function getSelectionLineInfo() {
   };
 }
 
+const COL_SEPARATOR = " ||| ";
+
 function extractTableRowText(rowEl) {
   const tag = rowEl?.tagName?.toLowerCase();
   if (tag === "tr") {
     const cells = Array.from(rowEl.querySelectorAll("th,td"));
-    const parts = cells.map((c) => normalizeText(c.innerText || c.textContent || "")).filter(Boolean);
-    return normalizeText(parts.join(" | "));
+    const parts = cells.map((c) => normalizeText(c.innerText || c.textContent || "").replace(/\n/g, " "));
+    return normalizeText(parts.join(COL_SEPARATOR));
   }
 
   const role = rowEl?.getAttribute?.("role");
@@ -156,8 +172,8 @@ function extractTableRowText(rowEl) {
     const cells = Array.from(
       rowEl.querySelectorAll('[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]')
     );
-    const parts = cells.map((c) => normalizeText(c.innerText || c.textContent || "")).filter(Boolean);
-    if (parts.length) return normalizeText(parts.join(" | "));
+    const parts = cells.map((c) => normalizeText(c.innerText || c.textContent || "").replace(/\n/g, " "));
+    if (parts.length) return normalizeText(parts.join(COL_SEPARATOR));
   }
 
   return normalizeText(rowEl?.innerText || rowEl?.textContent || "");
@@ -284,8 +300,13 @@ function renderMarkdown(text) {
   // 8. 斜体 *
   html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
 
-  // 9. 链接 [text](url)
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // 9. 链接 [text](url) — 对 URL 做 sanitize，防止 javascript: 协议
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+    const safeUrl = /^https?:\/\//i.test(url) ? url : "";
+    return safeUrl
+      ? `<a href="${safeUrl}" target="_blank" rel="noopener">${text}</a>`
+      : text;
+  });
 
   // 10. 无序列表 - 或 *
   html = html.replace(/^[\s]*[-*]\s+(.+)$/gm, "<li>$1</li>");
@@ -480,7 +501,7 @@ const CONTEXT_WARN_LIMIT = 100000; // 上下文警告阈值（100K，超过时�
 let toastQueue = [];
 let toastTimer = null;
 function showToast(message) {
-  console.log(`[web2ai] showToast called: "${String(message ?? "").slice(0, 60)}" IS_TOP_FRAME=${IS_TOP_FRAME}`);
+  DEBUG && console.log(`[web2ai] showToast called: "${String(message ?? "").slice(0, 60)}" IS_TOP_FRAME=${IS_TOP_FRAME}`);
   // 如果在 iframe 中，转发到 top frame 显示
   if (!IS_TOP_FRAME) {
     chrome.runtime.sendMessage({
@@ -491,7 +512,7 @@ function showToast(message) {
   }
   toastQueue.push(String(message ?? ""));
   if (toastTimer) {
-    console.log(`[web2ai] showToast: timer already active, queued. queue.length=${toastQueue.length}`);
+    DEBUG && console.log(`[web2ai] showToast: timer already active, queued. queue.length=${toastQueue.length}`);
     return;
   }
   const id = "web2ai_toast";
@@ -520,12 +541,12 @@ function showToast(message) {
       }
     });
     document.documentElement.appendChild(node);
-    console.log(`[web2ai] showToast: created toast node`);
+    DEBUG && console.log(`[web2ai] showToast: created toast node`);
   }
   const showNext = () => {
-    if (!toastQueue.length) { toastTimer = null; node.style.display = "none"; console.log(`[web2ai] showToast: queue empty, hidden`); return; }
+    if (!toastQueue.length) { toastTimer = null; node.style.display = "none"; DEBUG && console.log(`[web2ai] showToast: queue empty, hidden`); return; }
     const msg = toastQueue.shift();
-    console.log(`[web2ai] showToast: displaying "${msg.slice(0, 60)}" queue.length=${toastQueue.length}`);
+    DEBUG && console.log(`[web2ai] showToast: displaying "${msg.slice(0, 60)}" queue.length=${toastQueue.length}`);
     node.textContent = msg;
     node.style.display = "block";
     toastTimer = setTimeout(showNext, 4000);
@@ -567,7 +588,7 @@ function extractTableHeadersFromContexts(contexts) {
     const result = [];
     for (const g of groups) {
       if (g.header?.text) {
-        const cols = g.header.text.split(" | ").filter(Boolean);
+        const cols = g.header.text.split(COL_SEPARATOR).filter(Boolean);
         if (cols.length) result.push(cols);
       }
     }
@@ -576,7 +597,7 @@ function extractTableHeadersFromContexts(contexts) {
   // 无分组时回退到旧逻辑
   const headerCtx = contexts.find(c => c.kind === "table-header");
   if (!headerCtx || !headerCtx.text) return [];
-  const cols = headerCtx.text.split(" | ").filter(Boolean);
+  const cols = headerCtx.text.split(COL_SEPARATOR).filter(Boolean);
   return cols.length ? [cols] : [];
 }
 
@@ -1167,7 +1188,7 @@ async function analyzeCurrentPage() {
 function addContextSnippet(snippet) {
   const t0 = performance.now();
   const text = normalizeText(snippet?.text);
-  console.log(`[web2ai] addContextSnippet kind=${snippet?.kind} text="${text?.slice(0, 60)}" IS_TOP_FRAME=${IS_TOP_FRAME} tableGroups.length=${STATE.tableGroups.length}`);
+  DEBUG && console.log(`[web2ai] addContextSnippet kind=${snippet?.kind} text="${text?.slice(0, 60)}" IS_TOP_FRAME=${IS_TOP_FRAME} tableGroups.length=${STATE.tableGroups.length}`);
   if (!text) {
     showToast("没有可添加的内容");
     return;
@@ -1200,7 +1221,8 @@ function addContextSnippet(snippet) {
     anchorSelector,
     quote,
     lineInfo,
-    silent: snippet.silent
+    silent: snippet.silent,
+    cellCount: snippet.cellCount || 0
   };
   storeContextToBackground(item);
   if (!IS_TOP_FRAME) {
@@ -1221,7 +1243,7 @@ function addContextSnippet(snippet) {
     // 最终校验：必须有 header 分组才能加入 row
     const hasHeader = STATE.tableGroups.some(g => g.header !== null);
     if (!hasHeader) {
-      console.log(`[web2ai] addContextSnippet REJECT table-row: no header group`);
+      DEBUG && console.log(`[web2ai] addContextSnippet REJECT table-row: no header group`);
       showToast("请先选择表格的表头行加入上下文");
       STATE.contexts.shift(); // 移除刚加入的这条
       // 通知所有 frame 回滚 UI 状态
@@ -1234,13 +1256,18 @@ function addContextSnippet(snippet) {
       return;
     }
     // 对比当前行列数和最近 header 的列数
-    const rowCols = item.text.split(" | ").filter(Boolean).length;
+    // 优先使用 DOM cell 数量（cellCount），避免 cell 内容中的 | 干扰 split
     const headerGroup = STATE.tableGroups.find(g => g.header !== null);
     if (headerGroup && headerGroup.header) {
-      const headerCols = headerGroup.header.text.split(" | ").filter(Boolean).length;
-      console.log(`[web2ai] addContextSnippet colCheck: rowCols=${rowCols} headerCols=${headerCols}`);
+      const headerCols = headerGroup.header.text.split(COL_SEPARATOR).length;
+      const rowCols = item.cellCount > 0
+        ? item.cellCount
+        : item.text.split(COL_SEPARATOR).length;
+      DEBUG && console.log(`[web2ai] addContextSnippet colCheck: rowCols=${rowCols} headerCols=${headerCols} cellCount=${item.cellCount}`);
+      DEBUG && console.log(`[web2ai] addContextSnippet HEADER fields (${headerCols}):`, headerGroup.header.text.split(COL_SEPARATOR).map((f, i) => `[${i}] "${f}"`).join(", "));
+      DEBUG && console.log(`[web2ai] addContextSnippet ROW fields (${rowCols}):`, item.text.split(COL_SEPARATOR).map((f, i) => `[${i}] "${f}"`).join(", "));
       if (rowCols !== headerCols) {
-        console.log(`[web2ai] addContextSnippet REJECT table-row: column count mismatch`);
+        DEBUG && console.log(`[web2ai] addContextSnippet REJECT table-row: column count mismatch row=${rowCols} header=${headerCols}`);
         showToast(`当前行有 ${rowCols} 列，但表头有 ${headerCols} 列，列数不一致。如果是新表格，请先选择它的表头行`);
         STATE.contexts.shift();
         if (item.ref) {
@@ -1263,12 +1290,12 @@ function addContextSnippet(snippet) {
   }
   STATE.open = true;
   const elapsed = performance.now() - t0;
-  if (elapsed > 5) console.log(`[web2ai] addContextSnippet done: ${elapsed.toFixed(1)}ms silent=${snippet.silent} kind=${snippet?.kind}`);
+  if (elapsed > 5) DEBUG && console.log(`[web2ai] addContextSnippet done: ${elapsed.toFixed(1)}ms silent=${snippet.silent} kind=${snippet?.kind}`);
   if (!snippet.silent) {
-    console.log(`[web2ai] addContextSnippet calling render() (silent=${snippet.silent})`);
+    DEBUG && console.log(`[web2ai] addContextSnippet calling render() (silent=${snippet.silent})`);
     render();
   } else {
-    console.log(`[web2ai] addContextSnippet skip render() (silent=${snippet.silent})`);
+    DEBUG && console.log(`[web2ai] addContextSnippet skip render() (silent=${snippet.silent})`);
   }
 }
 
@@ -1302,9 +1329,9 @@ function removeContextByRef(ref, opts = {}) {
 function removeContext(id, opts = {}) {
   try {
     const ctx = STATE.contexts.find((c) => c.id === id);
-    console.log(`[web2ai] removeContext id=${id} ctx=`, ctx, `refToCheckbox size=${refToCheckbox.size}`, `refToRowEl size=${refToRowEl.size}`);
+    DEBUG && console.log(`[web2ai] removeContext id=${id} ctx=`, ctx, `refToCheckbox size=${refToCheckbox.size}`, `refToRowEl size=${refToRowEl.size}`);
     if (ctx?.ref) {
-      console.log(`[web2ai] removeContext ref=${ctx.ref} refToCheckbox.has=${refToCheckbox.has(ctx.ref)} refToRowEl.has=${refToRowEl.has(ctx.ref)}`);
+      DEBUG && console.log(`[web2ai] removeContext ref=${ctx.ref} refToCheckbox.has=${refToCheckbox.has(ctx.ref)} refToRowEl.has=${refToRowEl.has(ctx.ref)}`);
       removeContextInBackground(ctx.ref);
       // 广播消息到所有 frame，让对应 frame 取消 checkbox 和高亮
       chrome.runtime.sendMessage({
@@ -1312,14 +1339,14 @@ function removeContext(id, opts = {}) {
         payload: { message: { type: "UNSELECT_ROW_BY_REF", ref: ctx.ref } }
       }).catch(() => void 0);
       // 同步取消页面上两个 checkbox 的勾选
-      console.log(`[web2ai] removeContext calling syncRowCheckboxState(false)`);
+      DEBUG && console.log(`[web2ai] removeContext calling syncRowCheckboxState(false)`);
       syncRowCheckboxState(false);
       // 取消页面上对应行的高亮和 overlay
       let rowEl = refToRowEl.get(ctx.ref);
       if (!rowEl && ctx.anchorSelector) {
         try { rowEl = document.querySelector(ctx.anchorSelector); } catch {}
       }
-      console.log(`[web2ai] removeContext rowEl=`, rowEl);
+      DEBUG && console.log(`[web2ai] removeContext rowEl=`, rowEl);
       if (rowEl) {
         removePinnedRowOverlay(rowEl);
         highlightRow(rowEl, false);
@@ -1357,7 +1384,7 @@ function removeFromTableGroups(ref) {
 }
 
 function clearContext() {
-  console.log(`[web2ai] clearContext refToCheckbox size=${refToCheckbox.size} refToRowEl size=${refToRowEl.size} pinnedRowOverlays size=${pinnedRowOverlays.size}`);
+  DEBUG && console.log(`[web2ai] clearContext refToCheckbox size=${refToCheckbox.size} refToRowEl size=${refToRowEl.size} pinnedRowOverlays size=${pinnedRowOverlays.size}`);
   STATE.contexts = [];
   STATE.tableGroups = [];
   clearContextsInBackground();
@@ -1419,6 +1446,17 @@ let overlayShadow = null;
 
 let chatPort = null;
 const streamHandlers = new Map();
+
+function stopGeneration() {
+  if (chatPort) {
+    chatPort.disconnect();
+    chatPort = null;
+  }
+  streamHandlers.clear();
+  streamingMsgRef = null;
+  STATE.pending = false;
+  render();
+}
 
 function getChatPort() {
   if (chatPort) return chatPort;
@@ -1673,9 +1711,19 @@ function render() {
           {
             class: "btn primary",
             disabled: STATE.pending ? true : null,
-            onClick: () => onSend()
+            onClick: () => onSend(),
+            style: STATE.pending ? { display: "none" } : {}
           },
-          [STATE.pending ? "发送中" : "问一下"]
+          ["问一下"]
+        ),
+        el(
+          "button",
+          {
+            class: "btn danger",
+            onClick: () => stopGeneration(),
+            style: STATE.pending ? {} : { display: "none" }
+          },
+          ["停止生成"]
         ),
         el(
           "button",
@@ -1801,12 +1849,12 @@ async function sendText(rawText, opts = {}) {
     if (opts.headersOnly) {
       // 场景1：只传表头引导提示词，不传上下文数据
       requestMessages.push({ role: "user", content: text });
-      console.log(`[web2ai] sendText headersOnly mode, prompt length=${text.length}`);
+      DEBUG && console.log(`[web2ai] sendText headersOnly mode, prompt length=${text.length}`);
     } else {
       // 正常模式：带上下文 + 对话历史
       let contextsToUse = STATE.contexts;
       const totalChars = getContextTotalChars(contextsToUse);
-      console.log(`[web2ai] sendText contexts=${contextsToUse.length} totalChars=${totalChars} warnLimit=${CONTEXT_WARN_LIMIT}`);
+      DEBUG && console.log(`[web2ai] sendText contexts=${contextsToUse.length} totalChars=${totalChars} warnLimit=${CONTEXT_WARN_LIMIT}`);
       if (totalChars > CONTEXT_WARN_LIMIT) {
         const chosen = await confirmContextOverflow(contextsToUse, CONTEXT_CHAR_LIMIT);
         if (chosen === null) {
@@ -1837,7 +1885,7 @@ async function sendText(rawText, opts = {}) {
         })
       );
 
-      console.log(`[web2ai] sendText requestMessages=${requestMessages.length}`, JSON.stringify({
+      DEBUG && console.log(`[web2ai] sendText requestMessages=${requestMessages.length}`, JSON.stringify({
         systemLen: requestMessages[0]?.content?.length || 0,
         historyRounds: recentMessages.length,
         totalMessages: requestMessages.length,
@@ -1852,6 +1900,7 @@ async function sendText(rawText, opts = {}) {
       ts: Date.now()
     };
     STATE.messages.push(assistantMsg);
+    streamingMsgRef = assistantMsg;
     render();
 
     await streamChat({
@@ -1863,10 +1912,11 @@ async function sendText(rawText, opts = {}) {
     });
 
     assistantMsg.content = normalizeText(assistantMsg.content) || "(empty response)";
+    streamingMsgRef = null;
     render();
   } catch (e) {
     const errMsg = String(e?.message ?? e);
-    console.log(`[web2ai] sendText request failed, retrying once: ${errMsg}`);
+    DEBUG && console.log(`[web2ai] sendText request failed, retrying once: ${errMsg}`);
     // 自动重试一次，直接用原来的请求
     try {
       // 移除刚 push 的 assistant 空消息
@@ -1878,6 +1928,7 @@ async function sendText(rawText, opts = {}) {
         ts: Date.now()
       };
       STATE.messages.push(retryAssistantMsg);
+      streamingMsgRef = retryAssistantMsg;
       render();
       await streamChat({
         messages: requestMessages,
@@ -1887,8 +1938,10 @@ async function sendText(rawText, opts = {}) {
         }
       });
       retryAssistantMsg.content = normalizeText(retryAssistantMsg.content) || "(empty response)";
+      streamingMsgRef = null;
       render();
     } catch (e2) {
+      streamingMsgRef = null;
       STATE.messages.push({
         role: "assistant",
         content: `请求失败：${String(e2?.message ?? e2)}`,
@@ -1896,6 +1949,7 @@ async function sendText(rawText, opts = {}) {
       });
     }
   } finally {
+    streamingMsgRef = null;
     STATE.pending = false;
     render();
   }
@@ -2195,13 +2249,13 @@ function selectAllRowsInSameGroup(opts = {}) {
     const txt = compactOneLine(extractTableRowText(r)).slice(0, 40);
     return `[${i}] ref=${ref || "none"} text="${txt}"`;
   }).join("\n");
-  console.log(`[web2ai] selectAllRowsInSameGroup found ${rows.length} rows:\n${rowDetails}`);
+  DEBUG && console.log(`[web2ai] selectAllRowsInSameGroup found ${rows.length} rows:\n${rowDetails}`);
   let added = 0;
   for (const rowEl of rows) {
     added += addRowElToContext(rowEl, { silent: true });
   }
   const elapsed = performance.now() - t0;
-  console.log(`[web2ai] selectAllRowsInSameGroup added ${added}/${rows.length} totalTime=${elapsed.toFixed(1)}ms`);
+  DEBUG && console.log(`[web2ai] selectAllRowsInSameGroup added ${added}/${rows.length} totalTime=${elapsed.toFixed(1)}ms`);
   if (added) {
     if (IS_TOP_FRAME) {
       render();
@@ -2272,19 +2326,6 @@ function getTableRootForRow(rowEl) {
   );
 }
 
-function getTableSignature(root) {
-  if (!root) return "";
-  const first =
-    root.querySelector?.("tbody tr") ||
-    root.querySelector?.("tr") ||
-    root.querySelector?.('[role="rowgroup"] [role="row"]') ||
-    root.querySelector?.('[role="row"]');
-  if (!first) return "";
-  const idx = first.getAttribute?.("data-rowindex") || "";
-  const txt = compactOneLine(first.innerText || first.textContent || "").slice(0, 60);
-  return `${idx}|${txt}`;
-}
-
 function getTableRowCount(root) {
   if (!root) return 0;
   const rows = root.querySelectorAll?.("tbody tr, tr, [role='rowgroup'] [role='row'], [role='row']") || [];
@@ -2296,22 +2337,11 @@ function getTableRowCount(root) {
   return count;
 }
 
-function getTableFirstRowTextLength(root) {
-  if (!root) return 0;
-  const first =
-    root.querySelector?.("tbody tr") ||
-    root.querySelector?.("tr") ||
-    root.querySelector?.('[role="rowgroup"] [role="row"]') ||
-    root.querySelector?.('[role="row"]');
-  if (!first) return 0;
-  return (first.textContent || first.innerText || "").trim().length;
-}
-
 function dumpAllTables(label) {
   const allTables = document.querySelectorAll("table");
-  console.log(`[web2ai] ${label}: total tables in document: ${allTables.length}`);
+  DEBUG && console.log(`[web2ai] ${label}: total tables in document: ${allTables.length}`);
   allTables.forEach((tbl, idx) => {
-    const visible = isElementVisible(tbl);
+    const visible = isVisibleElement(tbl);
     const rect = tbl.getBoundingClientRect();
     const rows = tbl.querySelectorAll("tbody tr, tr");
     const rowTexts = Array.from(rows)
@@ -2320,21 +2350,12 @@ function dumpAllTables(label) {
         const raw = compactOneLine(r.innerText || r.textContent || "").slice(0, 50);
         return `[${i}] ${raw}`;
       });
-    console.log(`[web2ai]   table[${idx}]: tag=${tbl.tagName} connected=${tbl.isConnected} visible=${visible} rect=${JSON.stringify({w:Math.round(rect.width),h:Math.round(rect.height)})} rows=${rowTexts.length}`);
-    rowTexts.forEach(t => console.log(`[web2ai]     ${t}`));
+    DEBUG && console.log(`[web2ai]   table[${idx}]: tag=${tbl.tagName} connected=${tbl.isConnected} visible=${visible} rect=${JSON.stringify({w:Math.round(rect.width),h:Math.round(rect.height)})} rows=${rowTexts.length}`);
+    rowTexts.forEach(t => DEBUG && console.log(`[web2ai]     ${t}`));
   });
 }
 
-function isElementVisible(el) {
-  if (!el) return false;
-  try {
-    const style = getComputedStyle(el);
-    if (style.display === "none" || style.visibility === "hidden") return false;
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return false;
-    return true;
-  } catch { return true; }
-}
+
 
 /**
  * 翻页后等待表格数据变化。
@@ -2368,7 +2389,7 @@ function waitForTableChange(root, prevDigest, timeoutMs = 8000, prevRowTexts, ta
         !prevTexts.every((t, i) => t === currentRowTexts[i])
       );
 
-      console.log(`[web2ai] waitForTableChange check: root connected=${root?.isConnected} liveRoot=${liveRoot === root ? "original" : "recovered"} rows=${rows} contentChanged=${contentChanged} elapsed=${elapsed}ms`);
+      DEBUG && console.log(`[web2ai] waitForTableChange check: root connected=${root?.isConnected} liveRoot=${liveRoot === root ? "original" : "recovered"} rows=${rows} contentChanged=${contentChanged} elapsed=${elapsed}ms`);
 
       if (elapsed % 3000 < 50) {
         dumpAllTables(`waitForTableChange DURING elapsed=${elapsed}ms`);
@@ -2420,7 +2441,7 @@ function findLiveTableByIndex(fallbackRoot, tableIndex) {
     let bestScore = -1;
     for (const tbl of batchContainer.querySelectorAll("table")) {
       if (!tbl.isConnected) continue;
-      if (!isElementVisible(tbl)) continue;
+      if (!isVisibleElement(tbl)) continue;
       const rows = getTableRowCount(tbl);
       if (rows > bestScore) {
         bestScore = rows;
@@ -2481,13 +2502,13 @@ function waitForTableDataReady(root, prevDigest, timeoutMs = 12000, tableIndex) 
       const liveRoot = (root && root.isConnected) ? root : findLiveTableByIndex(root, tableIndex);
       const rows = getTableRowCount(liveRoot);
 
-      console.log(`[web2ai] waitForTableDataReady rows=${rows} stableCount=${stableCount} elapsed=${elapsed}ms root connected=${root?.isConnected} liveRoot=${liveRoot === root ? "original" : "recovered"}`);
+      DEBUG && console.log(`[web2ai] waitForTableDataReady rows=${rows} stableCount=${stableCount} elapsed=${elapsed}ms root connected=${root?.isConnected} liveRoot=${liveRoot === root ? "original" : "recovered"}`);
 
       if (rows > 0 && rows === lastRows) {
         stableCount++;
         if (stableCount >= 3 && minWaitDone) {
           clearInterval(timer);
-          console.log(`[web2ai] waitForTableDataReady resolved: ${rows} rows stable`);
+          DEBUG && console.log(`[web2ai] waitForTableDataReady resolved: ${rows} rows stable`);
           resolve(rows);
         }
       } else {
@@ -2497,7 +2518,7 @@ function waitForTableDataReady(root, prevDigest, timeoutMs = 12000, tableIndex) 
       if (elapsed >= minWait) minWaitDone = true;
       if (elapsed > timeoutMs) {
         clearInterval(timer);
-        console.log(`[web2ai] waitForTableDataReady TIMEOUT - returning ${rows} rows`);
+        DEBUG && console.log(`[web2ai] waitForTableDataReady TIMEOUT - returning ${rows} rows`);
         resolve(rows);
       }
     }, 400);
@@ -2661,13 +2682,13 @@ function findLiveTableAfterPageTurn(root, tableIndex) {
   if (root.isConnected && getTableRowCount(root) > 0) return root;
   const recovered = findLiveTableByIndex(root, tableIndex);
   if (recovered !== root) {
-    console.log(`[web2ai] findLiveTableAfterPageTurn recovered via tableIndex=${tableIndex}`);
+    DEBUG && console.log(`[web2ai] findLiveTableAfterPageTurn recovered via tableIndex=${tableIndex}`);
   }
   return recovered;
 }
 
 async function startMultiPageSelect() {
-  console.log("[web2ai] startMultiPageSelect called");
+  DEBUG && console.log("[web2ai] startMultiPageSelect called");
   if (multiPageRunning) return;
   if (!batchAnchorRow || !batchAnchorRow.isConnected) {
     showToast("请先在表格里加入至少两行，再使用跨页选择");
@@ -2694,7 +2715,7 @@ async function startMultiPageSelect() {
 
       const rowsBefore = getRowGroupRows(batchAnchorRow);
       const rowsBeforeText = rowsBefore.map(r => compactOneLine(r.innerText || r.textContent || "").slice(0, 30)).join(" | ");
-      console.log(`[web2ai] page ${i + 1} rows:`, rowsBeforeText);
+      DEBUG && console.log(`[web2ai] page ${i + 1} rows:`, rowsBeforeText);
       const added2 = selectAllRowsInSameGroup({ silent: true });
       totalAdded += added2;
       multiPageProgress.done = i + 1;
@@ -2716,7 +2737,7 @@ async function startMultiPageSelect() {
         batchAnchorRow.closest('[class*="drawer"i] [class*="body"i]') ||
         batchAnchorRow.closest('[class*="modal"i] [class*="body"i]');
       if (drawerCheck && !drawerCheck.contains(nextBtn)) {
-        console.log(`[web2ai] nextBtn not in same drawer as batchAnchorRow, skip`);
+        DEBUG && console.log(`[web2ai] nextBtn not in same drawer as batchAnchorRow, skip`);
         showToast("翻页按钮不在当前抽屉容器内，跨页已停止");
         break;
       }
@@ -2728,27 +2749,27 @@ async function startMultiPageSelect() {
         break;
       }
       const tableIdx = Array.from(document.querySelectorAll("table")).indexOf(root);
-      console.log(`[web2ai] startMultiPageSelect page ${i + 1} -> ${i + 2}, root=`, root, `tag=${root.tagName} connected=${root.isConnected} tableIndex=${tableIdx}`);
+      DEBUG && console.log(`[web2ai] startMultiPageSelect page ${i + 1} -> ${i + 2}, root=`, root, `tag=${root.tagName} connected=${root.isConnected} tableIndex=${tableIdx}`);
       // 在点击翻页前记录当前行的文本，用于 waitForTableChange 对比
       const prevRowTexts = getTableRowTexts(root);
       const prevDigest = getTableContentDigest(root);
-      console.log(`[web2ai] prevDigest="${prevDigest}" prevRows=${prevRowTexts.length}`);
+      DEBUG && console.log(`[web2ai] prevDigest="${prevDigest}" prevRows=${prevRowTexts.length}`);
       const clicked = clickElement(nextBtn);
-      console.log(`[web2ai] clickElement nextBtn result=${clicked}`, nextBtn);
+      DEBUG && console.log(`[web2ai] clickElement nextBtn result=${clicked}`, nextBtn);
       if (!clicked) {
         showToast("翻页点击失败，跨页已停止");
         break;
       }
       await new Promise((r) => setTimeout(r, 300));
       const changed = await waitForTableChange(root, prevDigest, 9000, prevRowTexts, tableIdx);
-      console.log(`[web2ai] waitForTableChange result=${changed}`);
+      DEBUG && console.log(`[web2ai] waitForTableChange result=${changed}`);
       if (!changed) {
         showToast("翻页后页面未更新，跨页已停止");
         break;
       }
 
       const rowCount = await waitForTableDataReady(root, prevDigest, 10000, tableIdx);
-      console.log(`[web2ai] waitForTableDataReady result=${rowCount}`);
+      DEBUG && console.log(`[web2ai] waitForTableDataReady result=${rowCount}`);
       if (!rowCount || rowCount <= 0) {
         showToast(`翻页后数据加载超时（第 ${i + 2} 页），跨页已停止`);
         break;
@@ -2756,12 +2777,12 @@ async function startMultiPageSelect() {
 
       // 翻页后从 document 中重新查找当前可见的 table（翻页后旧 table 可能被隐藏/替换）
       const liveRoot = findLiveTableAfterPageTurn(root, tableIdx);
-      console.log(`[web2ai] after page turn: liveRoot=${liveRoot === root ? "original" : "new"}`);
+      DEBUG && console.log(`[web2ai] after page turn: liveRoot=${liveRoot === root ? "original" : "new"}`);
 
       pruneDisconnectedRowMappings();
       clearSelectedRowRefsInRoot(liveRoot);
       const newRow = pickFirstRowInRoot(liveRoot);
-      console.log(`[web2ai] pickFirstRowInRoot result=`, newRow);
+      DEBUG && console.log(`[web2ai] pickFirstRowInRoot result=`, newRow);
       if (!newRow) {
         showToast(`翻页后未找到新行（第 ${i + 2} 页），跨页已停止`);
         break;
@@ -2771,9 +2792,9 @@ async function startMultiPageSelect() {
       const newTableEl = newRow.tagName === "TR" ? newRow.closest("table") : null;
       if (newTableEl) {
         batchTableRoot = newTableEl;
-        console.log(`[web2ai] batchTableRoot updated, tableIndex=${Array.from(document.querySelectorAll("table")).indexOf(newTableEl)}`);
+        DEBUG && console.log(`[web2ai] batchTableRoot updated, tableIndex=${Array.from(document.querySelectorAll("table")).indexOf(newTableEl)}`);
       }
-      console.log(`[web2ai] batchAnchorRow updated, next loop i=${i + 1}`);
+      DEBUG && console.log(`[web2ai] batchAnchorRow updated, next loop i=${i + 1}`);
       updateBatchBar();
     }
   } catch (e) {
@@ -2803,7 +2824,7 @@ function syncRowCheckboxState(checked) {
   const b = inlineRowFab?.querySelector?.("#web2ai_table_row_inline_checkbox");
   const bBefore = b?.checked;
   if (b && b.checked !== checked) b.checked = checked;
-  console.log(`[web2ai] syncRowCheckboxState(${checked}) fab=${aBefore}->${a?.checked} inline=${bBefore}->${b?.checked} tableRowFab=`, tableRowFab, `inlineRowFab=`, inlineRowFab);
+  DEBUG && console.log(`[web2ai] syncRowCheckboxState(${checked}) fab=${aBefore}->${a?.checked} inline=${bBefore}->${b?.checked} tableRowFab=`, tableRowFab, `inlineRowFab=`, inlineRowFab);
 }
 
 function addRowElToContext(rowEl, { silent } = {}) {
@@ -2811,16 +2832,16 @@ function addRowElToContext(rowEl, { silent } = {}) {
   const t0 = performance.now();
   const existing = selectedRowRef.get(rowEl);
   if (isAddedRef(existing)) {
-    console.log(`[web2ai] addRowElToContext skip already added ref=${existing}`, rowEl);
+    DEBUG && console.log(`[web2ai] addRowElToContext skip already added ref=${existing}`, rowEl);
     return 0;
   }
-  const text = extractTableRowText(rowEl).replace(/\s*\|\s*问AI\s*/, "").replace(/^\s*问AI\s*\|\s*/, "").replace(/\s*\|\s*$/, "").trim();
+  const text = extractTableRowText(rowEl).trim();
   if (!text) {
-    console.log(`[web2ai] addRowElToContext skip empty text`, rowEl);
+    DEBUG && console.log(`[web2ai] addRowElToContext skip empty text`, rowEl);
     return 0;
   }
   const textPreview = compactOneLine(text).slice(0, 60);
-  console.log(`[web2ai] addRowElToContext adding text="${textPreview}"`, rowEl);
+  DEBUG && console.log(`[web2ai] addRowElToContext adding text="${textPreview}"`, rowEl);
   const ref = `CTX${STATE.nextCtxNum++}`;
   selectedRowRef.set(rowEl, ref);
   refToRowEl.set(ref, rowEl);
@@ -2829,22 +2850,24 @@ function addRowElToContext(rowEl, { silent } = {}) {
     const cb = tableRowFab?.querySelector?.("#web2ai_table_row_checkbox");
     if (cb) refToCheckbox.set(ref, cb);
   } catch {}
-  console.log(`[web2ai] addRowElToContext after set: ref=${ref} refToRowEl.size=${refToRowEl.size} refToCheckbox.size=${refToCheckbox.size} cb=`, tableRowFab?.querySelector?.("#web2ai_table_row_checkbox"));
   highlightRow(rowEl, true);
   ensurePinnedRowOverlay(rowEl, ref, "added");
   // 判断该行是表头行还是数据行
-  // 表头行包含 <th>，数据行包含 <td>
   const isHeaderRow = rowEl.querySelector("th") !== null;
   const kind = isHeaderRow ? "table-header" : "table-row";
+  // 计算 DOM 中实际的 cell 数量，用于列数校验（避免文本处理导致列数偏差）
+  const cellCount = rowEl.tagName === "TR"
+    ? rowEl.querySelectorAll("th,td").length
+    : rowEl.getAttribute("role") === "row"
+      ? rowEl.querySelectorAll('[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]').length
+      : 0;
   // 如果是数据行，检查是否有 header 分组（仅在 top frame 中检查）
   if (!isHeaderRow && IS_TOP_FRAME) {
     const hasHeaderGroup = STATE.tableGroups.some(g => g.header !== null) ||
       STATE.contexts.some(c => c.kind === "table-header");
-    console.log(`[web2ai] addRowElToContext dataRowCheck: hasHeaderGroup=${hasHeaderGroup} tableGroups.length=${STATE.tableGroups.length}`);
     if (!hasHeaderGroup) {
-      console.log(`[web2ai] addRowElToContext REJECT: no header group found`);
+      DEBUG && console.log(`[web2ai] addRowElToContext REJECT: no header group found`);
       showToast("请先选择表格的表头行加入上下文");
-      // 回滚：取消 checkbox 勾选和高亮
       syncRowCheckboxState(false);
       highlightRow(rowEl, false);
       selectedRowRef.delete(rowEl);
@@ -2853,17 +2876,17 @@ function addRowElToContext(rowEl, { silent } = {}) {
       removePinnedRowOverlay(rowEl);
       return 0;
     }
-    // 对比当前行列数和最近 header 的列数
-    const rowCols = text.split(" | ").filter(Boolean).length;
-    // 找最近的有 header 的 group
+    // 对比当前行列数和最近 header 的列数（用文本 split，因为 extractTableRowText 能正确提取所有 cell）
+    const rowCols = text.split(COL_SEPARATOR).length;
     const headerGroup = STATE.tableGroups.find(g => g.header !== null);
     if (headerGroup && headerGroup.header) {
-      const headerCols = headerGroup.header.text.split(" | ").filter(Boolean).length;
-      console.log(`[web2ai] addRowElToContext colCheck: rowCols=${rowCols} headerCols=${headerCols} rowText="${text.slice(0, 80)}" headerText="${headerGroup.header.text.slice(0, 80)}"`);
+      const headerCols = headerGroup.header.text.split(COL_SEPARATOR).length;
+      DEBUG && console.log(`[web2ai] addRowElToContext colCheck: rowCols=${rowCols} headerCols=${headerCols}`);
+      DEBUG && console.log(`[web2ai] addRowElToContext HEADER fields (${headerCols}):`, headerGroup.header.text.split(COL_SEPARATOR).map((f, i) => `[${i}] "${f}"`).join(", "));
+      DEBUG && console.log(`[web2ai] addRowElToContext ROW fields (${rowCols}):`, text.split(COL_SEPARATOR).map((f, i) => `[${i}] "${f}"`).join(", "));
       if (rowCols !== headerCols) {
-        console.log(`[web2ai] addRowElToContext REJECT: column count mismatch`);
+        DEBUG && console.log(`[web2ai] addRowElToContext REJECT: column count mismatch row=${rowCols} header=${headerCols}`);
         showToast(`当前行有 ${rowCols} 列，但表头有 ${headerCols} 列，列数不一致。如果是新表格，请先选择它的表头行`);
-        // 回滚
         syncRowCheckboxState(false);
         highlightRow(rowEl, false);
         selectedRowRef.delete(rowEl);
@@ -2882,6 +2905,7 @@ function addRowElToContext(rowEl, { silent } = {}) {
     title: document.title,
     ref,
     rowEl,
+    cellCount,
     silent: Boolean(silent)
   });
 
@@ -2891,7 +2915,7 @@ function addRowElToContext(rowEl, { silent } = {}) {
     const parentTableEl = rowEl.tagName === "TR" ? rowEl.closest("table") : null;
     if (parentTableEl) {
       batchTableRoot = parentTableEl;
-      console.log(`[web2ai] addRowElToContext batchTableRoot set:`, parentTableEl, `tableIndex=${Array.from(document.querySelectorAll("table")).indexOf(parentTableEl)}`);
+      DEBUG && console.log(`[web2ai] addRowElToContext batchTableRoot set:`, parentTableEl, `tableIndex=${Array.from(document.querySelectorAll("table")).indexOf(parentTableEl)}`);
     }
     // 记录 rowEl 所在的外层容器（drawer/modal body），翻页后 table 被销毁时用容器限定查找范围
     batchContainer = rowEl.closest(".ant-drawer-body, .ant-modal-body, .arco-drawer-body, .arco-modal-body") ||
@@ -2901,7 +2925,7 @@ function addRowElToContext(rowEl, { silent } = {}) {
     updateBatchBar();
   }
   const elapsed = performance.now() - t0;
-  if (elapsed > 10) console.log(`[web2ai] addRowElToContext SLOW: ${elapsed.toFixed(1)}ms silent=${silent} kind=${kind} ref=${ref}`);
+  if (elapsed > 10) DEBUG && console.log(`[web2ai] addRowElToContext SLOW: ${elapsed.toFixed(1)}ms silent=${silent} kind=${kind} ref=${ref}`);
   return 1;
 }
 
@@ -2916,17 +2940,17 @@ function handleRowCheckboxChange(checked) {
     const allTables = document.querySelectorAll("table");
     const tableIdx = Array.from(allTables).indexOf(tableEl);
     const tableContent = getTableContentDigest(tableEl);
-    console.log(`[web2ai] handleRowCheckboxChange ${checked ? "选中" : "取消"} row, tableIndex=${tableIdx}, table=`, tableEl, `digest="${tableContent}"`);
+    DEBUG && console.log(`[web2ai] handleRowCheckboxChange ${checked ? "选中" : "取消"} row, tableIndex=${tableIdx}, table=`, tableEl, `digest="${tableContent}"`);
     // 同时输出所有 table 的 index 对照，方便确认
     allTables.forEach((t, i) => {
       if (t.isConnected) {
-        const visible = isElementVisible(t);
+        const visible = isVisibleElement(t);
         const rect = t.getBoundingClientRect();
-        console.log(`[web2ai]   allTables[${i}]: connected visible=${visible} rect=${JSON.stringify({w:Math.round(rect.width),h:Math.round(rect.height)})} digest="${getTableContentDigest(t)}"`);
+        DEBUG && console.log(`[web2ai]   allTables[${i}]: connected visible=${visible} rect=${JSON.stringify({w:Math.round(rect.width),h:Math.round(rect.height)})} digest="${getTableContentDigest(t)}"`);
       }
     });
   } else {
-    console.log(`[web2ai] handleRowCheckboxChange ${checked ? "选中" : "取消"} row, rowEl.tagName=${rowEl.tagName} (not a TR, no parent table)`);
+    DEBUG && console.log(`[web2ai] handleRowCheckboxChange ${checked ? "选中" : "取消"} row, rowEl.tagName=${rowEl.tagName} (not a TR, no parent table)`);
   }
 
   if (checked) {
@@ -3258,10 +3282,9 @@ function hideInlineRowFab() {
   inlineRowFabHost = null;
 }
 
-function ensurePinnedRowOverlay(rowEl, ref, mode) {
+function ensurePinnedRowOverlay(rowEl, ref) {
   if (!rowEl || !ref) return;
   if (pinnedRowOverlays.has(rowEl)) return;
-  const m = "added";
 
   const isInline = rowEl.tagName === "TR";
   const inlineCell = isInline ? getRowInlineAnchorCell(rowEl) : null;
@@ -3453,22 +3476,28 @@ function pickRowTargetFromPoint(e) {
   return e.target;
 }
 
+let _rafPending = false;
 document.addEventListener(
   "mousemove",
   (e) => {
-    const target = pickRowTargetFromPoint(e);
-    const composedPath = target === e.target ? e.composedPath?.() : null;
-    const rowEl = findRowElementFromEventTarget(target, composedPath);
-    if (!rowEl) {
-      hideTableRowFab();
-      return;
-    }
-    const rect = getRowAnchorRect(rowEl);
-    if (!rect || rect.width === 0 || rect.height === 0) {
-      hideTableRowFab();
-      return;
-    }
-    showTableRowFabAt(rect, rowEl);
+    if (_rafPending) return;
+    _rafPending = true;
+    requestAnimationFrame(() => {
+      _rafPending = false;
+      const target = pickRowTargetFromPoint(e);
+      const composedPath = target === e.target ? e.composedPath?.() : null;
+      const rowEl = findRowElementFromEventTarget(target, composedPath);
+      if (!rowEl) {
+        hideTableRowFab();
+        return;
+      }
+      const rect = getRowAnchorRect(rowEl);
+      if (!rect || rect.width === 0 || rect.height === 0) {
+        hideTableRowFab();
+        return;
+      }
+      showTableRowFabAt(rect, rowEl);
+    });
   },
   true
 );
@@ -3490,7 +3519,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === "ADD_CONTEXT_SNIPPET") {
-    console.log(`[web2ai] received ADD_CONTEXT_SNIPPET kind=${message.snippet?.kind} ref=${message.snippet?.ref} IS_TOP_FRAME=${IS_TOP_FRAME}`);
+    DEBUG && console.log(`[web2ai] received ADD_CONTEXT_SNIPPET kind=${message.snippet?.kind} ref=${message.snippet?.ref} IS_TOP_FRAME=${IS_TOP_FRAME}`);
     addContextSnippet(message.snippet);
     sendResponse({ ok: true });
     return;
@@ -3504,7 +3533,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === "UNSELECT_ROW_BY_REF") {
     const ref = message.ref;
-    console.log(`[web2ai] UNSELECT_ROW_BY_REF ref=${ref} refToRowEl.has=${refToRowEl.has(ref)} refToCheckbox.has=${refToCheckbox.has(ref)}`);
+    DEBUG && console.log(`[web2ai] UNSELECT_ROW_BY_REF ref=${ref} refToRowEl.has=${refToRowEl.has(ref)} refToCheckbox.has=${refToCheckbox.has(ref)}`);
     // 取消 checkbox 勾选
     syncRowCheckboxState(false);
     // 取消高亮和 overlay

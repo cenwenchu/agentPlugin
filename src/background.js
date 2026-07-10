@@ -1,8 +1,4 @@
-const DEFAULT_SETTINGS = {
-  baseUrl: "https://api.deepseek.com",
-  model: "deepseek-v4-flash",
-  apiKey: ""
-};
+import { DEFAULT_SETTINGS } from "./shared.js";
 
 async function getSettings() {
   const data = await chrome.storage.sync.get(["settings"]);
@@ -137,15 +133,8 @@ function sendToFrame(tabId, frameId, message) {
   });
 }
 
-function broadcastToTab(tabId, message) {
-  return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tabId, message, (response) => {
-      const err = chrome.runtime.lastError;
-      if (err) reject(err);
-      else resolve(response);
-    });
-  });
-}
+// broadcastToTab 与 sendToTab 功能相同，保留别名以兼容现有调用
+const broadcastToTab = sendToTab;
 
 function contextsKey(tabId) {
   return `web2ai_contexts_${tabId}`;

@@ -1,0 +1,25 @@
+{
+  "name": "agentplugin",
+  "version": "1.0.0",
+  "description": "核心能力：",
+  "main": "index.js",
+  "scripts": {
+    "build": "esbuild src/content/main.js --bundle --outfile=dist/contentScript.js --format=iife --target=chrome100",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cenwenchu/agentPlugin.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/cenwenchu/agentPlugin/issues"
+  },
+  "homepage": "https://github.com/cenwenchu/agentPlugin#readme",
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}

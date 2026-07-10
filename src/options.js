@@ -1,8 +1,4 @@
-const DEFAULT_SETTINGS = {
-  baseUrl: "https://api.deepseek.com",
-  model: "deepseek-v4-flash",
-  apiKey: ""
-};
+import { DEFAULT_SETTINGS } from "./shared.js";
 
 function $(id) {
   const el = document.getElementById(id);

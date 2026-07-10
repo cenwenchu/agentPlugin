@@ -1,0 +1,734 @@
+import { DEBUG, IS_TOP_FRAME, STATE, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
+import { el } from './dom.js';
+import { renderMarkdown } from './markdown.js';
+import { openOptionsPage, streamChat, stopGeneration, initCtxCounterFromBackground, hydrateContextsFromBackground } from './messaging.js';
+import { addContextSnippet, removeContext, clearAll, buildContextBlock, getContextTotalChars, confirmContextOverflow, extractTableHeadersFromContexts, buildHeaderGuidePrompt, extractPageText } from './context.js';
+import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab } from './table.js';
+import { showToast } from './toast.js';
+import { getSelectionText } from './selection.js';
+
+function scheduleRender() {
+  if (refs.renderScheduled) return;
+  refs.renderScheduled = true;
+  requestAnimationFrame(() => {
+    refs.renderScheduled = false;
+    if (refs.streamingMsgRef && refs.overlayShadow) {
+      const chatList = refs.overlayShadow.getElementById("web2ai_chat_list");
+      if (chatList) {
+        const lastBubble = chatList.lastElementChild;
+        if (lastBubble && lastBubble.classList.contains("assistant")) {
+          lastBubble.innerHTML = renderMarkdown(refs.streamingMsgRef.content);
+          chatList.scrollTop = chatList.scrollHeight;
+          return;
+        }
+      }
+    }
+    render();
+  });
+}
+
+function ensureOverlay() {
+  if (refs.overlayHost) return;
+  refs.overlayHost = el("div", {
+    id: "web2ai_overlay_host",
+    style: { position: "fixed", inset: "0", zIndex: "2147483646", pointerEvents: "none" }
+  });
+  refs.overlayShadow = refs.overlayHost.attachShadow({ mode: "open" });
+  document.documentElement.appendChild(refs.overlayHost);
+  render();
+}
+
+function render() {
+  if (!IS_TOP_FRAME) return;
+  ensureOverlay();
+  if (refs.launcherFab) {
+    refs.launcherFab.style.display = STATE.open ? "none" : "flex";
+  }
+  // 最大化时将所有浮动 UI 的 z-index 降到聊天面板下方，防止遮挡
+  const floatingZIndex = (STATE.open && STATE.maximized) ? "1" : "2147483647";
+  if (refs.launcherFab) refs.launcherFab.style.zIndex = floatingZIndex;
+  if (refs.batchBar) refs.batchBar.style.zIndex = floatingZIndex;
+  if (refs.tableRowFab) refs.tableRowFab.style.zIndex = floatingZIndex;
+  if (refs.inlineRowFab) refs.inlineRowFab.style.zIndex = floatingZIndex;
+  for (const node of refs.pinnedRowOverlays.values()) {
+    node.style.zIndex = floatingZIndex;
+  }
+
+  const styles = `
+    :host { all: initial; }
+    .wrap { position: fixed; right: 0; top: 0; bottom: 0; width: 420px; height: 100vh; pointer-events: auto; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .wrap.max { left: 0; right: 0; width: 100vw; }
+    .card { height: 100%; display: flex; flex-direction: column; background: rgba(255,255,255,0.98); border-left: 1px solid rgba(0,0,0,0.12); overflow: hidden; box-shadow: 0 12px 36px rgba(0,0,0,0.22); backdrop-filter: blur(10px); }
+    .wrap.max .card { border-left: none; box-shadow: none; }
+    .hidden { display: none; }
+    .header { display: flex; align-items: center; gap: 6px; padding: 10px 10px; border-bottom: 1px solid rgba(0,0,0,0.08); }
+    .title { font-weight: 650; font-size: 13px; color: #111827; flex: 1; }
+    .header .btn-primary { font-weight: 600; }
+    .btn { height: 28px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.12); background: #fff; color: #111827; padding: 0 10px; cursor: pointer; font-size: 12px; }
+    .btn.primary { background: #111827; color: #fff; border-color: #111827; }
+    .btn.danger { background: #fff; color: #b91c1c; border-color: rgba(185,28,28,0.35); }
+    .body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px; overflow: hidden; }
+    .body.max { flex-direction: row; }
+    .section { border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; overflow: hidden; background: #fff; display: flex; flex-direction: column; min-height: 0; }
+    .sectionHead { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(248,250,252,0.9); border-bottom: 1px solid rgba(0,0,0,0.06); }
+    .sectionTitle { font-size: 12px; font-weight: 650; color: #111827; flex: 1; }
+    .sectionBody { padding: 8px 10px; max-height: 30vh; overflow: auto; flex: 1; min-height: 0; }
+    .body.max .sectionBody { max-height: none; }
+    .body.max .contextSec { flex: 0 0 340px; width: 340px; }
+    .body.max .chatSec { flex: 1; }
+    .tableGroupLabel { font-size: 11px; font-weight: 650; color: #374151; padding: 4px 0 2px 0; margin-top: 4px; }
+    .tableGroupLabel:first-child { margin-top: 0; }
+    .contextItem { position: relative; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; padding: 6px 6px; margin-bottom: 6px; background: #fff; }
+    .contextMeta { font-size: 11px; color: #6b7280; margin-bottom: 4px; padding-right: 28px; }
+    .contextText { font-size: 12px; color: #111827; white-space: pre-wrap; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .contextOmitted { font-size: 11px; color: #6b7280; margin-top: 6px; }
+    .ctxRemove { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); background: #fff; color: #111827; cursor: pointer; font-size: 14px; line-height: 20px; padding: 0; }
+    .ctxRemove:hover { background: rgba(0,0,0,0.04); }
+    .chatSec { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+    .chat { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; background: #fff; }
+    .bubble { border-radius: 12px; padding: 8px 10px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: break-word; }
+    .bubble.user { background: #111827; color: #fff; align-self: flex-end; }
+    .bubble.assistant { background: #f3f4f6; color: #111827; align-self: flex-start; border: 1px solid rgba(0,0,0,0.06); }
+    .bubble.assistant p { margin: 0 0 6px 0; }
+    .bubble.assistant p:last-child { margin-bottom: 0; }
+    .bubble.assistant table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 11px; }
+    .bubble.assistant th, .bubble.assistant td { border: 1px solid rgba(0,0,0,0.15); padding: 4px 6px; text-align: left; }
+    .bubble.assistant th { background: rgba(0,0,0,0.04); font-weight: 650; }
+    .bubble.assistant pre { background: rgba(0,0,0,0.06); border-radius: 8px; padding: 8px; overflow-x: auto; margin: 6px 0; font-size: 11px; }
+    .bubble.assistant code { font-family: "SF Mono", "Menlo", "Monaco", monospace; font-size: 11px; background: rgba(0,0,0,0.06); padding: 1px 4px; border-radius: 4px; }
+    .bubble.assistant pre code { background: none; padding: 0; }
+    .bubble.assistant ul, .bubble.assistant ol { margin: 4px 0; padding-left: 20px; }
+    .bubble.assistant li { margin: 2px 0; }
+    .bubble.assistant h2, .bubble.assistant h3, .bubble.assistant h4 { margin: 8px 0 4px 0; font-weight: 650; }
+    .bubble.assistant h2 { font-size: 14px; }
+    .bubble.assistant h3 { font-size: 13px; }
+    .bubble.assistant h4 { font-size: 12px; }
+    .bubble.assistant a { color: #2563eb; text-decoration: underline; }
+    .composer { display: flex; gap: 10px; padding: 10px; border-top: 1px solid rgba(0,0,0,0.08); background: rgba(248,250,252,0.9); }
+    textarea { flex: 1; resize: none; height: 92px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.14); padding: 8px 10px; font-size: 12px; outline: none; background: #fff; color: #111827; }
+    textarea:focus { border-color: rgba(59,130,246,0.7); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+    .composerActions { width: 92px; display: flex; flex-direction: column; gap: 8px; }
+    .composerActions .btn { width: 100%; }
+    .backdrop { position: fixed; inset: 0; background: transparent; pointer-events: none; }
+  `;
+
+  const wrap = el("div", {
+    class: `wrap ${STATE.open ? "" : "hidden"}${STATE.maximized ? " max" : ""}`
+  });
+  const backdrop = el("div", { class: `backdrop ${STATE.open ? "" : "hidden"}` });
+
+  const header = el("div", { class: "header" }, [
+    el("div", { class: "title" }, ["小聚"]),
+    el(
+      "button",
+      {
+        class: "btn primary",
+        style: { fontSize: "11px", padding: "4px 10px" },
+        onClick: () => toggleMaximized()
+      },
+      [STATE.maximized ? "还原" : "最大化"]
+    ),
+    el(
+      "button",
+      {
+        class: "btn",
+        onClick: () => openOptionsPage()
+      },
+      ["设置"]
+    ),
+    el(
+      "button",
+      {
+        class: "btn",
+        onClick: () => setOpen(false)
+      },
+      ["关闭"]
+    ),
+    el(
+      "button",
+      {
+        class: "btn danger",
+        disabled: STATE.pending ? true : null,
+        onClick: () => clearAll()
+      },
+      ["全部清空"]
+    )
+  ]);
+
+  function renderContextItem(c) {
+    const fullText = normalizeText(c.text);
+    const displayLimit = 140;
+    const shownText = fullText.length > displayLimit ? fullText.slice(0, displayLimit) : fullText;
+    let omittedHint = "";
+    if (fullText.length > displayLimit) omittedHint = `剩余 ${fullText.length - displayLimit} 字符已省略`;
+    else {
+      const lineCount = fullText.split("\n").length;
+      if (lineCount > 2) omittedHint = `剩余 ${lineCount - 2} 行已省略`;
+    }
+    const tipLimit = 100;
+    const tipText =
+      fullText.length > tipLimit
+        ? `${fullText.slice(0, tipLimit)}…（已省略 ${fullText.length - tipLimit} 字符）`
+        : fullText;
+    return el("div", { class: "contextItem" }, [
+      el(
+        "button",
+        { class: "ctxRemove", title: "移除", onClick: () => removeContext(c.id) },
+        ["×"]
+      ),
+      el("div", { class: "contextMeta" }, [
+        `${c.kind === "table-header" ? "表结构说明" : c.kind === "table-row" ? "表格内容" : c.kind}${
+          c.lineInfo?.startLine && c.lineInfo?.endLine
+            ? ` · L${c.lineInfo.startLine}-${c.lineInfo.endLine}`
+            : ""
+        } · ${new Date(c.createdAt).toLocaleString()}`
+      ]),
+      el("div", { class: "contextText", title: tipText }, [shownText]),
+      omittedHint ? el("div", { class: "contextOmitted" }, [omittedHint]) : null,
+      null
+    ]);
+  }
+
+  function renderTableGroups() {
+    const groups = STATE.tableGroups;
+    if (!groups.length) {
+      return [el("div", { style: { fontSize: "12px", color: "#6b7280" } }, ["还没有上下文，选中文本或右键添加。"])];
+    }
+    const els = [];
+    for (let gi = 0; gi < groups.length; gi++) {
+      const g = groups[gi];
+      const rowCount = g.rows.length;
+      const label = g.header ? `表格 ${gi + 1}（${rowCount} 条）` : `未命名表格（${rowCount} 条）`;
+      els.push(el("div", { class: "tableGroupLabel" }, [label]));
+      if (g.header) {
+        els.push(renderContextItem(g.header));
+      }
+      for (const row of g.rows) {
+        els.push(renderContextItem(row));
+      }
+    }
+    return els;
+  }
+
+  const tableCount = STATE.tableGroups.length;
+  const rowCount = STATE.tableGroups.reduce((sum, g) => sum + g.rows.length, 0);
+  const contextSection = el("div", { class: "section contextSec" }, [
+    el("div", { class: "sectionHead" }, [
+      el("div", { class: "sectionTitle" }, [`上下文（${tableCount} 个表格，共 ${rowCount} 条）`])
+    ]),
+    el("div", { class: "sectionBody" }, renderTableGroups())
+  ]);
+
+  const chatSection = el("div", { class: "section chatSec" }, [
+    el("div", { class: "sectionHead" }, [
+      el("div", { class: "sectionTitle" }, ["对话"])
+    ]),
+    el(
+      "div",
+      { class: "chat", id: "web2ai_chat_list" },
+      STATE.messages.length
+        ? STATE.messages.map((m) => {
+            const bubble = el("div", { class: `bubble ${m.role}` });
+            if (m.role === "assistant") {
+              bubble.innerHTML = renderMarkdown(m.content);
+            } else {
+              bubble.textContent = m.content;
+            }
+            return bubble;
+          })
+        : [el("div", { style: { fontSize: "12px", color: "#6b7280" } }, ["输入问题开始对话。"])]
+    ),
+    el("div", { class: "composer" }, [
+      el("textarea", {
+        id: "web2ai_input",
+        placeholder: "问点什么…（Enter 发送，Shift+Enter 换行）"
+      }),
+      el("div", { class: "composerActions" }, [
+        el(
+          "button",
+          {
+            class: "btn primary",
+            disabled: STATE.pending ? true : null,
+            onClick: () => onSend(),
+            style: STATE.pending ? { display: "none" } : {}
+          },
+          ["问一下"]
+        ),
+        el(
+          "button",
+          {
+            class: "btn danger",
+            onClick: () => stopGeneration(),
+            style: STATE.pending ? {} : { display: "none" }
+          },
+          ["停止生成"]
+        ),
+        el(
+          "button",
+          {
+            class: "btn",
+            disabled: STATE.pending ? true : null,
+            onClick: () => clearDraftInput()
+          },
+          ["清空输入"]
+        )
+      ])
+    ])
+  ]);
+
+  const body = el("div", { class: `body${STATE.maximized ? " max" : ""}` }, [
+    contextSection,
+    chatSection
+  ]);
+  const card = el("div", { class: "card" }, [header, body]);
+  wrap.appendChild(card);
+
+  refs.overlayShadow.innerHTML = "";
+  refs.overlayShadow.appendChild(el("style", {}, [styles]));
+  refs.overlayShadow.appendChild(backdrop);
+  refs.overlayShadow.appendChild(wrap);
+
+  const input = refs.overlayShadow.getElementById("web2ai_input");
+  if (input) {
+    input.value = STATE.draftText;
+    input.addEventListener("input", (e) => {
+      STATE.draftText = e.target.value ?? "";
+      if (String(STATE.draftText).trim()) STATE.suppressAutoSuggest = false;
+      STATE.lastInputCursor = {
+        start: e.target.selectionStart ?? STATE.draftText.length,
+        end: e.target.selectionEnd ?? STATE.draftText.length
+      };
+    });
+    const updateCursor = (e) => {
+      STATE.lastInputCursor = {
+        start: e.target.selectionStart ?? STATE.draftText.length,
+        end: e.target.selectionEnd ?? STATE.draftText.length
+      };
+    };
+    input.addEventListener("click", updateCursor);
+    input.addEventListener("keyup", updateCursor);
+    input.addEventListener("select", updateCursor);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        onSend();
+      }
+    });
+  }
+
+  const chatList = refs.overlayShadow.getElementById("web2ai_chat_list");
+  if (chatList) {
+    chatList.scrollTop = chatList.scrollHeight;
+  }
+}
+
+function sliceRecentRounds(messages) {
+  const rounds = [];
+  let i = messages.length - 1;
+  while (i >= 0) {
+    if (messages[i].role === "assistant") {
+      const assistant = messages[i];
+      const user = i > 0 && messages[i - 1].role === "user" ? messages[i - 1] : null;
+      if (user) {
+        rounds.unshift([user, assistant]);
+        i -= 2;
+      } else {
+        rounds.unshift([null, assistant]);
+        i--;
+      }
+    } else if (messages[i].role === "user") {
+      rounds.unshift([messages[i], null]);
+      i--;
+    } else {
+      i--;
+    }
+  }
+
+  const take3 = rounds.slice(-3);
+  const charCount3 = take3.reduce((sum, [u, a]) => sum + (u?.content?.length || 0) + (a?.content?.length || 0), 0);
+
+  let selectedRounds;
+  if (charCount3 < 15000 && rounds.length >= 5) {
+    selectedRounds = rounds.slice(-5);
+  } else {
+    selectedRounds = take3;
+  }
+
+  const result = [];
+  for (const [user, assistant] of selectedRounds) {
+    if (user) result.push({ ...user });
+    if (assistant) result.push({ ...assistant });
+  }
+  return result;
+}
+
+async function sendText(rawText, opts = {}) {
+  if (!IS_TOP_FRAME) return;
+  ensureOverlay();
+  const text = normalizeText(rawText);
+  if (!text) return;
+  if (STATE.pending) return;
+
+  STATE.messages.push({ role: "user", content: text, ts: Date.now() });
+  STATE.pending = true;
+  render();
+
+  try {
+    const requestMessages = [];
+
+    if (opts.headersOnly) {
+      requestMessages.push({ role: "user", content: text });
+      DEBUG && console.log(`[web2ai] sendText headersOnly mode, prompt length=${text.length}`);
+    } else {
+      let contextsToUse = STATE.contexts;
+      const totalChars = getContextTotalChars(contextsToUse);
+      DEBUG && console.log(`[web2ai] sendText contexts=${contextsToUse.length} totalChars=${totalChars} warnLimit=${CONTEXT_WARN_LIMIT}`);
+      if (totalChars > CONTEXT_WARN_LIMIT) {
+        const chosen = await confirmContextOverflow(contextsToUse, CONTEXT_CHAR_LIMIT);
+        if (chosen === null) {
+          STATE.pending = false;
+          render();
+          return;
+        }
+        contextsToUse = chosen;
+      }
+      const isFirstTurn = STATE.messages.length <= 1;
+      const contextBlock = buildContextBlock(contextsToUse, !isFirstTurn);
+      if (contextBlock) requestMessages.push({ role: "system", content: contextBlock });
+
+      const recentMessages = sliceRecentRounds(STATE.messages);
+      const latestUserTs = STATE.messages.filter((m) => m.role === "user").pop()?.ts;
+      requestMessages.push(
+        ...recentMessages.map((m) => {
+          if (m.role === "user") {
+            const isLatest = m.ts === latestUserTs;
+            return isLatest
+              ? { role: "user", content: `USER_INPUT:\n${m.content}` }
+              : { role: "user", content: m.content };
+          }
+          return { role: m.role, content: m.content };
+        })
+      );
+
+      DEBUG && console.log(`[web2ai] sendText requestMessages=${requestMessages.length}`, JSON.stringify({
+        systemLen: requestMessages[0]?.content?.length || 0,
+        historyRounds: recentMessages.length,
+        totalMessages: requestMessages.length,
+        isFirstTurn
+      }));
+    }
+
+    const assistantMsg = {
+      role: "assistant",
+      id: uid(),
+      content: "",
+      ts: Date.now()
+    };
+    STATE.messages.push(assistantMsg);
+    refs.streamingMsgRef = assistantMsg;
+    render();
+
+    await streamChat({
+      messages: requestMessages,
+      onChunk: (delta) => {
+        assistantMsg.content += delta;
+        scheduleRender();
+      }
+    });
+
+    assistantMsg.content = normalizeText(assistantMsg.content) || "(empty response)";
+    refs.streamingMsgRef = null;
+    render();
+  } catch (e) {
+    const errMsg = String(e?.message ?? e);
+    DEBUG && console.log(`[web2ai] sendText request failed, retrying once: ${errMsg}`);
+    try {
+      STATE.messages.pop();
+      const retryAssistantMsg = {
+        role: "assistant",
+        id: uid(),
+        content: "",
+        ts: Date.now()
+      };
+      STATE.messages.push(retryAssistantMsg);
+      refs.streamingMsgRef = retryAssistantMsg;
+      render();
+      await streamChat({
+        messages: requestMessages,
+        onChunk: (delta) => {
+          retryAssistantMsg.content += delta;
+          scheduleRender();
+        }
+      });
+      retryAssistantMsg.content = normalizeText(retryAssistantMsg.content) || "(empty response)";
+      refs.streamingMsgRef = null;
+      render();
+    } catch (e2) {
+      refs.streamingMsgRef = null;
+      STATE.messages.push({
+        role: "assistant",
+        content: `请求失败：${String(e2?.message ?? e2)}`,
+        ts: Date.now()
+      });
+    }
+  } finally {
+    refs.streamingMsgRef = null;
+    STATE.pending = false;
+    render();
+  }
+}
+
+async function onSend() {
+  if (!IS_TOP_FRAME) return;
+  ensureOverlay();
+  const raw = STATE.draftText;
+  const hasInput = !!normalizeText(raw);
+  const hasContext = STATE.contexts.length > 0;
+  const isFirstTurn = STATE.messages.length === 0;
+
+  if (!isFirstTurn && !hasInput) {
+    showToast("请填写需要问的问题");
+    return;
+  }
+
+  if (STATE.pending) return;
+  STATE.draftText = "";
+  STATE.lastInputCursor = { start: 0, end: 0 };
+  applyDraftToInputIfPresent();
+
+  if (isFirstTurn && !hasInput) {
+    if (!hasContext) {
+      showToast("请先选择列表数据加入上下文");
+      return;
+    }
+    const headers = extractTableHeadersFromContexts(STATE.contexts);
+    const sampleRowsText = STATE.tableGroups.map(g => {
+      const firstRow = g.rows[0];
+      return firstRow ? compactOneLine(firstRow.text).slice(0, 200) : "";
+    }).filter(Boolean);
+    if (headers.length) {
+      const prompt = buildHeaderGuidePrompt(headers, sampleRowsText);
+      await sendText(prompt, { headersOnly: true });
+    } else {
+      showToast("请先选择表格中的表头行加入上下文");
+    }
+    return;
+  } else {
+    await sendText(raw);
+  }
+}
+
+function applyDraftToInputIfPresent() {
+  const input = refs.overlayShadow?.getElementById("web2ai_input");
+  if (!input) return;
+  if (input.value !== STATE.draftText) input.value = STATE.draftText;
+  if (STATE.lastInputCursor?.start != null && STATE.lastInputCursor?.end != null) {
+    try {
+      input.setSelectionRange(STATE.lastInputCursor.start, STATE.lastInputCursor.end);
+    } catch {
+      void 0;
+    }
+  }
+}
+
+function insertIntoDraft(text) {
+  const cursor = STATE.lastInputCursor;
+  const start = typeof cursor?.start === "number" ? cursor.start : STATE.draftText.length;
+  const end = typeof cursor?.end === "number" ? cursor.end : STATE.draftText.length;
+  STATE.draftText = STATE.draftText.slice(0, start) + text + STATE.draftText.slice(end);
+  const pos = start + text.length;
+  STATE.lastInputCursor = { start: pos, end: pos };
+  applyDraftToInputIfPresent();
+}
+
+function clearDraftInput() {
+  STATE.draftText = "";
+  STATE.lastInputCursor = { start: 0, end: 0 };
+  STATE.suppressAutoSuggest = true;
+  applyDraftToInputIfPresent();
+}
+
+function setOpen(open) {
+  STATE.open = open;
+  if (IS_TOP_FRAME) {
+    ensureOverlay();
+    render();
+  }
+}
+
+function setMaximized(max) {
+  STATE.maximized = Boolean(max);
+  chrome.storage.sync.set({ panelMaximized: STATE.maximized }).catch(() => void 0);
+  if (STATE.maximized) STATE.open = true;
+  render();
+}
+
+function toggleMaximized() {
+  setMaximized(!STATE.maximized);
+}
+
+function ensureHotkeys() {
+  if (refs.hotkeysBound) return;
+  refs.hotkeysBound = true;
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "Escape" && STATE.open) {
+        if (STATE.maximized) setMaximized(false);
+        else setOpen(false);
+      }
+    },
+    true
+  );
+}
+
+function ensureLauncherFab() {
+  if (refs.launcherFab) return;
+
+  const size = 44;
+  const padding = 16;
+  const defaultLeft = () => Math.max(padding, window.innerWidth - padding - size);
+  const defaultTop = () => Math.max(padding, window.innerHeight - 120 - size);
+  const clampLeft = (x) => clamp(x, padding, window.innerWidth - size - padding);
+  const clampTop = (y) => clamp(y, padding, window.innerHeight - size - padding);
+
+  refs.launcherFab = el("div", {
+    id: "web2ai_launcher_fab",
+    style: {
+      position: "fixed",
+      left: `${defaultLeft()}px`,
+      top: `${defaultTop()}px`,
+      width: `${size}px`,
+      height: `${size}px`,
+      borderRadius: "999px",
+      background: "rgba(255,255,255,0.98)",
+      border: "1px solid rgba(0,0,0,0.16)",
+      boxShadow: "0 12px 32px rgba(0,0,0,0.22)",
+      zIndex: "2147483647",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      cursor: "pointer",
+      touchAction: "none"
+    }
+  });
+
+  refs.launcherFab.innerHTML =
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 10.5V9.2C7.5 6.77 9.47 4.8 11.9 4.8H12.1C14.53 4.8 16.5 6.77 16.5 9.2V10.5" stroke="#111827" stroke-width="1.6" stroke-linecap="round"/><path d="M6.8 10.5H17.2C18.42 10.5 19.4 11.48 19.4 12.7V15.9C19.4 18.33 17.43 20.3 15 20.3H9C6.57 20.3 4.6 18.33 4.6 15.9V12.7C4.6 11.48 5.58 10.5 6.8 10.5Z" stroke="#111827" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.4 14.1H9.41" stroke="#111827" stroke-width="2.2" stroke-linecap="round"/><path d="M14.6 14.1H14.61" stroke="#111827" stroke-width="2.2" stroke-linecap="round"/><path d="M9.2 17.1C10.2 17.8 11.1 18.1 12 18.1C12.9 18.1 13.8 17.8 14.8 17.1" stroke="#111827" stroke-width="1.6" stroke-linecap="round"/></svg>';
+
+  let suppressClickUntil = 0;
+  let drag = null;
+  let currentPos = { left: defaultLeft(), top: defaultTop() };
+
+  const applyPos = (pos) => {
+    const left = clampLeft(pos.left);
+    const top = clampTop(pos.top);
+    currentPos = { left, top };
+    refs.launcherFab.style.left = `${left}px`;
+    refs.launcherFab.style.top = `${top}px`;
+  };
+
+  chrome.storage.sync
+    .get(["launcherPos", "panelMaximized"])
+    .then((data) => {
+      const p = data?.launcherPos;
+      if (p && typeof p.left === "number" && typeof p.top === "number") applyPos(p);
+      if (typeof data?.panelMaximized === "boolean") STATE.maximized = data.panelMaximized;
+    })
+    .catch(() => void 0);
+
+  window.addEventListener(
+    "resize",
+    () => {
+      applyPos(currentPos);
+    },
+    true
+  );
+
+  refs.launcherFab.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    drag = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeft: currentPos.left,
+      startTop: currentPos.top,
+      moved: false
+    };
+    try {
+      refs.launcherFab.setPointerCapture(e.pointerId);
+    } catch {
+      void 0;
+    }
+  });
+
+  refs.launcherFab.addEventListener("pointermove", (e) => {
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) > 4) {
+      drag.moved = true;
+      suppressClickUntil = Date.now() + 350;
+    }
+    if (!drag.moved) return;
+    applyPos({ left: drag.startLeft + dx, top: drag.startTop + dy });
+  });
+
+  const endDrag = (e) => {
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const moved = drag.moved;
+    drag = null;
+    if (moved) {
+      chrome.storage.sync.set({ launcherPos: currentPos }).catch(() => void 0);
+    }
+  };
+  refs.launcherFab.addEventListener("pointerup", endDrag);
+  refs.launcherFab.addEventListener("pointercancel", endDrag);
+
+  refs.launcherFab.addEventListener("click", (e) => {
+    if (Date.now() < suppressClickUntil) return;
+    const text = getSelectionText();
+    if (text) {
+      addContextSnippet({
+        kind: "selection",
+        text,
+        url: location.href,
+        title: document.title
+      });
+      setOpen(true);
+      return;
+    }
+    setOpen(!STATE.open);
+  });
+  document.documentElement.appendChild(refs.launcherFab);
+}
+
+function initOverlay() {
+  ensureTableRowFab();
+  initCtxCounterFromBackground();
+
+  if (IS_TOP_FRAME) {
+    ensureHotkeys();
+    ensureOverlay();
+    ensureLauncherFab();
+    hydrateContextsFromBackground();
+  }
+}
+
+export {
+  ensureOverlay,
+  ensureHotkeys,
+  ensureLauncherFab,
+  render,
+  scheduleRender,
+  setOpen,
+  setMaximized,
+  toggleMaximized,
+  applyDraftToInputIfPresent,
+  insertIntoDraft,
+  clearDraftInput,
+  sliceRecentRounds,
+  sendText,
+  onSend,
+  initOverlay
+};
