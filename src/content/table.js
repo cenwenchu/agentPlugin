@@ -2,7 +2,7 @@ import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, refs, clamp, normalizeText, 
 import { el, getOverlayBoundsForElement, findRowElementFromEventTarget, isVisibleElement } from './dom.js';
 import { addContextSnippet, removeContextByRef, extractTableRowText } from './context.js';
 import { showToast } from './toast.js';
-import { render, setOpen } from './overlay.js';
+import { render } from './overlay.js';
 
 function highlightRow(rowEl, on) {
   if (!rowEl) return;
@@ -180,6 +180,7 @@ function ensureTableRowFab() {
   refs.tableRowFab = el("label", {
     id: "web2ai_table_row_fab",
     title: "勾选：把该行内容加入上下文，发送给 AI",
+    onClick: (e) => e.stopPropagation(),
     style: {
       position: "fixed",
       zIndex: Z_INDEX,
@@ -242,7 +243,8 @@ function ensureTableRowFab() {
   input.addEventListener("click", (e) => {
     e.stopPropagation();
   });
-  input.addEventListener("change", () => {
+  input.addEventListener("change", (e) => {
+    e.stopPropagation();
     handleRowCheckboxChange(input.checked);
   });
 
@@ -254,11 +256,11 @@ function ensureInlineRowFab() {
   refs.inlineRowFab = el("label", {
     id: "web2ai_table_row_inline_fab",
     title: "勾选：把该行内容加入上下文，发送给 AI",
+    onClick: (e) => e.stopPropagation(),
     style: {
       position: "absolute",
       right: "6px",
-      top: "50%",
-      transform: "translateY(-50%)",
+      top: "4px",
       zIndex: "3",
       display: "none",
       alignItems: "center",
@@ -319,7 +321,8 @@ function ensureInlineRowFab() {
   input.addEventListener("click", (e) => {
     e.stopPropagation();
   });
-  input.addEventListener("change", () => {
+  input.addEventListener("change", (e) => {
+    e.stopPropagation();
     handleRowCheckboxChange(input.checked);
   });
 }
@@ -367,8 +370,7 @@ function ensurePinnedRowOverlay(rowEl, ref) {
     style: {
       position: isInline && inlineCell ? "absolute" : "fixed",
       right: isInline && inlineCell ? "6px" : null,
-      top: isInline && inlineCell ? "50%" : null,
-      transform: isInline && inlineCell ? "translateY(-50%)" : null,
+      top: isInline && inlineCell ? "4px" : null,
       zIndex: "2147483647",
       display: "flex",
       alignItems: "center",
@@ -384,29 +386,9 @@ function ensurePinnedRowOverlay(rowEl, ref) {
       "span",
       {
         style: {
-          width: "26px",
-          height: "26px",
-          borderRadius: "8px",
-          background: "rgba(255,255,255,0.98)",
-          border: "1px solid rgba(0,0,0,0.22)",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center"
-        }
-      },
-      ["✓"]
-    )
-  );
-
-  node.appendChild(
-    el(
-      "span",
-      {
-        style: {
           fontSize: "11px",
           lineHeight: "1",
-          padding: "6px 10px 6px 12px",
+          padding: "6px 10px",
           borderRadius: "999px",
           background: "rgba(17,24,39,0.92)",
           color: "#fff",
@@ -1302,7 +1284,6 @@ async function startMultiPageSelect() {
 
   if (totalAdded > 0) {
     showToast(`跨页完成：共加入 ${totalAdded} 行`);
-    setOpen(true);
   } else if (!refs.multiPageProgress?.stop) {
     showToast("跨页完成：没有新增可加入的数据");
   }
@@ -1310,10 +1291,18 @@ async function startMultiPageSelect() {
 
 function getRowInlineAnchorCell(rowEl) {
   if (!rowEl) return null;
-  if (rowEl.tagName === "TR") return rowEl.querySelector("td,th");
-  return rowEl.querySelector?.(
-    "[role='rowheader'],[role='columnheader'],[role='cell'],[role='gridcell']"
-  );
+  const cells = rowEl.tagName === "TR"
+    ? rowEl.querySelectorAll("td,th")
+    : rowEl.querySelectorAll?.(
+        "[role='rowheader'],[role='columnheader'],[role='cell'],[role='gridcell']"
+      );
+  if (!cells) return null;
+  // 从第二个可见单元格开始找，跳过第一列（通常是 checkbox）
+  const visible = [];
+  for (const cell of cells) {
+    if (cell.offsetParent !== null) visible.push(cell);
+  }
+  return visible[1] || visible[0] || null;
 }
 
 function initTableListeners() {

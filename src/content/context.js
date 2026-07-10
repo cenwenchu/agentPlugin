@@ -104,7 +104,6 @@ function addContextSnippet(snippet) {
       STATE.tableGroups.unshift({ id: `TG${Date.now()}`, header: null, rows: [item] });
     }
   }
-  STATE.open = true;
   const elapsed = performance.now() - t0;
   if (elapsed > 5) DEBUG && console.log(`[web2ai] addContextSnippet done: ${elapsed.toFixed(1)}ms silent=${snippet.silent} kind=${snippet?.kind}`);
   if (!snippet.silent) {
@@ -144,21 +143,22 @@ function removeContextByRef(ref, opts = {}) {
 function removeContext(id, opts = {}) {
   try {
     const ctx = STATE.contexts.find((c) => c.id === id);
-    DEBUG && console.log(`[web2ai] removeContext id=${id} ctx=`, ctx, `refToCheckbox size=${refs.refToCheckbox.size}`, `refToRowEl size=${refs.refToRowEl.size}`);
+    console.log(`[web2ai] removeContext start: id=${id} kind=${ctx?.kind} ref=${ctx?.ref}`);
+    console.log(`[web2ai] removeContext state before: contexts=${STATE.contexts.length} tableGroups=${STATE.tableGroups.length}`, STATE.tableGroups.map(g => `[${g.header?.ref||"-"} rows=${g.rows.length}]`).join(", "));
+    console.log(`[web2ai] removeContext refs: selectedRowRef=${refs.selectedRowRef.size} refToRowEl=${refs.refToRowEl.size} refToCheckbox=${refs.refToCheckbox.size} batchAnchorRow=${!!refs.batchAnchorRow}`);
     if (ctx?.ref) {
-      DEBUG && console.log(`[web2ai] removeContext ref=${ctx.ref} refToCheckbox.has=${refs.refToCheckbox.has(ctx.ref)} refToRowEl.has=${refs.refToRowEl.has(ctx.ref)}`);
+      console.log(`[web2ai] removeContext ref=${ctx.ref} refToCheckbox.has=${refs.refToCheckbox.has(ctx.ref)} refToRowEl.has=${refs.refToRowEl.has(ctx.ref)}`);
       removeContextInBackground(ctx.ref);
       chrome.runtime.sendMessage({
         type: "BROADCAST_TO_TAB",
         payload: { message: { type: "UNSELECT_ROW_BY_REF", ref: ctx.ref } }
       }).catch(() => void 0);
-      DEBUG && console.log(`[web2ai] removeContext calling syncRowCheckboxState(false)`);
       syncRowCheckboxState(false);
       let rowEl = refs.refToRowEl.get(ctx.ref);
       if (!rowEl && ctx.anchorSelector) {
         try { rowEl = document.querySelector(ctx.anchorSelector); } catch {}
       }
-      DEBUG && console.log(`[web2ai] removeContext rowEl=`, rowEl);
+      console.log(`[web2ai] removeContext header rowEl=`, rowEl?.tagName, rowEl?.isConnected);
       if (rowEl) {
         removePinnedRowOverlay(rowEl);
         highlightRow(rowEl, false);
@@ -168,7 +168,32 @@ function removeContext(id, opts = {}) {
       refs.refToCheckbox.delete(ctx.ref);
     }
     STATE.contexts = STATE.contexts.filter((c) => c.id !== id);
-    if (ctx?.ref) removeFromTableGroups(ctx.ref);
+    if (ctx?.ref) {
+      // 如果是表头，广播所有下属行的引用给各 frame 自行清理
+      if (ctx.kind === "table-header") {
+        console.log(`[web2ai] removeContext HEADER detected, broadcasting row refs for cleanup`);
+        const group = STATE.tableGroups.find((g) => g.header?.ref === ctx.ref);
+        console.log(`[web2ai] removeContext group found:`, group ? `rows=${group.rows.length}` : "NONE");
+        if (group) {
+          const rowRefs = group.rows.map((r) => r.ref).filter(Boolean);
+          console.log(`[web2ai] removeContext broadcasting cleanup for refs:`, rowRefs);
+          // 从 STATE.contexts 移除所有行
+          for (const row of group.rows) {
+            STATE.contexts = STATE.contexts.filter((c) => c.id !== row.id);
+            if (row.ref) removeContextInBackground(row.ref);
+          }
+          // 广播：让各 frame 通过各自的 refToRowEl 找行并清理
+          chrome.runtime.sendMessage({
+            type: "BROADCAST_TO_TAB",
+            payload: { message: { type: "UNSELECT_ROWS_BY_REFS", refs: rowRefs } }
+          }).catch(() => void 0);
+        }
+        refs.batchAnchorRow = null;
+        refs.batchContainer = null;
+      }
+      removeFromTableGroups(ctx.ref);
+    }
+    console.log(`[web2ai] removeContext state after: contexts=${STATE.contexts.length} tableGroups=${STATE.tableGroups.length}`, STATE.tableGroups.map(g => `[${g.header?.ref||"-"} rows=${g.rows.length}]`).join(", "));
     updateBatchBar();
     if (!opts?.silent) render();
   } catch (e) {
@@ -199,6 +224,17 @@ function clearContext() {
   STATE.contexts = [];
   STATE.tableGroups = [];
   clearContextsInBackground();
+  // 直接清理当前 frame 的行选中 UI
+  for (const rowEl of Array.from(refs.pinnedRowOverlays.keys())) {
+    removePinnedRowOverlay(rowEl);
+    highlightRow(rowEl, false);
+    refs.selectedRowRef.delete(rowEl);
+  }
+  refs.batchAnchorRow = null;
+  refs.batchContainer = null;
+  syncRowCheckboxState(false);
+  if (refs.batchBar) refs.batchBar.style.display = "none";
+  // 广播到其他 frames（iframe 等），由各 frame 自行清理 refToRowEl/refToCheckbox
   chrome.runtime
     .sendMessage({ type: "BROADCAST_TO_TAB", payload: { message: { type: "CLEAR_ROW_UI" } } })
     .catch(() => void 0);

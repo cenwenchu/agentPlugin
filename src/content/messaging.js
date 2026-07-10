@@ -87,7 +87,6 @@ async function hydrateContextsFromBackground() {
         }
       }
     }
-    if (STATE.contexts.length > 0) STATE.open = true;
     // Dynamic import to avoid circular dependency (overlay.js -> messaging.js)
     const { render } = await import('./overlay.js');
     render();

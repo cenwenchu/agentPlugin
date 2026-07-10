@@ -1,7 +1,6 @@
-import { DEBUG, IS_TOP_FRAME, refs, clamp, normalizeText, Z_INDEX } from './state.js';
+import { DEBUG, refs, clamp, normalizeText, Z_INDEX } from './state.js';
 import { el, getCssSelector } from './dom.js';
 import { addContextSnippet } from './context.js';
-import { setOpen } from './overlay.js';
 
 function getSelectionText() {
   const sel = window.getSelection();
@@ -91,14 +90,6 @@ function ensureSelectionFab() {
         quote: snap.quote,
         lineInfo: snap.lineInfo
       });
-      if (IS_TOP_FRAME) {
-        setOpen(true);
-      }
-      else {
-        chrome.runtime
-          .sendMessage({ type: "FORWARD_TO_TOP", payload: { message: { type: "OPEN_PANEL" } } })
-          .catch(() => void 0);
-      }
       hideSelectionFab();
     }
   });

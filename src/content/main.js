@@ -27,6 +27,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  if (message?.type === "UNSELECT_ROWS_BY_REFS") {
+    const refs_arr = message.refs;
+    if (Array.isArray(refs_arr)) {
+      syncRowCheckboxState(false);
+      for (const ref of refs_arr) {
+        const rowEl = refs.refToRowEl.get(ref);
+        if (rowEl) {
+          removePinnedRowOverlay(rowEl);
+          highlightRow(rowEl, false);
+          refs.selectedRowRef.delete(rowEl);
+          refs.refToRowEl.delete(ref);
+        }
+        refs.refToCheckbox.delete(ref);
+      }
+      updateBatchBar();
+    }
+    sendResponse({ ok: true });
+    return;
+  }
+
   if (message?.type === "UNSELECT_ROW_BY_REF") {
     const ref = message.ref;
     DEBUG && console.log(`[web2ai] UNSELECT_ROW_BY_REF ref=${ref} refToRowEl.has=${refs.refToRowEl.has(ref)} refToCheckbox.has=${refs.refToCheckbox.has(ref)}`);

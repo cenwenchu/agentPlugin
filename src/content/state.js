@@ -76,7 +76,8 @@ const refs = {
   lastSelectionSnapshot: null,
   hotkeysBound: false,
   toastQueue: [],
-  toastTimer: null
+  toastTimer: null,
+  launcherBadge: null
 };
 
 export {

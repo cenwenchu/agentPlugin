@@ -62,7 +62,7 @@ const OVERLAY_CSS = `
     textarea:focus { border-color: rgba(59,130,246,0.7); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
     .composerActions { width: 92px; display: flex; flex-direction: column; gap: 8px; }
     .composerActions .btn { width: 100%; }
-    .backdrop { position: fixed; inset: 0; background: transparent; pointer-events: none; }
+    .backdrop { position: fixed; inset: 0; background: transparent; pointer-events: auto; }
   `;
 
 function scheduleRender() {
@@ -102,6 +102,31 @@ function render() {
   if (refs.launcherFab) {
     refs.launcherFab.style.display = STATE.open ? "none" : "flex";
   }
+  // 更新数据统计气泡
+  if (refs.launcherBadge && refs.launcherFab) {
+    const tableCount = STATE.tableGroups.length;
+    const rowCount = STATE.tableGroups.reduce((sum, g) => sum + g.rows.length, 0);
+    if (!STATE.open && (tableCount > 0 || STATE.contexts.length > 0)) {
+      const label = tableCount > 0
+        ? `${tableCount}个表格，${rowCount}条数据`
+        : `${STATE.contexts.length}条数据`;
+      refs.launcherBadge.textContent = label;
+      const fabLeft = parseInt(refs.launcherFab.style.left, 10);
+      const fabTop = parseInt(refs.launcherFab.style.top, 10);
+      const fabSize = 44;
+      refs.launcherBadge.style.left = `${Math.max(8, fabLeft + fabSize)}px`;
+      refs.launcherBadge.style.top = `${Math.max(8, fabTop)}px`;
+      refs.launcherBadge.style.transform = "translate(-100%, -100%)";
+      refs.launcherBadge.style.display = "block";
+      refs.launcherBadge.style.zIndex = Z_INDEX;
+      refs.launcherBadge.style.opacity = "1";
+      refs.launcherBadge.style.transform = "translate(-100%, -100%) scale(1)";
+    } else {
+      refs.launcherBadge.style.opacity = "0";
+      refs.launcherBadge.style.transform = "translate(-100%, -100%) scale(0.9)";
+      setTimeout(() => { if (refs.launcherBadge) refs.launcherBadge.style.display = "none"; }, 250);
+    }
+  }
   // 最大化时将所有浮动 UI 的 z-index 降到聊天面板下方，防止遮挡
   const floatingZIndex = (STATE.open && STATE.maximized) ? "1" : Z_INDEX;
   if (refs.launcherFab) refs.launcherFab.style.zIndex = floatingZIndex;
@@ -115,7 +140,10 @@ function render() {
   const wrap = el("div", {
     class: `wrap ${STATE.open ? "" : "hidden"}${STATE.maximized ? " max" : ""}`
   });
-  const backdrop = el("div", { class: `backdrop ${STATE.open ? "" : "hidden"}` });
+  const backdrop = el("div", {
+    class: `backdrop ${STATE.open ? "" : "hidden"}`,
+    onClick: () => setOpen(false)
+  });
 
   const header = el("div", { class: "header" }, [
     el("div", { class: "title" }, ["小聚"]),
@@ -135,14 +163,6 @@ function render() {
         onClick: () => openOptionsPage()
       },
       ["设置"]
-    ),
-    el(
-      "button",
-      {
-        class: "btn",
-        onClick: () => setOpen(false)
-      },
-      ["关闭"]
     ),
     el(
       "button",
@@ -626,6 +646,11 @@ function ensureLauncherFab() {
     currentPos = { left, top };
     refs.launcherFab.style.left = `${left}px`;
     refs.launcherFab.style.top = `${top}px`;
+    if (refs.launcherBadge && refs.launcherBadge.style.display !== "none") {
+       const fabSize = 44;
+       refs.launcherBadge.style.left = `${Math.max(8, left + fabSize)}px`;
+       refs.launcherBadge.style.top = `${Math.max(8, top)}px`;
+     }
   };
 
   chrome.storage.sync
@@ -695,12 +720,36 @@ function ensureLauncherFab() {
         url: location.href,
         title: document.title
       });
-      setOpen(true);
       return;
     }
     setOpen(!STATE.open);
   });
   document.documentElement.appendChild(refs.launcherFab);
+
+  // 数据统计气泡
+  refs.launcherBadge = el("div", {
+    id: "web2ai_launcher_badge",
+    style: {
+      position: "fixed",
+      display: "none",
+      left: `${defaultLeft() + size}px`,
+      top: `${defaultTop()}px`,
+      padding: "7px 14px",
+      borderRadius: "999px",
+      background: "rgba(17,24,39,0.92)",
+      color: "#fff",
+      fontSize: "12px",
+      fontWeight: "600",
+      fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      whiteSpace: "nowrap",
+      pointerEvents: "none",
+      boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+      opacity: "0",
+      transform: "translate(-100%, -100%) scale(0.9)",
+      transition: "opacity 0.25s ease, transform 0.25s ease"
+    }
+  });
+  document.documentElement.appendChild(refs.launcherBadge);
 }
 
 function initOverlay() {
