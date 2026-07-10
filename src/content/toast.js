@@ -1,4 +1,4 @@
-import { DEBUG, IS_TOP_FRAME, refs } from './state.js';
+import { DEBUG, IS_TOP_FRAME, refs, Z_INDEX } from './state.js';
 import { el } from './dom.js';
 
 function showToast(message, duration = 1500) {
@@ -26,7 +26,7 @@ function showToast(message, duration = 1500) {
         left: "50%",
         bottom: "18px",
         transform: "translateX(-50%)",
-        zIndex: "2147483647",
+        zIndex: Z_INDEX,
         background: "rgba(220,38,38,0.95)",
         color: "white",
         padding: "14px 20px",
@@ -50,7 +50,7 @@ function showToast(message, duration = 1500) {
     DEBUG && console.log(`[web2ai] showToast: displaying "${msg.slice(0, 60)}" queue.length=${refs.toastQueue.length}`);
     node.textContent = msg;
     node.style.display = "block";
-    refs.toastTimer = setTimeout(showNext, 4000);
+    refs.toastTimer = setTimeout(showNext, duration);
   };
   showNext();
 }

@@ -1,4 +1,4 @@
-import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, refs, clamp, normalizeText, compactOneLine } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, refs, clamp, normalizeText, compactOneLine, Z_INDEX } from './state.js';
 import { el, getOverlayBoundsForElement, findRowElementFromEventTarget, isVisibleElement } from './dom.js';
 import { addContextSnippet, removeContextByRef, extractTableRowText } from './context.js';
 import { showToast } from './toast.js';
@@ -58,9 +58,7 @@ function addRowElToContext(rowEl, { silent } = {}) {
       ? rowEl.querySelectorAll('[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]').length
       : 0;
   if (isHeaderRow) {
-    const detail = dumpRowCellDetail(rowEl);
-    console.log(`[web2ai] addRowElToContext HEADER row added: cellCount=${cellCount}`, detail);
-    console.log(`[web2ai] addRowElToContext HEADER cell texts (${detail.cells.length}):`, detail.cells.map((c, i) => `[${i}] "${c.text}"`).join(", "));
+    DEBUG && console.log(`[web2ai] addRowElToContext HEADER row added: cellCount=${cellCount}`, dumpRowCellDetail(rowEl));
   }
   if (!isHeaderRow && IS_TOP_FRAME) {
     const hasHeaderGroup = STATE.tableGroups.some(g => g.header !== null) ||
@@ -80,20 +78,12 @@ function addRowElToContext(rowEl, { silent } = {}) {
     if (headerGroup && headerGroup.header) {
       const headerCellCount = headerGroup.header.cellCount || headerGroup.header.text.split(COL_SEPARATOR).length;
       const rowCellCount = cellCount || text.split(COL_SEPARATOR).length;
-      console.log(`[web2ai] addRowElToContext colCheck: rowCellCount=${rowCellCount} headerCellCount=${headerCellCount} (cellCount=${cellCount})`);
-      console.log(`[web2ai] addRowElToContext HEADER fields:`, headerGroup.header.text.split(COL_SEPARATOR).map((f, i) => `[${i}] "${f}"`).join(", "));
-      console.log(`[web2ai] addRowElToContext ROW fields:`, text.split(COL_SEPARATOR).map((f, i) => `[${i}] "${f}"`).join(", "));
-      // 打印行所有单元格的详细信息，便于对比表头列
-      const rowDetail = dumpRowCellDetail(rowEl);
-      console.log(`[web2ai] addRowElToContext ROW cell details (${cellCount} DOM cells):`, rowDetail);
-      console.log(`[web2ai] addRowElToContext ROW cell texts (${rowDetail.cells.length}):`, rowDetail.cells.map((c, i) => `[${i}] "${c.text}"`).join(", "));
+      DEBUG && console.log(`[web2ai] addRowElToContext colCheck: rowCellCount=${rowCellCount} headerCellCount=${headerCellCount} (cellCount=${cellCount})`);
       if (headerGroup.header.rowEl) {
-        const headerDetail = dumpRowCellDetail(headerGroup.header.rowEl);
-        console.log(`[web2ai] addRowElToContext HEADER cell details:`, headerDetail);
-        console.log(`[web2ai] addRowElToContext HEADER cell texts (${headerDetail.cells.length}):`, headerDetail.cells.map((c, i) => `[${i}] "${c.text}"`).join(", "));
+        DEBUG && console.log(`[web2ai] addRowElToContext HEADER cell details:`, dumpRowCellDetail(headerGroup.header.rowEl));
       }
       if (rowCellCount !== headerCellCount) {
-        console.log(`[web2ai] addRowElToContext REJECT: column count mismatch row=${rowCellCount} header=${headerCellCount}`);
+        DEBUG && console.log(`[web2ai] addRowElToContext REJECT: column count mismatch row=${rowCellCount} header=${headerCellCount}`);
         showToast(`当前行有 ${rowCellCount} 列，但表头有 ${headerCellCount} 列，列数不一致。如果是新表格，请先选择它的表头行`);
         syncRowCheckboxState(false);
         highlightRow(rowEl, false);
@@ -192,7 +182,7 @@ function ensureTableRowFab() {
     title: "勾选：把该行内容加入上下文，发送给 AI",
     style: {
       position: "fixed",
-      zIndex: "2147483647",
+      zIndex: Z_INDEX,
       display: "none",
       alignItems: "center",
       justifyContent: "flex-start",
@@ -540,10 +530,19 @@ function hideTableRowFab() {
 }
 
 function pickRowTargetFromPoint(e) {
+  const target = e.target;
+  if (target && !refs.tableRowFab?.contains(target)) {
+    let isPinned = false;
+    for (const node of refs.pinnedRowOverlays.values()) {
+      if (node.contains(target)) { isPinned = true; break; }
+    }
+    if (!isPinned) return target;
+  }
+
   const stack =
     typeof document.elementsFromPoint === "function"
       ? document.elementsFromPoint(e.clientX, e.clientY)
-      : [e.target];
+      : [];
 
   for (const el of stack) {
     if (!el) continue;
@@ -558,7 +557,7 @@ function pickRowTargetFromPoint(e) {
     if (isPinned) continue;
     return el;
   }
-  return e.target;
+  return target;
 }
 
 function ensureBatchBar() {
@@ -1348,9 +1347,10 @@ function initTableListeners() {
     "scroll",
     () => {
       hideTableRowFab();
+      pruneDisconnectedRowMappings();
       for (const rowEl of refs.pinnedRowOverlays.keys()) positionPinnedRowOverlay(rowEl);
     },
-    true
+    { passive: true, capture: true }
   );
 }
 

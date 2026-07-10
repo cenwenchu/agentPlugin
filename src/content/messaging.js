@@ -2,8 +2,6 @@ import { uid, STATE, refs } from './state.js';
 import { showToast } from './toast.js';
 
 async function openOptionsPage() {
-  chrome.runtime.sendMessage({ type: "GET_SETTINGS" }).catch(() => void 0);
-
   try {
     if (chrome?.runtime?.openOptionsPage) chrome.runtime.openOptionsPage();
   } catch {
@@ -43,19 +41,22 @@ async function clearContextsInBackground() {
   }
 }
 
+function parseMaxCtxNum(contexts) {
+  return contexts
+    .map((c) => String(c?.ref || ""))
+    .map((r) => {
+      const m = r.match(/^CTX(\d+)$/);
+      return m ? Number(m[1]) : 0;
+    })
+    .reduce((a, b) => Math.max(a, b), 0);
+}
+
 async function hydrateContextsFromBackground() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: "LIST_CONTEXTS" });
     if (!resp?.ok) return;
     const contexts = Array.isArray(resp.data?.contexts) ? resp.data.contexts : [];
-    const maxNum = contexts
-      .map((c) => String(c?.ref || ""))
-      .map((r) => {
-        const m = r.match(/^CTX(\d+)$/);
-        return m ? Number(m[1]) : 0;
-      })
-      .reduce((a, b) => Math.max(a, b), 0);
-    STATE.nextCtxNum = Math.max(1, maxNum + 1);
+    STATE.nextCtxNum = Math.max(1, parseMaxCtxNum(contexts) + 1);
 
     for (const c of contexts) {
       if (!c?.ref) {
@@ -100,14 +101,7 @@ async function initCtxCounterFromBackground() {
     const resp = await chrome.runtime.sendMessage({ type: "LIST_CONTEXTS" });
     if (!resp?.ok) return;
     const contexts = Array.isArray(resp.data?.contexts) ? resp.data.contexts : [];
-    const maxNum = contexts
-      .map((c) => String(c?.ref || ""))
-      .map((r) => {
-        const m = r.match(/^CTX(\d+)$/);
-        return m ? Number(m[1]) : 0;
-      })
-      .reduce((a, b) => Math.max(a, b), 0);
-    STATE.nextCtxNum = Math.max(STATE.nextCtxNum, maxNum + 1);
+    STATE.nextCtxNum = Math.max(STATE.nextCtxNum, parseMaxCtxNum(contexts) + 1);
   } catch {
     void 0;
   }

@@ -1,4 +1,4 @@
-import { DEBUG, IS_TOP_FRAME, STATE, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
 import { el } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { openOptionsPage, streamChat, stopGeneration, initCtxCounterFromBackground, hydrateContextsFromBackground } from './messaging.js';
@@ -7,54 +7,7 @@ import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatch
 import { showToast } from './toast.js';
 import { getSelectionText } from './selection.js';
 
-function scheduleRender() {
-  if (refs.renderScheduled) return;
-  refs.renderScheduled = true;
-  requestAnimationFrame(() => {
-    refs.renderScheduled = false;
-    if (refs.streamingMsgRef && refs.overlayShadow) {
-      const chatList = refs.overlayShadow.getElementById("web2ai_chat_list");
-      if (chatList) {
-        const lastBubble = chatList.lastElementChild;
-        if (lastBubble && lastBubble.classList.contains("assistant")) {
-          lastBubble.innerHTML = renderMarkdown(refs.streamingMsgRef.content);
-          chatList.scrollTop = chatList.scrollHeight;
-          return;
-        }
-      }
-    }
-    render();
-  });
-}
-
-function ensureOverlay() {
-  if (refs.overlayHost) return;
-  refs.overlayHost = el("div", {
-    id: "web2ai_overlay_host",
-    style: { position: "fixed", inset: "0", zIndex: "2147483646", pointerEvents: "none" }
-  });
-  refs.overlayShadow = refs.overlayHost.attachShadow({ mode: "open" });
-  document.documentElement.appendChild(refs.overlayHost);
-  render();
-}
-
-function render() {
-  if (!IS_TOP_FRAME) return;
-  ensureOverlay();
-  if (refs.launcherFab) {
-    refs.launcherFab.style.display = STATE.open ? "none" : "flex";
-  }
-  // 最大化时将所有浮动 UI 的 z-index 降到聊天面板下方，防止遮挡
-  const floatingZIndex = (STATE.open && STATE.maximized) ? "1" : "2147483647";
-  if (refs.launcherFab) refs.launcherFab.style.zIndex = floatingZIndex;
-  if (refs.batchBar) refs.batchBar.style.zIndex = floatingZIndex;
-  if (refs.tableRowFab) refs.tableRowFab.style.zIndex = floatingZIndex;
-  if (refs.inlineRowFab) refs.inlineRowFab.style.zIndex = floatingZIndex;
-  for (const node of refs.pinnedRowOverlays.values()) {
-    node.style.zIndex = floatingZIndex;
-  }
-
-  const styles = `
+const OVERLAY_CSS = `
     :host { all: initial; }
     .wrap { position: fixed; right: 0; top: 0; bottom: 0; width: 420px; height: 100vh; pointer-events: auto; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     .wrap.max { left: 0; right: 0; width: 100vw; }
@@ -111,6 +64,53 @@ function render() {
     .composerActions .btn { width: 100%; }
     .backdrop { position: fixed; inset: 0; background: transparent; pointer-events: none; }
   `;
+
+function scheduleRender() {
+  if (refs.renderScheduled) return;
+  refs.renderScheduled = true;
+  requestAnimationFrame(() => {
+    refs.renderScheduled = false;
+    if (refs.streamingMsgRef && refs.overlayShadow) {
+      const chatList = refs.overlayShadow.getElementById("web2ai_chat_list");
+      if (chatList) {
+        const lastBubble = chatList.lastElementChild;
+        if (lastBubble && lastBubble.classList.contains("assistant")) {
+          lastBubble.innerHTML = renderMarkdown(refs.streamingMsgRef.content);
+          chatList.scrollTop = chatList.scrollHeight;
+          return;
+        }
+      }
+    }
+    render();
+  });
+}
+
+function ensureOverlay() {
+  if (refs.overlayHost) return;
+  refs.overlayHost = el("div", {
+    id: "web2ai_overlay_host",
+    style: { position: "fixed", inset: "0", zIndex: String(Number(Z_INDEX) - 1), pointerEvents: "none" }
+  });
+  refs.overlayShadow = refs.overlayHost.attachShadow({ mode: "open" });
+  document.documentElement.appendChild(refs.overlayHost);
+  render();
+}
+
+function render() {
+  if (!IS_TOP_FRAME) return;
+  ensureOverlay();
+  if (refs.launcherFab) {
+    refs.launcherFab.style.display = STATE.open ? "none" : "flex";
+  }
+  // 最大化时将所有浮动 UI 的 z-index 降到聊天面板下方，防止遮挡
+  const floatingZIndex = (STATE.open && STATE.maximized) ? "1" : Z_INDEX;
+  if (refs.launcherFab) refs.launcherFab.style.zIndex = floatingZIndex;
+  if (refs.batchBar) refs.batchBar.style.zIndex = floatingZIndex;
+  if (refs.tableRowFab) refs.tableRowFab.style.zIndex = floatingZIndex;
+  if (refs.inlineRowFab) refs.inlineRowFab.style.zIndex = floatingZIndex;
+  for (const node of refs.pinnedRowOverlays.values()) {
+    node.style.zIndex = floatingZIndex;
+  }
 
   const wrap = el("div", {
     class: `wrap ${STATE.open ? "" : "hidden"}${STATE.maximized ? " max" : ""}`
@@ -284,7 +284,7 @@ function render() {
   wrap.appendChild(card);
 
   refs.overlayShadow.innerHTML = "";
-  refs.overlayShadow.appendChild(el("style", {}, [styles]));
+  refs.overlayShadow.appendChild(el("style", {}, [OVERLAY_CSS]));
   refs.overlayShadow.appendChild(backdrop);
   refs.overlayShadow.appendChild(wrap);
 
@@ -604,7 +604,7 @@ function ensureLauncherFab() {
       background: "rgba(255,255,255,0.98)",
       border: "1px solid rgba(0,0,0,0.16)",
       boxShadow: "0 12px 32px rgba(0,0,0,0.22)",
-      zIndex: "2147483647",
+      zIndex: Z_INDEX,
       display: "flex",
       alignItems: "center",
       justifyContent: "center",

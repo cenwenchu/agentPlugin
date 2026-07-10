@@ -1,4 +1,4 @@
-import { refs } from './state.js';
+import { refs, Z_INDEX } from './state.js';
 import { el } from './dom.js';
 import { showToast } from './toast.js';
 
@@ -22,7 +22,7 @@ function fallbackHighlightRect(rect) {
       id: "web2ai_fallback_highlight",
       style: {
         position: "fixed",
-        zIndex: "2147483647",
+        zIndex: Z_INDEX,
         pointerEvents: "none",
         borderRadius: "8px",
         background: "rgba(59, 130, 246, 0.18)",

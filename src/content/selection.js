@@ -1,4 +1,4 @@
-import { DEBUG, IS_TOP_FRAME, refs, clamp, normalizeText } from './state.js';
+import { DEBUG, IS_TOP_FRAME, refs, clamp, normalizeText, Z_INDEX } from './state.js';
 import { el, getCssSelector } from './dom.js';
 import { addContextSnippet } from './context.js';
 import { setOpen } from './overlay.js';
@@ -60,7 +60,7 @@ function ensureSelectionFab() {
     id: "web2ai_selection_fab",
     style: {
       position: "fixed",
-      zIndex: "2147483647",
+      zIndex: Z_INDEX,
       display: "none",
       alignItems: "center",
       justifyContent: "center",
@@ -131,47 +131,48 @@ function hideSelectionFab() {
 }
 
 function initSelectionListeners() {
+  let selectionDebounceTimer = null;
   document.addEventListener(
     "selectionchange",
     () => {
-      const text = getSelectionText();
-      if (!text) {
-        hideSelectionFab();
-        return;
-      }
-      const rect = getSelectionRect();
-      if (!rect) {
-        hideSelectionFab();
-        return;
-      }
-      const anchorEl = getSelectionAnchorElement();
-      if (refs.overlayHost && anchorEl && refs.overlayHost.contains(anchorEl)) {
-        hideSelectionFab();
-        return;
-      }
-      const lineInfo = getSelectionLineInfo();
-      const anchorSelector = lineInfo?.anchorSelector || getCssSelector(anchorEl);
-      const quote = normalizeText(text).slice(0, 80);
-      showSelectionFab({ text, rect, anchorSelector, quote, lineInfo });
+      if (selectionDebounceTimer) return;
+      selectionDebounceTimer = setTimeout(() => {
+        selectionDebounceTimer = null;
+        const text = getSelectionText();
+        if (!text) {
+          hideSelectionFab();
+          return;
+        }
+        const rect = getSelectionRect();
+        if (!rect) {
+          hideSelectionFab();
+          return;
+        }
+        const anchorEl = getSelectionAnchorElement();
+        if (refs.overlayHost && anchorEl && refs.overlayHost.contains(anchorEl)) {
+          hideSelectionFab();
+          return;
+        }
+        const lineInfo = getSelectionLineInfo();
+        const anchorSelector = lineInfo?.anchorSelector || getCssSelector(anchorEl);
+        const quote = normalizeText(text).slice(0, 80);
+        showSelectionFab({ text, rect, anchorSelector, quote, lineInfo });
+      }, 100);
     },
     true
   );
 
-  document.addEventListener(
-    "scroll",
-    () => {
+  let scrollRafPending = false;
+  const onScroll = () => {
+    if (scrollRafPending) return;
+    scrollRafPending = true;
+    requestAnimationFrame(() => {
+      scrollRafPending = false;
       hideSelectionFab();
-    },
-    true
-  );
-
-  window.addEventListener(
-    "resize",
-    () => {
-      hideSelectionFab();
-    },
-    true
-  );
+    });
+  };
+  document.addEventListener("scroll", onScroll, { passive: true, capture: true });
+  window.addEventListener("resize", onScroll, { passive: true, capture: true });
 }
 
 export {

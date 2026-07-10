@@ -1,4 +1,4 @@
-import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, uid, normalizeText, truncateText, compactOneLine, refs } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, Z_INDEX, uid, normalizeText, truncateText, compactOneLine, refs } from './state.js';
 import { el, getCssSelector, isVisibleElement, getElementLabel } from './dom.js';
 import { storeContextToBackground, removeContextInBackground, clearContextsInBackground } from './messaging.js';
 import { showToast } from './toast.js';
@@ -168,7 +168,7 @@ function removeContext(id, opts = {}) {
       refs.refToCheckbox.delete(ctx.ref);
     }
     STATE.contexts = STATE.contexts.filter((c) => c.id !== id);
-    removeFromTableGroups(ctx.ref);
+    if (ctx?.ref) removeFromTableGroups(ctx.ref);
     updateBatchBar();
     if (!opts?.silent) render();
   } catch (e) {
@@ -283,7 +283,7 @@ function confirmContextOverflow(contexts, limit) {
       style: {
         position: "fixed",
         inset: "0",
-        zIndex: "2147483647",
+        zIndex: Z_INDEX,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -452,9 +452,10 @@ function extractTableHeaders(container) {
 function extractTableRowText(rowEl) {
   const tag = rowEl?.tagName?.toLowerCase();
   const stripInjected = (cell) => {
-    const clone = cell.cloneNode(true);
-    clone.querySelectorAll("[id^='web2ai_'], [class^='web2ai_']").forEach(n => n.remove());
-    const t = normalizeText(clone.innerText || clone.textContent || "").replace(/\n/g, " ");
+    const injectedEls = cell.querySelectorAll("[id^='web2ai_']");
+    for (const el of injectedEls) el.style.display = "none";
+    const t = normalizeText(cell.innerText || cell.textContent || "").replace(/\n/g, " ");
+    for (const el of injectedEls) el.style.display = "";
     return t || "-";  // 空单元格用 "-" 占位，避免 ||| 连续导致 split 后列数丢失
   };
   if (tag === "tr") {
