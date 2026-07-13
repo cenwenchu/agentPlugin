@@ -1,0 +1,1363 @@
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=true rowEl=true isConnected=true batchAnchorRow=false batchAnchorConnected=undefined batchBar=false batchBarConnected=undefined
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=false
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX1 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row first even', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row first even
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 0 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even> **CURRENT**
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=22)
+ [web2ai] step2-depth1: parent=<TABLE> children=2
+   [0] <COLGROUP>
+   [1] <TBODY> **CURRENT**
+table.js:1759 [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+table.js:1704 [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+table.js:1708   [0] <DIV.art-table-header no-scrollbar>
+table.js:1708   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+table.js:1708   [2] <DIV.art-table-footer art-horizonta>
+table.js:1708   [3] <DIV.art-lock-shadow-mask>
+table.js:1708   [4] <DIV.art-lock-shadow-mask>
+table.js:1748 [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+table.js:1764 [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+table.js:239 [web2ai] addRowElToContext auto-adding header row found above, cells=22
+table.js:147 [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=true
+table.js:163 [web2ai] addRowElToContext HEADER_MANUAL: ref=CTX2 cellCount=22 {tag: 'tr', role: '', cells: Array(22)}
+table.js:166 [web2ai] HEADER_MANUAL structure: {tagName: 'TR', className: 'art-table-header-row first last', role: '', closestTable: 'TABLE', tableClassName: '', …}
+table.js:269 [web2ai] 表头 CTX2: [0] 序号, [1] 平台, [2] 趋势图, [3] 买家分析, [4] 利润, [5] 毛利, [6] 净销售收入, [7] 销售收入, [8] 销量, [9] 净销售成本, [10] 平台服务费, [11] 营销支出, [12] 包装费/运费险/税金, [13] 其他支出, [14] 费用, [15] 支付退款(按金额), [16] 支付退款(按件数), [17] 支付退款(按订单数), [18] 发货退款, [19] 支付发货, [20] 全部发货, [21] 全部退款
+table.js:269 [web2ai] 数据行 CTX1: [0] 1, [1] 抖音 动销店铺: 21 账单待授权店铺：均已授权 广告费待授权店铺：4去授权 订单明细: 1,157,114 查看商品利润, [2] 买 家 销 售 退 款 利 润, [3] 净买家数: 964,902 环比: 25.72% 客均净收入/利润: ¥26.75 / ¥4.76 客均净件数/下单数: 1.58 / 1.06 买家数: 1,094,651 净新买家数 : 868,583 环比: 23.69% 占净买家: 90.02% 日均新增: 124,083.29 新买家数: 996,484, [4] 利润: ¥4,596,050.39 环比下降: ¥-813,840.92 利润率: 17.81% 变化: 2.63% 利润增长店铺: 4 > 利润下降店铺: 12 >, [5] 毛利: ¥1,747.90万 环比下降: ¥-7,188,864.95 毛利率: 67.73% 变化: 1.48% 商品毛利: ¥2,096.09万 商品毛利率: 81.37% 净成本: ¥8,327,292.70 成本构成 占净金额: 32.27%, [6] 净金额: ¥2,580.63万 环比: 27.60% 占比: 50.62% 净收入增长店铺: 3 > 净收入下降店铺: 15 >, [7] 金额: ¥3,033.71万 环比: 31.20% 占比: 51.45%, [8] 订单数: 1,157,114 件数: 1,778,980 净件数: 1,524,625, [9] 净成本: ¥8,327,292.70 环比: 24.12% 商品净成本: ¥4,798,222.17 环比: 23.60% 占净成本: 57.62% 占净金额: 18.59% 运费支出: ¥1,920,015.55 环比: 23.61% 占净成本: 23.06% 占净金额: 7.44% 其它成本: ¥1,609,054.98 环比: 26.23% 占净成本: 19.32% 占净金额: 6.24%, [10] 平台服务费: ¥509,127.51 环比: 17.83% 占净成本: 6.11% 占净金额: 1.97% 预估金额: ¥498,630.47 已结算金额: ¥10,497.04, [11] 营销支出: ¥796,768.26 环比: 30.16% 占净成本: 9.57% 占净金额: 3.09% 达人佣金: ¥796,306.69 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥462.26 营销支出返还: ¥-0.69, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥294,858.35 明细 占净成本: 3.54% 占净金额: 1.14% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥8,300.86 环比: 67.69% 占净成本: 0.10% 占净金额: 0.03% 小额打款: ¥700.98 订单明细, [14] 总费用: ¥1,288.30万 环比: 33.10% 广告费: ¥1,286.49万 占总费用: 99.86% 特殊订单总费用: ¥0.00 占总费用: 0% 店铺费用支出: ¥18,143.51 占总费用: 0.14% 自定义费用: ¥0.00 占总费用: 0%, [15] 支付退款率: 14.80% 变化: 4.27% 支付退款金额: ¥4,489,393.32 环比: 46.62% 发货前仅退款: ¥3,651,901.81 12.04% 发货后仅退款: ¥294,591.42 0.97% 退货退款: ¥542,900.09 1.79%, [16] 支付退款率: 14.25% 变化: 4.27% 支付退款件数: 253,420 环比: 46.62% 发货前仅退款: 208,156 11.70% 发货后仅退款: 14,071 0.79% 退货退款: 31,193 1.75%, [17] 支付退款率: 14.63% 变化: 4.03% 支付退款订单数: 169,290 环比: 44.76% 发货前仅退款: 136,183 11.77% 发货后仅退款: 13,414 1.16% 退货退款: 19,839 1.71%, [18] 发货退款率(按金额): 3.82% 变化: 3.41% 发货退款率(按件数): 3.51% 变化: 3.36% 发货退款率(按订单数): 3.79% 变化: 3.11%, [19] 金额: ¥2,544.01万 件数: 1,500,964 订单数: 974,759 支付发货率: 84.24%, [20] 金额: ¥2,802.81万 环比: 24.23% 件数: 1,648,471 环比: 23.54%, [21] 金额: ¥6,248,314.44 环比: 18.95% 件数: 360,735 环比: 18.43%
+table.js:274 [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX1
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=false connected=undefined
+table.js:773 [web2ai.BAR] ensureBatchBar CREATING new bar
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:295 [web2ai] auto-open check: STATE.open=false, silent=false
+table.js:296 [web2ai] auto-open: set STATE.open=true, called render
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=true rowEl=true isConnected=true batchAnchorRow=true batchAnchorConnected=true batchBar=true batchBarConnected=true
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=false
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX3 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row odd', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row odd
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 1 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even>
+   [1] <TR.art-table-row odd> **CURRENT**
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row first even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+table.js:1759 [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+table.js:1759 [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=22)
+table.js:1704 [web2ai] step2-depth1: parent=<TABLE> children=2
+table.js:1708   [0] <COLGROUP>
+table.js:1708   [1] <TBODY> **CURRENT**
+table.js:1759 [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+table.js:1704 [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+table.js:1708   [0] <DIV.art-table-header no-scrollbar>
+table.js:1708   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+table.js:1708   [2] <DIV.art-table-footer art-horizonta>
+table.js:1708   [3] <DIV.art-lock-shadow-mask>
+table.js:1708   [4] <DIV.art-lock-shadow-mask>
+table.js:1748 [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+table.js:1764 [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+table.js:246 [web2ai] addRowElToContext header above already added, skip
+table.js:269 [web2ai] 数据行 CTX3: [0] 2, [1] 天猫 动销店铺: 9 账单待授权店铺：3 去授权 订单明细: 533,277 查看商品利润, [2] 买 家 销 售 退 款 利 润, [3] 净买家数: 410,872 环比: 33.04% 客均净收入/利润: ¥29.53 / ¥15.17 客均净件数/下单数: 2.75 / 1.23 买家数: 434,984 净新买家数 : 313,213 环比: 32.14% 占净买家: 76.23% 日均新增: 44,744.71 新买家数: 336,699, [4] 利润: ¥6,231,257.33 环比增长: ¥4,759,736.58 利润率: 51.36% 变化: 43.71% 利润增长店铺: 1 > 利润下降店铺: 7 >, [5] 毛利: ¥6,231,257.33 环比增长: ¥4,759,736.58 毛利率: 51.36% 变化: 43.71% 商品毛利: ¥7,520,255.21 商品毛利率: 61.99% 净成本: ¥5,900,793.40 成本构成 占净金额: 48.64%, [6] 净金额: ¥1,213.21万 环比: 36.94% 占比: 23.80% 净收入增长店铺: 1 > 净收入下降店铺: 8 >, [7] 金额: ¥1,372.15万 环比: 40.11% 占比: 23.27%, [8] 订单数: 533,277 件数: 1,221,846 净件数: 1,128,549, [9] 净成本: ¥5,900,793.40 环比: 66.79% 商品净成本: ¥4,610,853.61 环比: 70.23% 占净成本: 78.14% 占净金额: 38.01% 运费支出: ¥1,087,419.75 环比: 34.89% 占净成本: 18.43% 占净金额: 8.96% 其它成本: ¥202,520.04 环比: 66.73% 占净成本: 3.43% 占净金额: 1.67%, [10] 平台服务费: ¥140,973.83 环比: 60.85% 占净成本: 2.39% 占净金额: 1.16% 预估金额: ¥116,930.03 已结算金额: ¥24,043.80, [11] 营销支出: ¥1,235.53 环比: 91.73% 占净成本: 0.02% 占净金额: 0.01% 达人佣金: ¥0.00 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥1,235.53 营销支出返还: ¥0.00, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥42,999.90 占净成本: 0.73% 占净金额: 0.35% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥17,310.78 环比: 88.88% 占净成本: 0.29% 占净金额: 0.14% 小额打款: ¥0.00 订单明细, [14] 总费用: ¥0.00 环比: - 广告费: ¥0.00 占总费用: - 特殊订单总费用: ¥0.00 占总费用: - 店铺费用支出: ¥0.00 占总费用: - 自定义费用: ¥0.00 占总费用: -, [15] 支付退款率: 11.52% 变化: 4.39% 支付退款金额: ¥1,581,201.11 环比: 56.64% 发货前仅退款: ¥1,162,013.95 8.47% 发货后仅退款: ¥177,338.64 1.29% 退货退款: ¥241,848.52 1.76%, [16] 支付退款率: 7.59% 变化: 3.67% 支付退款件数: 92,709 环比: 54.08% 发货前仅退款: 78,495 6.42% 发货后仅退款: 1,893 0.15% 退货退款: 12,321 1.01%, [17] 支付退款率: 9.42% 变化: 3.56% 支付退款订单数: 50,238 环比: 53.34% 发货前仅退款: 38,906 7.30% 发货后仅退款: 4,376 0.82% 退货退款: 7,750 1.45%, [18] 发货退款率(按金额): 4.13% 变化: 3.85% 发货退款率(按件数): 1.79% 变化: 2.24% 发货退款率(按订单数): 2.93% 变化: 2.74%, [19] 金额: ¥1,176.98万 件数: 1,091,017 订单数: 466,685 支付发货率: 87.51%, [20] 金额: ¥1,331.43万 环比: 33.10% 件数: 1,191,501 环比: 25.36%, [21] 金额: ¥2,509,287.57 环比: 24.10% 件数: 158,328 环比: 11.12%
+table.js:274 [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX3
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:295 [web2ai] auto-open check: STATE.open=true, silent=false
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=true rowEl=true isConnected=true batchAnchorRow=false batchAnchorConnected=undefined batchBar=false batchBarConnected=undefined
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=true silent=false
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX1 cellCount=27 IS_TOP_FRAME=true {tag: 'tr', role: '', cells: Array(27)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row first even', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext column count mismatch row=27 header=22, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row first even
+ [web2ai] findHeaderRowAbove step1: table.rows=20
+ [web2ai] findHeaderRowAbove step1: checked 0 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=20
+   [0] <TR.art-table-row first even> **CURRENT**
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=27)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=27)
+ [web2ai] step2-depth1: parent=<TABLE> children=2
+   [0] <COLGROUP>
+table.js:1708   [1] <TBODY> **CURRENT**
+table.js:1759 [web2ai] scanChildren: no header in sibling <COLGROUP> (children=27)
+table.js:1704 [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+table.js:1708   [0] <DIV.art-table-header no-scrollbar>
+table.js:1708   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+table.js:1708   [2] <DIV.art-table-footer art-horizonta>
+table.js:1708   [3] <DIV.art-lock-shadow-mask>
+table.js:1708   [4] <DIV.art-lock-shadow-mask>
+table.js:1748 [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+table.js:1764 [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=27
+table.js:239 [web2ai] addRowElToContext auto-adding header row found above, cells=27
+table.js:147 [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=true silent=true
+table.js:163 [web2ai] addRowElToContext HEADER_MANUAL: ref=CTX2 cellCount=27 {tag: 'tr', role: '', cells: Array(27)}
+table.js:166 [web2ai] HEADER_MANUAL structure: {tagName: 'TR', className: 'art-table-header-row first last', role: '', closestTable: 'TABLE', tableClassName: '', …}
+table.js:269 [web2ai] 表头 CTX2: [0] -, [1] 序号, [2] 分销商名称, [3] 备注, [4] 标签, [5] 联系人, [6] 分销等级, [7] 可用金额 查看账户, [8] 寄样情况, [9] 开票设置 修改默认配置, [10] 待退款售后单量(近 60 天), [11] 分销业绩（近30天）, [12] 破价商品统计 控价管理, [13] 起采金额 修改默认配置, [14] 允许库存同步, [15] 风险代发, [16] 仅小站内商品可分销 默认禁用, [17] 分销商允许批量拆单 如何允许？, [18] 上架数量, [19] 销售能力, [20] 业务员, [21] 开单名称, [22] 分销商编号, [23] 申请信息, [24] 合作时间, [25] 合作状态, [26] 操作
+table.js:269 [web2ai] 数据行 CTX1: [0] -, [1] 1, [2] 力天书库 寄样/发货地址 来源: 寻合作, [3] 湖北-湖北久一文化传媒有限公司-华中区, [4] -, [5] 童好好 158*****263 微信：*****, [6] 三级, [7] ¥0 充值退款 资金明细 出账结算, [8] 待审核：0 待发货：0 已发货：0 已签收：0, [9] 不支持开票  设置, [10] 近60天暂无待退款售后单, [11] 分销订单数：0 分销件单价：- 分销件数：0 查看更多, [12] 近30日暂无破价, [13] 默认, [14] -, [15] -, [16] -, [17] 允许, [18] 0, [19] 平台/店铺数： 5 1 1 3 近30天发货单量16万+, [20] 叶子, [21] -, [22] 15135165, [23] -, [24] 2026-07-12 14:42:05, [25] 合作中, [26] 申样 设置运费模板 更多
+table.js:274 [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX1
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=false connected=undefined
+table.js:773 [web2ai.BAR] ensureBatchBar CREATING new bar
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:295 [web2ai] auto-open check: STATE.open=true, silent=false
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=true rowEl=true isConnected=true batchAnchorRow=true batchAnchorConnected=true batchBar=true batchBarConnected=true
+table.js:147 [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=true silent=false
+table.js:193 [web2ai] addRowElToContext DATA_ROW: ref=CTX3 cellCount=27 IS_TOP_FRAME=true {tag: 'tr', role: '', cells: Array(27)}
+table.js:195 [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row odd', role: '', closestTable: 'TABLE', tableClassName: '', …}
+table.js:269 [web2ai] 数据行 CTX3: [0] -, [1] 2, [2] 鹿邑县坤泽汇商贸中心 寄样/发货地址 来源: 邀约链接, [3] -, [4] -, [5] 157*****885, [6] 三级, [7] ¥0 充值退款 资金明细 出账结算, [8] 待审核：0 待发货：0 已发货：0 已签收：0, [9] 不支持开票  设置, [10] 近60天暂无待退款售后单, [11] 分销订单数：0 分销件单价：- 分销件数：0 查看更多, [12] 近30日暂无破价, [13] 默认, [14] -, [15] -, [16] -, [17] 允许, [18] 0, [19] 平台/店铺数： 暂无 近30天发货单量0, [20] 叶子, [21] -, [22] 15934074, [23] -, [24] 2026-07-07 17:51:29, [25] 合作中, [26] 申样 设置运费模板 更多
+table.js:274 [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX3
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:295 [web2ai] auto-open check: STATE.open=true, silent=false
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=true rowEl=true isConnected=true batchAnchorRow=true batchAnchorConnected=true batchBar=true batchBarConnected=true
+table.js:147 [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=true silent=false
+table.js:193 [web2ai] addRowElToContext DATA_ROW: ref=CTX4 cellCount=27 IS_TOP_FRAME=true {tag: 'tr', role: '', cells: Array(27)}
+table.js:195 [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row even', role: '', closestTable: 'TABLE', tableClassName: '', …}
+table.js:269 [web2ai] 数据行 CTX4: [0] -, [1] 3, [2] 书音图书 寄样/发货地址 来源: 邀约链接, [3] -, [4] -, [5] 166*****356, [6] 三级, [7] ¥0 充值退款 资金明细 出账结算, [8] 待审核：0 待发货：0 已发货：0 已签收：0, [9] 不支持开票  设置, [10] 近60天暂无待退款售后单, [11] 分销订单数：5 分销件单价：14.64 分销件数：5 查看更多, [12] 近30日暂无破价, [13] 默认, [14] -, [15] -, [16] -, [17] 允许, [18] 0, [19] 平台/店铺数： 1 近30天发货单量100+, [20] 步遥（南昌线上分销部）, [21] -, [22] 15862255, [23] -, [24] 2026-07-06 09:25:23, [25] 合作中, [26] 申样 设置运费模板 更多
+table.js:274 [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX4
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:295 [web2ai] auto-open check: STATE.open=true, silent=false
+table.js:1103 [web2ai.BAR] pruneDisconnected: clearing stale batchAnchorRow (was connected=false)
+table.js:1109 [web2ai.BAR] pruneDisconnected: hiding stale bar (anchor gone, bar still connected in top frame)
+table.js:1121 [web2ai.BAR] pruneDisconnected: cleaned 4 rowRefs + 4 overlays
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=true rowEl=true isConnected=true batchAnchorRow=true batchAnchorConnected=true batchBar=true batchBarConnected=true
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=false
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX4 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row even', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row even
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 2 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even>
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even> **CURRENT**
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row first even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+table.js:1759 [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=22)
+table.js:1704 [web2ai] step2-depth1: parent=<TABLE> children=2
+table.js:1708   [0] <COLGROUP>
+table.js:1708   [1] <TBODY> **CURRENT**
+table.js:1759 [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+table.js:1704 [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+table.js:1708   [0] <DIV.art-table-header no-scrollbar>
+table.js:1708   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+table.js:1708   [2] <DIV.art-table-footer art-horizonta>
+table.js:1708   [3] <DIV.art-lock-shadow-mask>
+table.js:1708   [4] <DIV.art-lock-shadow-mask>
+table.js:1748 [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+table.js:1764 [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+table.js:246 [web2ai] addRowElToContext header above already added, skip
+table.js:269 [web2ai] 数据行 CTX4: [0] 3, [1] 拼多多 动销店铺: 13 账单采集： 您未开启自动采集 去开启 12 个店铺账号未维护 去维护 订单明细: 483,922 查看商品利润, [2] 销 售 退 款 利 润, [3] 净买家数: - 环比: - 客均净收入/利润: - / - 客均净件数/下单数: - / - 买家数: - 净新买家数 : - 环比: - 占净买家: - 日均新增: - 新买家数: - 拼多多暂不支持买家统计！, [4] 利润: ¥4,512,272.75 环比下降: ¥-791,234.92 利润率: 61.37% 变化: 0.16% 利润增长店铺: 4 > 利润下降店铺: 7 >, [5] 毛利: ¥4,512,272.75 环比下降: ¥-791,234.92 毛利率: 61.37% 变化: 0.16% 商品毛利: ¥5,443,874.35 商品毛利率: 74.04% 净成本: ¥2,840,491.82 成本构成 占净金额: 38.63%, [6] 净金额: ¥7,352,764.57 环比: 15.13% 占比: 14.42% 净收入增长店铺: 5 > 净收入下降店铺: 6 >, [7] 金额: ¥8,628,488.34 环比: 19.08% 占比: 14.63%, [8] 订单数: 483,922 件数: 882,283 净件数: 775,900, [9] 净成本: ¥2,840,491.82 环比: 15.47% 商品净成本: ¥1,908,741.13 环比: 17.81% 占净成本: 67.20% 占净金额: 25.96% 运费支出: ¥784,349.13 环比: 9.27% 占净成本: 27.61% 占净金额: 10.67% 其它成本: ¥147,401.56 环比: 15.12% 占净成本: 5.19% 占净金额: 2.00%, [10] 平台服务费: ¥147,401.56 环比: 15.12% 占净成本: 5.19% 占净金额: 2.00% 预估金额: ¥147,401.56 已结算金额: ¥0.00, [11] 营销支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 达人佣金: ¥0.00 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥0.00 营销支出返还: ¥0.00, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥0.00 占净成本: 0% 占净金额: 0% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 小额打款: ¥0.00 订单明细, [14] 总费用: ¥0.00 环比: - 广告费: ¥0.00 占总费用: - 特殊订单总费用: ¥0.00 占总费用: - 店铺费用支出: ¥0.00 占总费用: - 自定义费用: ¥0.00 占总费用: -, [15] 支付退款率: 14.76% 变化: 3.98% 支付退款金额: ¥1,273,152.58 环比: 36.26% 发货前仅退款: ¥990,911.03 11.48% 发货后仅退款: ¥88,692.70 1.03% 退货退款: ¥193,548.85 2.24%, [16] 支付退款率: 12.01% 变化: 4.46% 支付退款件数: 105,974 环比: 35.99% 发货前仅退款: 85,471 9.69% 发货后仅退款: 3,762 0.43% 退货退款: 16,741 1.90%, [17] 支付退款率: 13.85% 变化: 3.70% 支付退款订单数: 67,005 环比: 32.98% 发货前仅退款: 51,564 10.66% 发货后仅退款: 6,389 1.32% 退货退款: 9,161 1.89%, [18] 发货退款率(按金额): 4.26% 变化: 2.66% 发货退款率(按件数): 2.97% 变化: 2.60% 发货退款率(按订单数): 4.05% 变化: 2.34%, [19] 金额: ¥7,216,987.40 件数: 765,316 订单数: 412,045 支付发货率: 85.15%, [20] 金额: ¥7,891,440.77 环比: 11.21% 件数: 819,431 环比: 4.52%, [21] 金额: ¥1,680,799.84 环比: 7.47% 件数: 150,614 环比: 5.51%
+table.js:274 [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX4
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:295 [web2ai] auto-open check: STATE.open=true, silent=false
+context.js:72 [web2ai] addContextSnippet WARNING: column count mismatch row=22 header=27, adding to headerless group
+table.js:135 [web2ai.BAR] addRowElToContext SKIP already added ref=CTX1
+table.js:135 [web2ai.BAR] addRowElToContext SKIP already added ref=CTX3
+table.js:135 [web2ai.BAR] addRowElToContext SKIP already added ref=CTX4
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=true
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX5 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row odd', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row odd
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 3 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even>
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd> **CURRENT**
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row first even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=22)
+ [web2ai] step2-depth1: parent=<TABLE> children=2
+   [0] <COLGROUP>
+   [1] <TBODY> **CURRENT**
+ [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+ [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+   [0] <DIV.art-table-header no-scrollbar>
+   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+   [2] <DIV.art-table-footer art-horizonta>
+   [3] <DIV.art-lock-shadow-mask>
+   [4] <DIV.art-lock-shadow-mask>
+ [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+ [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+ [web2ai] addRowElToContext header above already added, skip
+ [web2ai] 数据行 CTX5: [0] 4, [1] 微信视频号 动销店铺: 8 账单待授权店铺：均已授权 订单明细: 76,998 查看商品利润, [2] 买 家 销 售 退 款 利 润, [3] 净买家数: 65,755 环比: 10.55% 客均净收入/利润: ¥30.69 / ¥23.13 客均净件数/下单数: 1.52 / 1.08 买家数: 71,275 净新买家数 : 52,713 环比: 6.72% 占净买家: 80.17% 日均新增: 7,530.43 新买家数: 58,023, [4] 利润: ¥1,520,928.98 环比下降: ¥-285,113.29 利润率: 75.36% 变化: 0.03% 利润增长店铺: 0 > 利润下降店铺: 6 >, [5] 毛利: ¥1,520,928.98 环比下降: ¥-285,113.29 毛利率: 75.36% 变化: 0.03% 商品毛利: ¥1,782,088.37 商品毛利率: 88.32% 净成本: ¥497,359.10 成本构成 占净金额: 24.64%, [6] 净金额: ¥2,018,288.08 环比: 15.76% 占比: 3.96% 净收入增长店铺: 0 > 净收入下降店铺: 6 >, [7] 金额: ¥2,251,541.04 环比: 20.03% 占比: 3.82%, [8] 订单数: 76,998 件数: 111,160 净件数: 99,717, [9] 净成本: ¥497,359.10 环比: 15.66% 商品净成本: ¥235,599.71 环比: 18.35% 占净成本: 47.37% 占净金额: 11.67% 运费支出: ¥133,642.24 环比: 11.75% 占净成本: 26.87% 占净金额: 6.62% 其它成本: ¥128,117.15 环比: 14.43% 占净成本: 25.76% 占净金额: 6.35%, [10] 平台服务费: ¥39,762.23 环比: 5.19% 占净成本: 7.99% 占净金额: 1.97% 预估金额: ¥39,762.23 已结算金额: ¥0.00, [11] 营销支出: ¥88,354.92 环比: 12.31% 占净成本: 17.76% 占净金额: 4.38% 达人佣金: ¥88,354.92 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥0.00 营销支出返还: ¥0.00, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥0.00 占净成本: 0% 占净金额: 0% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 小额打款: ¥0.00, [14] 总费用: ¥0.00 环比: - 广告费: ¥0.00 占总费用: - 特殊订单总费用: ¥0.00 占总费用: - 店铺费用支出: ¥0.00 占总费用: - 自定义费用: ¥0.00 占总费用: -, [15] 支付退款率: 10.21% 变化: 4.52% 支付退款金额: ¥229,936.96 环比: 44.58% 发货前仅退款: ¥171,502.86 7.62% 发货后仅退款: ¥17,002.87 0.76% 退货退款: ¥41,431.23 1.84%, [16] 支付退款率: 10.24% 变化: 4.74% 支付退款件数: 11,380 环比: 43.09% 发货前仅退款: 8,628 7.76% 发货后仅退款: 694 0.62% 退货退款: 2,058 1.85%, [17] 支付退款率: 10.59% 变化: 4.70% 支付退款订单数: 8,155 环比: 40.78% 发货前仅退款: 6,014 7.81% 发货后仅退款: 707 0.92% 退货退款: 1,439 1.87%, [18] 发货退款率(按金额): 3.24% 变化: 3.98% 发货退款率(按件数): 3.14% 变化: 4.24% 发货退款率(按订单数): 3.43% 变化: 4.20%, [19] 金额: ¥1,999,380.62 件数: 98,522 订单数: 68,118 支付发货率: 88.47%, [20] 金额: ¥2,129,214.31 环比: 15.07% 件数: 104,935 环比: 11.53%, [21] 金额: ¥359,161.44 环比: 1.61% 件数: 18,028 环比: 2.30%
+ [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX5
+ [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+ [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+ [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=true
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX6 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row even', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row even
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 4 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even>
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even> **CURRENT**
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row first even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=22)
+ [web2ai] step2-depth1: parent=<TABLE> children=2
+   [0] <COLGROUP>
+   [1] <TBODY> **CURRENT**
+ [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+ [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+   [0] <DIV.art-table-header no-scrollbar>
+   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+   [2] <DIV.art-table-footer art-horizonta>
+   [3] <DIV.art-lock-shadow-mask>
+   [4] <DIV.art-lock-shadow-mask>
+ [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+ [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+ [web2ai] addRowElToContext header above already added, skip
+ [web2ai] 数据行 CTX6: [0] 5, [1] 快手 动销店铺: 7 账单待授权店铺：均已授权 订单明细: 68,755 查看商品利润, [2] 买 家 销 售 退 款 利 润, [3] 净买家数: 56,551 环比: 2.12% 客均净收入/利润: ¥23.35 / ¥16.71 客均净件数/下单数: 1.53 / 1.11 买家数: 62,101 净新买家数 : 47,731 环比: 0.77% 占净买家: 84.40% 日均新增: 6,818.71 新买家数: 53,209, [4] 利润: ¥944,941.64 环比下降: ¥-25,056.46 利润率: 71.55% 变化: 1.43% 利润增长店铺: 3 > 利润下降店铺: 4 >, [5] 毛利: ¥944,941.64 环比下降: ¥-25,056.46 毛利率: 71.55% 变化: 1.43% 商品毛利: ¥1,125,678.77 商品毛利率: 85.38% 净成本: ¥375,744.75 成本构成 占净金额: 28.45%, [6] 净金额: ¥1,320,686.39 环比: 4.53% 占比: 2.59% 净收入增长店铺: 3 > 净收入下降店铺: 4 >, [7] 金额: ¥1,507,266.08 环比: 9.17% 占比: 2.56%, [8] 订单数: 68,755 件数: 97,946 净件数: 86,430, [9] 净成本: ¥375,744.75 环比: 9.11% 商品净成本: ¥192,687.62 环比: 12.04% 占净成本: 51.28% 占净金额: 14.59% 运费支出: ¥133,023.47 环比: 4.55% 占净成本: 35.40% 占净金额: 10.07% 其它成本: ¥50,033.66 环比: 25.42% 占净成本: 13.32% 占净金额: 3.79%, [10] 平台服务费: ¥7,513.21 环比: 6.56% 占净成本: 2.00% 占净金额: 0.57% 预估金额: ¥7,509.79 已结算金额: ¥3.42, [11] 营销支出: ¥14,946.51 环比: 42.73% 占净成本: 3.98% 占净金额: 1.13% 达人佣金: ¥14,946.51 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥0.00 营销支出返还: ¥0.00, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥27,573.94 占净成本: 7.34% 占净金额: 2.09% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 小额打款: ¥0.00, [14] 总费用: ¥0.00 环比: - 广告费: ¥0.00 占总费用: - 特殊订单总费用: ¥0.00 占总费用: - 店铺费用支出: ¥0.00 占总费用: - 自定义费用: ¥0.00 占总费用: -, [15] 支付退款率: 12.36% 变化: 4.26% 支付退款金额: ¥186,369.11 环比: 32.44% 发货前仅退款: ¥144,395.27 9.58% 发货后仅退款: ¥25,001.04 1.66% 退货退款: ¥16,972.80 1.13%, [16] 支付退款率: 11.74% 变化: 4.09% 支付退款件数: 11,494 环比: 33.11% 发货前仅退款: 9,159 9.35% 发货后仅退款: 1,315 1.34% 退货退款: 1,020 1.04%, [17] 支付退款率: 12.52% 变化: 4.15% 支付退款订单数: 8,606 环比: 29.83% 发货前仅退款: 6,655 9.68% 发货后仅退款: 1,218 1.77% 退货退款: 743 1.08%, [18] 发货退款率(按金额): 3.61% 变化: 3.49% 发货退款率(按件数): 3.22% 变化: 3.45% 发货退款率(按订单数): 3.68% 变化: 3.38%, [19] 金额: ¥1,296,579.94 件数: 83,511 订单数: 58,998 支付发货率: 85.81%, [20] 金额: ¥1,403,302.54 环比: 0.46% 件数: 90,755 环比: 1.77%, [21] 金额: ¥261,376.35 环比: 5.04% 件数: 16,727 环比: 5.67%
+ [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX6
+ [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+ [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+ [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=true
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX7 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row odd', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row odd
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 5 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even>
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd> **CURRENT**
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row first even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=22)
+ [web2ai] step2-depth1: parent=<TABLE> children=2
+   [0] <COLGROUP>
+   [1] <TBODY> **CURRENT**
+ [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+ [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+   [0] <DIV.art-table-header no-scrollbar>
+   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+   [2] <DIV.art-table-footer art-horizonta>
+   [3] <DIV.art-lock-shadow-mask>
+   [4] <DIV.art-lock-shadow-mask>
+ [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+ [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+ [web2ai] addRowElToContext header above already added, skip
+ [web2ai] 数据行 CTX7: [0] 6, [1] 淘工厂 动销店铺: 2 订单明细: 42,680 查看商品利润, [2] 买 家 销 售 退 款 利 润, [3] 净买家数: 32,496 环比: 13.80% 客均净收入/利润: ¥26.44 / ¥13.54 客均净件数/下单数: 2.18 / 1.27 买家数: 33,506 净新买家数 : 21,838 环比: 13.21% 占净买家: 67.20% 日均新增: 3,119.71 新买家数: 22,745, [4] 利润: ¥439,975.44 环比下降: ¥-95,968.09 利润率: 51.20% 变化: 1.13% 利润增长店铺: 0 > 利润下降店铺: 2 >, [5] 毛利: ¥439,975.44 环比下降: ¥-95,968.09 毛利率: 51.20% 变化: 1.13% 商品毛利: ¥533,534.86 商品毛利率: 62.09% 净成本: ¥419,319.45 成本构成 占净金额: 48.80%, [6] 净金额: ¥859,294.89 环比: 19.72% 占比: 1.69% 净收入增长店铺: 0 > 净收入下降店铺: 2 >, [7] 金额: ¥915,097.08 环比: 22.98% 占比: 1.55%, [8] 订单数: 42,680 件数: 74,822 净件数: 70,864, [9] 净成本: ¥419,319.45 环比: 21.54% 商品净成本: ¥325,760.03 环比: 22.24% 占净成本: 77.69% 占净金额: 37.91% 运费支出: ¥76,341.17 环比: 18.81% 占净成本: 18.21% 占净金额: 8.88% 其它成本: ¥17,218.25 环比: 19.81% 占净成本: 4.11% 占净金额: 2.00%, [10] 平台服务费: ¥17,218.25 环比: 19.81% 占净成本: 4.11% 占净金额: 2.00% 预估金额: ¥17,218.25 已结算金额: ¥0.00, [11] 营销支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 达人佣金: ¥0.00 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥0.00 营销支出返还: ¥0.00, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥0.00 占净成本: 0% 占净金额: 0% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 小额打款: ¥0.00, [14] 总费用: ¥0.00 环比: - 广告费: ¥0.00 占总费用: - 特殊订单总费用: ¥0.00 占总费用: - 店铺费用支出: ¥0.00 占总费用: - 自定义费用: ¥0.00 占总费用: -, [15] 支付退款率: 6.07% 变化: 3.81% 支付退款金额: ¥55,529.46 环比: 52.68% 发货前仅退款: ¥36,229.03 3.96% 发货后仅退款: ¥8,213.13 0.90% 退货退款: ¥11,087.30 1.21%, [16] 支付退款率: 5.13% 变化: 3.99% 支付退款件数: 3,841 环比: 56.49% 发货前仅退款: 2,687 3.59% 发货后仅退款: 328 0.44% 退货退款: 826 1.10%, [17] 支付退款率: 5.41% 变化: 4.66% 支付退款订单数: 2,309 环比: 56.98% 发货前仅退款: 1,185 2.78% 发货后仅退款: 685 1.60% 退货退款: 461 1.08%, [18] 发货退款率(按金额): 3.18% 变化: 3.10% 发货退款率(按件数): 2.55% 变化: 2.87% 发货退款率(按订单数): 3.69% 变化: 3.28%, [19] 金额: ¥822,191.63 件数: 68,428 订单数: 39,578 支付发货率: 92.73%, [20] 金额: ¥938,835.35 环比: 10.92% 件数: 76,000 环比: 13.29%, [21] 金额: ¥112,228.25 环比: 23.01% 件数: 10,138 环比: 21.59%
+ [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX7
+ [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+ [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+ [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=true
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX8 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row even', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row even
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 6 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even>
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even> **CURRENT**
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row first even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=22)
+ [web2ai] step2-depth1: parent=<TABLE> children=2
+   [0] <COLGROUP>
+   [1] <TBODY> **CURRENT**
+ [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+ [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+   [0] <DIV.art-table-header no-scrollbar>
+   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+   [2] <DIV.art-table-footer art-horizonta>
+   [3] <DIV.art-lock-shadow-mask>
+   [4] <DIV.art-lock-shadow-mask>
+ [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+ [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+ [web2ai] addRowElToContext header above already added, skip
+ [web2ai] 数据行 CTX8: [0] 7, [1] 京东 动销店铺: 3 账单待授权店铺：均已授权 订单明细: 14,745 查看商品利润, [2] 买 家 销 售 退 款 利 润, [3] 净买家数: 12,196 环比: 28.22% 客均净收入/利润: ¥38.38 / ¥-2.22 客均净件数/下单数: 2.09 / 1.14 买家数: 12,959 净新买家数 : 10,697 环比: 29.47% 占净买家: 87.71% 日均新增: 1,528.14 新买家数: 11,456, [4] 利润: ¥-27,091.83 环比下降: ¥-290,861.91 利润率: -5.79% 变化: 55.07% 利润增长店铺: 1 > 利润下降店铺: 2 >, [5] 毛利: ¥-27,091.83 环比下降: ¥-290,861.91 毛利率: -5.79% 变化: 55.07% 商品毛利: ¥12,682.42 商品毛利率: 2.71% 净成本: ¥495,129.13 成本构成 占净金额: 105.79%, [6] 净金额: ¥468,037.30 环比: 12.56% 占比: 0.92% 净收入增长店铺: 0 > 净收入下降店铺: 3 >, [7] 金额: ¥518,968.94 环比: 16.72% 占比: 0.88%, [8] 订单数: 14,745 件数: 27,921 净件数: 25,430, [9] 净成本: ¥495,129.13 环比: 82.37% 商品净成本: ¥455,057.88 环比: 123.08% 占净成本: 91.91% 占净金额: 97.23% 运费支出: ¥29,808.28 环比: 19.26% 占净成本: 6.02% 占净金额: 6.37% 其它成本: ¥10,262.97 环比: 66.44% 占净成本: 2.07% 占净金额: 2.19%, [10] 平台服务费: ¥10,129.85 环比: 65.99% 占净成本: 2.05% 占净金额: 2.16% 预估金额: ¥8,926.69 已结算金额: ¥1,203.16, [11] 营销支出: ¥7.12 环比: 89.26% 占净成本: 0% 占净金额: <0.01% 达人佣金: ¥0.00 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥7.20 营销支出返还: ¥-0.08, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥0.00 占净成本: 0% 占净金额: 0% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥126.00 环比: 82.74% 占净成本: 0.03% 占净金额: 0.03% 小额打款: ¥0.00, [14] 总费用: ¥0.00 环比: - 广告费: ¥0.00 占总费用: - 特殊订单总费用: ¥0.00 占总费用: - 店铺费用支出: ¥0.00 占总费用: - 自定义费用: ¥0.00 占总费用: -, [15] 支付退款率: 9.77% 变化: 4.11% 支付退款金额: ¥50,689.88 环比: 41.40% 发货前仅退款: ¥39,436.19 7.60% 发货后仅退款: ¥4,262.28 0.82% 退货退款: ¥6,991.41 1.35%, [16] 支付退款率: 8.88% 变化: 3.17% 支付退款件数: 2,479 环比: 40.18% 发货前仅退款: 1,953 6.99% 发货后仅退款: 166 0.59% 退货退款: 360 1.29%, [17] 支付退款率: 9.37% 变化: 2.35% 支付退款订单数: 1,381 环比: 43.15% 发货前仅退款: 1,043 7.07% 发货后仅退款: 148 1.00% 退货退款: 192 1.30%, [18] 发货退款率(按金额): 2.97% 变化: 3.97% 发货退款率(按件数): 2.48% 变化: 3.18% 发货退款率(按订单数): 3.01% 变化: 2.53%, [19] 金额: ¥431,841.49 件数: 23,907 订单数: 12,424 支付发货率: 84.26%, [20] 金额: ¥473,347.07 环比: 13.35% 件数: 26,012 环比: 15.85%, [21] 金额: ¥77,318.44 环比: 6.61% 件数: 3,866 环比: 5.31%
+ [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX8
+ [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+ [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+ [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=true
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX9 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row odd', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row odd
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 7 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even>
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd> **CURRENT**
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row first even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=22)
+ [web2ai] step2-depth1: parent=<TABLE> children=2
+   [0] <COLGROUP>
+   [1] <TBODY> **CURRENT**
+ [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+ [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+   [0] <DIV.art-table-header no-scrollbar>
+   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+   [2] <DIV.art-table-footer art-horizonta>
+   [3] <DIV.art-lock-shadow-mask>
+   [4] <DIV.art-lock-shadow-mask>
+ [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+ [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+ [web2ai] addRowElToContext header above already added, skip
+ [web2ai] 数据行 CTX9: [0] 8, [1] 分销商 动销分销商: 196 订单明细: 37,603 查看商品利润, [2] 销 售 退 款 利 润, [3] 净买家数: - 环比: - 客均净收入/利润: - / - 客均净件数/下单数: - / - 买家数: - 净新买家数 : - 环比: - 占净买家: - 日均新增: - 新买家数: - 分销渠道暂不支持买家统计！, [4] 利润: ¥219,743.89 环比下降: ¥-88,724.52 利润率: 52.34% 变化: 2.59% 利润增长分销商: 63 > 利润下降分销商: 111 >, [5] 毛利: ¥219,743.89 环比下降: ¥-88,724.52 毛利率: 52.34% 变化: 2.59% 商品毛利: ¥204,538.28 商品毛利率: 60.14% 净成本: ¥200,060.94 成本构成 占净金额: 47.66%, [6] 净金额: ¥419,804.83 环比: 32.29% 占比: 0.82% 净收入增长分销商: 62 > 净收入下降分销商: 113 >, [7] 金额: ¥434,208.80 环比: 34.13% 占比: 0.74%, [8] 订单数: 37,603 件数: 56,063 净件数: 54,193, [9] 净成本: ¥200,060.94 环比: 35.78% 商品净成本: ¥135,583.75 环比: 37.57% 占净成本: 67.77% 占净金额: 32.30% 运费支出: ¥64,477.19 环比: 31.68% 占净成本: 32.23% 占净金额: 15.36% 其它成本: ¥0.00 环比: - 占净成本: 0% 占净金额: 0%, [10] 平台服务费: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 预估金额: ¥0.00 已结算金额: ¥0.00, [11] 营销支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 达人佣金: ¥0.00 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥0.00 营销支出返还: ¥0.00, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥0.00 占净成本: 0% 占净金额: 0% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 小额打款: ¥0.00, [14] 总费用: ¥0.00 环比: - 广告费: ¥0.00 占总费用: - 特殊订单总费用: ¥0.00 占总费用: - 店铺费用支出: ¥0.00 占总费用: - 自定义费用: ¥0.00 占总费用: -, [15] 支付退款率: 0.05% 变化: 0.74% 支付退款金额: ¥229.72 环比: 95.58% 发货前仅退款: ¥0.00 0% 发货后仅退款: ¥0.00 0% 退货退款: ¥229.72 0.05%, [16] 支付退款率: 0.06% 变化: 0.82% 支付退款件数: 33 环比: 95.95% 发货前仅退款: 0 0% 发货后仅退款: 0 0% 退货退款: 33 0.06%, [17] 支付退款率: 0.07% 变化: 0.80% 支付退款订单数: 25 环比: 95.29% 发货前仅退款: 0 0% 发货后仅退款: 0 0% 退货退款: 25 0.07%, [18] 发货退款率(按金额): 0.05% 变化: 0.82% 发货退款率(按件数): 0.06% 变化: 0.92% 发货退款率(按订单数): 0.07% 变化: 0.88%, [19] 金额: ¥411,347.07 件数: 53,425 订单数: 35,889 支付发货率: 95.44%, [20] 金额: ¥427,079.23 环比: 29.95% 件数: 55,997 环比: 33.84%, [21] 金额: ¥5,193.64 环比: 19.27% 件数: 731 环比: 23.05%
+ [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX9
+ [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+ [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+ [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=true
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX10 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row even', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row even
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 8 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even>
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row first even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row last odd> (children=22)
+ [web2ai] step2-depth1: parent=<TABLE> children=2
+   [0] <COLGROUP>
+   [1] <TBODY> **CURRENT**
+ [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+ [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+   [0] <DIV.art-table-header no-scrollbar>
+   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+   [2] <DIV.art-table-footer art-horizonta>
+   [3] <DIV.art-lock-shadow-mask>
+   [4] <DIV.art-lock-shadow-mask>
+ [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+ [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+ [web2ai] addRowElToContext header above already added, skip
+ [web2ai] 数据行 CTX10: [0] 9, [1] 小红书 动销店铺: 3 账单待授权店铺：均已授权 订单明细: 3,910 查看商品利润, [2] 买 家 销 售 退 款 利 润, [3] 净买家数: 3,375 环比: 35.31% 客均净收入/利润: ¥62.94 / ¥51.79 客均净件数/下单数: 1.97 / 1.09 买家数: 3,595 净新买家数 : 2,848 环比: 34.84% 占净买家: 84.39% 日均新增: 406.86 新买家数: 3,069, [4] 利润: ¥174,786.03 环比下降: ¥-89,318.78 利润率: 82.28% 变化: 0.90% 利润增长店铺: 0 > 利润下降店铺: 3 >, [5] 毛利: ¥174,786.03 环比下降: ¥-89,318.78 毛利率: 82.28% 变化: 0.90% 商品毛利: ¥184,230.03 商品毛利率: 86.84% 净成本: ¥37,643.96 成本构成 占净金额: 17.72%, [6] 净金额: ¥212,429.99 环比: 34.54% 占比: 0.42% 净收入增长店铺: 0 > 净收入下降店铺: 3 >, [7] 金额: ¥230,068.68 环比: 36.26% 占比: 0.39%, [8] 订单数: 3,910 件数: 7,269 净件数: 6,663, [9] 净成本: ¥37,643.96 环比: 37.70% 商品净成本: ¥27,927.96 环比: 38.60% 占净成本: 74.19% 占净金额: 13.15% 运费支出: ¥7,830.66 环比: 33.18% 占净成本: 20.80% 占净金额: 3.69% 其它成本: ¥1,885.34 环比: 41.38% 占净成本: 5.01% 占净金额: 0.89%, [10] 平台服务费: ¥526.07 环比: 177.48% 占净成本: 1.40% 占净金额: 0.25% 预估金额: ¥526.07 已结算金额: ¥0.00, [11] 营销支出: ¥118.00 环比: 83.29% 占净成本: 0.31% 占净金额: 0.06% 达人佣金: ¥0.00 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥118.00 营销支出返还: ¥0.00, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥1,241.27 占净成本: 3.30% 占净金额: 0.58% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥0.00 环比: 100.00% 占净成本: 0% 占净金额: 0% 小额打款: ¥0.00, [14] 总费用: ¥0.00 环比: - 广告费: ¥0.00 占总费用: - 特殊订单总费用: ¥0.00 占总费用: - 店铺费用支出: ¥0.00 占总费用: - 自定义费用: ¥0.00 占总费用: -, [15] 支付退款率: 6.28% 变化: 2.88% 支付退款金额: ¥14,446.69 环比: 56.30% 发货前仅退款: ¥11,671.07 5.07% 发货后仅退款: ¥848.57 0.37% 退货退款: ¥1,927.05 0.84%, [16] 支付退款率: 7.98% 变化: 3.17% 支付退款件数: 580 环比: 56.09% 发货前仅退款: 472 6.49% 发货后仅退款: 26 0.36% 退货退款: 82 1.13%, [17] 支付退款率: 8.36% 变化: 3.66% 支付退款订单数: 327 环比: 56.46% 发货前仅退款: 257 6.57% 发货后仅退款: 21 0.54% 退货退款: 49 1.25%, [18] 发货退款率(按金额): 1.68% 变化: 2.43% 发货退款率(按件数): 1.91% 变化: 3.52% 发货退款率(按订单数): 2.43% 变化: 3.08%, [19] 金额: ¥204,758.40 件数: 6,352 订单数: 3,428 支付发货率: 87.67%, [20] 金额: ¥223,285.45 环比: 33.07% 件数: 7,033 环比: 35.39%, [21] 金额: ¥27,637.74 环比: 13.14% 件数: 1,122 环比: 11.79%
+ [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX10
+ [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+ [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+ [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+ [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=false silent=true
+ [web2ai] addRowElToContext DATA_ROW: ref=CTX11 cellCount=22 IS_TOP_FRAME=false {tag: 'tr', role: '', cells: Array(22)}
+ [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row last odd', role: '', closestTable: 'TABLE', tableClassName: '', …}
+ [web2ai] addRowElToContext no header group found, trying to find header above
+ [web2ai] findHeaderRowAbove START: rowEl.tagName=TR className=art-table-row last odd
+ [web2ai] findHeaderRowAbove step1: table.rows=10
+ [web2ai] findHeaderRowAbove step1: checked 9 preceding trs, none had th
+ [web2ai] step2-depth0: parent=<TBODY> children=10
+   [0] <TR.art-table-row first even>
+   [1] <TR.art-table-row odd>
+   [2] <TR.art-table-row even>
+   [3] <TR.art-table-row odd>
+   [4] <TR.art-table-row even>
+   [5] <TR.art-table-row odd>
+   [6] <TR.art-table-row even>
+   [7] <TR.art-table-row odd>
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row first even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row odd> (children=22)
+ [web2ai] scanChildren: no header in sibling <TR.art-table-row even> (children=22)
+table.js:1704 [web2ai] step2-depth1: parent=<TABLE> children=2
+table.js:1708   [0] <COLGROUP>
+table.js:1708   [1] <TBODY> **CURRENT**
+table.js:1759 [web2ai] scanChildren: no header in sibling <COLGROUP> (children=22)
+table.js:1704 [web2ai] step2-depth3: parent=<DIV.art-table> children=5
+table.js:1708   [0] <DIV.art-table-header no-scrollbar>
+table.js:1708   [1] <DIV.art-table-body art-horizontal-> **CURRENT**
+table.js:1708   [2] <DIV.art-table-footer art-horizonta>
+table.js:1708   [3] <DIV.art-lock-shadow-mask>
+table.js:1708   [4] <DIV.art-lock-shadow-mask>
+table.js:1748 [web2ai] scanChildren: found BEFORE in <DIV.art-table-header no-scrollbar>, header=<TR.art-table-header-row first las>
+table.js:1764 [web2ai] findHeaderRowAbove FOUND via scanChildren-before: TR cells=22
+table.js:246 [web2ai] addRowElToContext header above already added, skip
+table.js:269 [web2ai] 数据行 CTX11: [0] 10, [1] 聚货通 动销店铺: 1 订单明细: 664 查看商品利润, [2] 买 家 销 售 退 款 利 润, [3] 净买家数: 16 环比: 20.00% 客均净收入/利润: ¥7,843.77 / ¥5,078.77 客均净件数/下单数: 678.31 / 41.50 买家数: 16 净新买家数 : 1 环比: 0% 占净买家: 6.25% 日均新增: 0.14 新买家数: 1, [4] 利润: ¥81,260.29 环比下降: ¥-61,181.73 利润率: 64.75% 变化: 6.18% 利润增长店铺: 0 > 利润下降店铺: 1 >, [5] 毛利: ¥81,260.29 环比下降: ¥-61,181.73 毛利率: 64.75% 变化: 6.18% 商品毛利: ¥82,823.33 商品毛利率: 66.29% 净成本: ¥44,240.07 成本构成 占净金额: 35.25%, [6] 净金额: ¥125,500.36 环比: 48.40% 占比: 0.25% 净收入增长店铺: 0 > 净收入下降店铺: 1 >, [7] 金额: ¥125,500.36 环比: 50.44% 占比: 0.21%, [8] 订单数: 664 件数: 10,853 净件数: 10,853, [9] 净成本: ¥44,240.07 环比: 56.10% 商品净成本: ¥42,123.77 环比: 56.23% 占净成本: 95.22% 占净金额: 33.56% 运费支出: ¥2,116.30 环比: 53.35% 占净成本: 4.78% 占净金额: 1.69% 其它成本: ¥0.00 环比: - 占净成本: 0% 占净金额: 0%, [10] 平台服务费: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 预估金额: ¥0.00 已结算金额: ¥0.00, [11] 营销支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 达人佣金: ¥0.00 团长佣金: ¥0.00 服务商佣金: ¥0.00 其它营销支出: ¥0.00 营销支出返还: ¥0.00, [12] 包装费: ¥0.00 占净成本: 0% 占净金额: 0% 运费险: ¥0.00 占净成本: 0% 占净金额: 0% 税金: ¥0.00 占净成本: 0% 占净金额: 0%, [13] 其他支出: ¥0.00 环比: - 占净成本: 0% 占净金额: 0% 小额打款: ¥0.00, [14] 总费用: ¥0.00 环比: - 广告费: ¥0.00 占总费用: - 特殊订单总费用: ¥0.00 占总费用: - 店铺费用支出: ¥0.00 占总费用: - 自定义费用: ¥0.00 占总费用: -, [15] 支付退款率: 0% 变化: 3.95% 支付退款金额: ¥0.00 环比: 100.00% 发货前仅退款: ¥0.00 0% 发货后仅退款: ¥0.00 0% 退货退款: ¥0.00 0%, [16] 支付退款率: 0% 变化: 0.03% 支付退款件数: 0 环比: 100.00% 发货前仅退款: 0 0% 发货后仅退款: 0 0% 退货退款: 0 0%, [17] 支付退款率: 0% 变化: 1.07% 支付退款订单数: 0 环比: 100.00% 发货前仅退款: 0 0% 发货后仅退款: 0 0% 退货退款: 0 0%, [18] 发货退款率(按金额): 7.69% 变化: 3.61% 发货退款率(按件数): 0.26% 变化: 0.23% 发货退款率(按订单数): 0.30% 变化: 0.77%, [19] 金额: ¥103,364.26 件数: 9,680 订单数: 653 支付发货率: 98.34%, [20] 金额: ¥132,065.73 环比: 46.14% 件数: 11,629 环比: 38.47%, [21] 金额: ¥62,877.70 环比: 161.22% 件数: 3,925 环比: 360.68%
+table.js:274 [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX11
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+context.js:72 [web2ai] addContextSnippet WARNING: column count mismatch row=22 header=27, adding to headerless group
+context.js:72 [web2ai] addContextSnippet WARNING: column count mismatch row=22 header=27, adding to headerless group
+context.js:72 [web2ai] addContextSnippet WARNING: column count mismatch row=22 header=27, adding to headerless group
+context.js:72 [web2ai] addContextSnippet WARNING: column count mismatch row=22 header=27, adding to headerless group
+context.js:72 [web2ai] addContextSnippet WARNING: column count mismatch row=22 header=27, adding to headerless group
+context.js:72 [web2ai] addContextSnippet WARNING: column count mismatch row=22 header=27, adding to headerless group
+context.js:72 [web2ai] addContextSnippet WARNING: column count mismatch row=22 header=27, adding to headerless group
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=false rowEl=true isConnected=true batchAnchorRow=false batchAnchorConnected=undefined batchBar=true batchBarConnected=true
+ [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+ [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+ [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+ [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+ [web2ai] removeContext start: id=19f5bcbe568_e34b8dc9ccbc7 kind=table-row ref=CTX1
+ [web2ai] removeContext state before: contexts=15 tableGroups=3 [- rows=8], [CTX2 rows=3], [CTX2 rows=2]
+ [web2ai] removeContext refs: selectedRowRef=undefined refToRowEl=0 refToCheckbox=4 batchAnchorRow=false
+ [web2ai] removeContext ref=CTX1 refToCheckbox.has=true refToRowEl.has=false
+context.js:146 [web2ai] removeContext header rowEl= TR true
+context.js:181 [web2ai] removeContext state after: contexts=14 tableGroups=3 [- rows=8], [CTX2 rows=2], [CTX2 rows=2]
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=false connected=undefined
+table.js:773 [web2ai.BAR] ensureBatchBar CREATING new bar
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=false rowEl=true isConnected=true batchAnchorRow=false batchAnchorConnected=undefined batchBar=true batchBarConnected=true
+ [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+ [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+ [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+ [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+ [web2ai] removeContext start: id=19f5bcbeb90_40a59576a1641 kind=table-row ref=CTX3
+ [web2ai] removeContext state before: contexts=14 tableGroups=3 [- rows=8], [CTX2 rows=2], [CTX2 rows=2]
+ [web2ai] removeContext refs: selectedRowRef=undefined refToRowEl=0 refToCheckbox=3 batchAnchorRow=false
+ [web2ai] removeContext ref=CTX3 refToCheckbox.has=true refToRowEl.has=false
+context.js:146 [web2ai] removeContext header rowEl= TR true
+context.js:181 [web2ai] removeContext state after: contexts=13 tableGroups=3 [- rows=8], [CTX2 rows=1], [CTX2 rows=2]
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=false rowEl=true isConnected=true batchAnchorRow=false batchAnchorConnected=undefined batchBar=true batchBarConnected=true
+ [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+ [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+ [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+ [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+ [web2ai] removeContext start: id=19f5bcc1b4d_381b8f7e88c75 kind=table-row ref=CTX4
+ [web2ai] removeContext state before: contexts=13 tableGroups=3 [- rows=8], [CTX2 rows=1], [CTX2 rows=2]
+ [web2ai] removeContext refs: selectedRowRef=undefined refToRowEl=0 refToCheckbox=2 batchAnchorRow=false
+ [web2ai] removeContext ref=CTX4 refToCheckbox.has=true refToRowEl.has=false
+context.js:146 [web2ai] removeContext header rowEl= TR true
+context.js:181 [web2ai] removeContext state after: contexts=12 tableGroups=3 [- rows=7], [CTX2 rows=1], [CTX2 rows=2]
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=false connected=undefined batchTableRoot=false connected=undefined batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:931 [web2ai.BAR] updateBatchBar anchor DISCONNECTED, hiding bar and clearing refs
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.
+table.js:322 [web2ai.BAR] handleRowCheckboxChange checked=true rowEl=true isConnected=true batchAnchorRow=false batchAnchorConnected=undefined batchBar=true batchBarConnected=true
+table.js:147 [web2ai] addRowElToContext ENTRY: tagName=TR IS_TOP_FRAME=true silent=false
+table.js:193 [web2ai] addRowElToContext DATA_ROW: ref=CTX5 cellCount=27 IS_TOP_FRAME=true {tag: 'tr', role: '', cells: Array(27)}
+table.js:195 [web2ai] DATA_ROW structure: {tagName: 'TR', className: 'art-table-row odd', role: '', closestTable: 'TABLE', tableClassName: '', …}
+table.js:269 [web2ai] 数据行 CTX5: [0] -, [1] 4, [2] 千城万仓供应链 寄样/发货地址 来源: 邀约链接, [3] -, [4] -, [5] 刘小波 185*****614, [6] 三级, [7] ¥0 充值退款 资金明细 出账结算, [8] 待审核：0 待发货：0 已发货：0 已签收：0, [9] 不支持开票  设置, [10] 近60天暂无待退款售后单, [11] 分销订单数：1 分销件单价：33.17 分销件数：3 查看更多, [12] 近30日暂无破价, [13] 默认, [14] -, [15] -, [16] -, [17] 允许, [18] 0, [19] 平台/店铺数： 3 1 近30天发货单量5000+, [20] 叶子, [21] -, [22] 11436519, [23] 分销商申请信息： 3 图片备注, [24] 2026-07-03 11:42:41, [25] 合作中, [26] 申样 设置运费模板 更多
+table.js:274 [web2ai.BAR] addRowElToContext SET batchAnchorRow: rowEl.isConnected=true ref=CTX5
+table.js:927 [web2ai.BAR] updateBatchBar ENTRY: batchAnchorRow=true connected=true batchTableRoot=true connected=true batchContainer=false connected=undefined batchBar=true connected=true
+table.js:765 [web2ai.BAR] ensureBatchBar existing bar: isConnected=true
+table.js:929 [web2ai.BAR] updateBatchBar after ensureBatchBar: batchBar=true connected=true
+table.js:295 [web2ai] auto-open check: STATE.open=true, silent=false
+umi.a5f8ef41.js:1 Sentry Logger [log]: Captured error event `接口extensionRequest_error:https://sc.ttdahuo.com/api/market/extension/request`
+umi.a5f8ef41.js:1 Sentry Logger [warn]: Event dropped due to being a duplicate of previously captured event.
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:447
+kc @ VM27855:447
+GC @ VM27855:447
+Lde @ VM27855:447
+processEvent @ VM27855:461
+Ek.Object.assign.id @ VM27855:453
+p1 @ VM27855:453
+p1 @ VM27855:453
+I0e @ VM27855:453
+O0e @ VM27855:453
+_prepareEvent @ VM27855:453
+_prepareEvent @ VM27855:461
+_processEvent @ VM27855:453
+_captureEvent @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+eval @ VM27855:453
+_executeHandlers @ VM27855:453
+eval @ VM27855:453
+_runExecutor @ VM27855:453
+sf @ VM27855:453
+then @ VM27855:453
+eval @ VM27855:453
+o @ VM27855:453
+_process @ VM27855:454
+captureException @ VM27855:453
+captureException @ VM27855:451
+pk @ VM27855:453
+ss @ VM27855:461
+zve @ VM27855:461
+await in zve
+Jn @ VM27855:461
+y3 @ VM27855:461
+eval @ VM27855:466
+Ga.n.current.n.current @ VM27855:461
+eval @ VM27855:461
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+setTimeout
+(anonymous) @ umi.a5f8ef41.js:1
+eval @ VM27855:461
+eval @ VM27855:461
+eval @ VM27855:461
+await in eval
+r @ VM27855:461
+umi.a5f8ef41.js:1 Sentry Logger [log]: Event processor "Dedupe" dropped event
+umi.a5f8ef41.js:1 Sentry Logger [log]: Recording outcome: "event_processor:error"
+umi.a5f8ef41.js:1 Sentry Logger [log]: An event processor returned `null`, will not send event.

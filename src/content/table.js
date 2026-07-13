@@ -131,15 +131,9 @@ function addRowElToContext(rowEl, { silent } = {}) {
   if (!rowEl) return 0;
   const t0 = performance.now();
   const existing = refs.selectedRowRef.get(rowEl);
-  if (isAddedRef(existing)) {
-    DEBUG && console.log(`[web2ai] addRowElToContext skip already added ref=${existing}`, rowEl);
-    return 0;
-  }
+  if (isAddedRef(existing)) return 0;
   const text = extractTableRowText(rowEl).trim();
-  if (!text) {
-    DEBUG && console.log(`[web2ai] addRowElToContext skip empty text`, rowEl);
-    return 0;
-  }
+  if (!text) return 0;
   const textPreview = compactOneLine(text).slice(0, 60);
   DEBUG && console.log(`[web2ai] addRowElToContext adding text="${textPreview}"`, rowEl);
   
@@ -748,7 +742,21 @@ function pickRowTargetFromPoint(e) {
 }
 
 function ensureBatchBar() {
-  if (refs.batchBar) return;
+  // 先清理页面上所有残留的旧 bar（防止 SPA 导航后出现多个）
+  const staleBars = document.querySelectorAll("#web2ai_batch_bar");
+  if (staleBars.length > 1) {
+    console.log(`[web2ai.BAR] ensureBatchBar found ${staleBars.length} bars in DOM! Cleaning up...`);
+  }
+  for (const bar of staleBars) {
+    if (bar !== refs.batchBar) bar.remove();
+  }
+  if (refs.batchBar) {
+    if (!refs.batchBar.isConnected) {
+      refs.batchBar = null;
+    } else {
+      return;
+    }
+  }
   refs.batchBar = el("div", {
     id: "web2ai_batch_bar",
     style: {
@@ -902,11 +910,17 @@ function ensureBatchBar() {
 }
 
 function updateBatchBar() {
-  ensureBatchBar();
+  // 优化：anchor 无效时不需要创建 bar，直接隐藏或跳过
   if (!refs.batchAnchorRow || !refs.batchAnchorRow.isConnected) {
-    refs.batchBar.style.display = "none";
+    if (refs.batchBar) {
+      refs.batchBar.style.display = "none";
+    }
+    refs.batchAnchorRow = null;
+    refs.batchTableRoot = null;
+    refs.batchContainer = null;
     return;
   }
+  ensureBatchBar();
   const count = getAddedRowCountInGroup(refs.batchAnchorRow);
   if (count < 1) {
     refs.batchBar.style.display = "none";
@@ -989,7 +1003,8 @@ function getRowGroupRows(anchorRowEl) {
 }
 
 function selectAllRowsInSameGroup(opts = {}) {
-  if (!refs.batchAnchorRow || !refs.batchAnchorRow.isConnected) return 0;
+  console.log(`[web2ai.BAR] selectAllRowsInSameGroup CALLED batchAnchorRow=${!!refs.batchAnchorRow} connected=${refs.batchAnchorRow?.isConnected}`);
+  if (!refs.batchAnchorRow || !refs.batchAnchorRow.isConnected) { console.log(`[web2ai.BAR] selectAllRowsInSameGroup anchor invalid, return 0`); return 0; }
   const t0 = performance.now();
   const rows = getRowGroupRows(refs.batchAnchorRow);
   const rowDetails = rows.map((r, i) => {
@@ -1022,8 +1037,10 @@ function selectAllRowsInSameGroup(opts = {}) {
 }
 
 function clearAllRowsInSameGroup(opts = {}) {
-  if (!refs.batchAnchorRow || !refs.batchAnchorRow.isConnected) return 0;
+  console.log(`[web2ai.BAR] clearAllRowsInSameGroup CALLED batchAnchorRow=${!!refs.batchAnchorRow} connected=${refs.batchAnchorRow?.isConnected} batchTableRoot=${!!refs.batchTableRoot} connected=${refs.batchTableRoot?.isConnected}`);
+  if (!refs.batchAnchorRow || !refs.batchAnchorRow.isConnected) { console.log(`[web2ai.BAR] clearAllRowsInSameGroup anchor invalid, return 0`); return 0; }
   const rows = getRowGroupRows(refs.batchAnchorRow);
+  console.log(`[web2ai.BAR] clearAllRowsInSameGroup getRowGroupRows returned ${rows.length} rows`);
   const refs_list = [];
   for (const rowEl of rows) {
     const ref = refs.selectedRowRef.get(rowEl);
@@ -1063,11 +1080,34 @@ function getAddedRowCountInGroup(anchorRowEl) {
 }
 
 function pruneDisconnectedRowMappings() {
+  let cleanedRows = 0, cleanedOverlays = 0;
   for (const [ref, rowEl] of refs.refToRowEl.entries()) {
-    if (!rowEl || !rowEl.isConnected) refs.refToRowEl.delete(ref);
+    if (!rowEl || !rowEl.isConnected) { refs.refToRowEl.delete(ref); cleanedRows++; }
   }
   for (const rowEl of Array.from(refs.pinnedRowOverlays.keys())) {
-    if (!rowEl || !rowEl.isConnected) removePinnedRowOverlay(rowEl);
+    if (!rowEl || !rowEl.isConnected) { removePinnedRowOverlay(rowEl); cleanedOverlays++; }
+  }
+  // 清理 SPA 页面切换后的残留 batch 状态
+  if (refs.batchAnchorRow && !refs.batchAnchorRow.isConnected) {
+    console.log(`[web2ai.BAR] pruneDisconnected: clearing stale batchAnchorRow (was connected=${refs.batchAnchorRow.isConnected})`);
+    refs.batchAnchorRow = null;
+    refs.batchTableRoot = null;
+    refs.batchContainer = null;
+    // 同时隐藏旧 bar（SPA 切换到 iframe 页面时，top frame 的 bar 不会被 updateBatchBar 自动隐藏）
+    if (refs.batchBar && refs.batchBar.isConnected) {
+      console.log(`[web2ai.BAR] pruneDisconnected: hiding stale bar (anchor gone, bar still connected in top frame)`);
+      refs.batchBar.style.display = "none";
+    }
+  }
+  if (refs.batchTableRoot && !refs.batchTableRoot.isConnected) refs.batchTableRoot = null;
+  if (refs.batchContainer && !refs.batchContainer.isConnected) refs.batchContainer = null;
+  // 清理失联的 bar
+  if (refs.batchBar && !refs.batchBar.isConnected) {
+    console.log(`[web2ai.BAR] pruneDisconnected: clearing stale batchBar (was connected=${refs.batchBar.isConnected})`);
+    refs.batchBar = null;
+  }
+  if (cleanedRows > 0 || cleanedOverlays > 0) {
+    console.log(`[web2ai.BAR] pruneDisconnected: cleaned ${cleanedRows} rowRefs + ${cleanedOverlays} overlays`);
   }
 }
 
