@@ -4,6 +4,107 @@ import { addContextSnippet, removeContextByRef, extractTableRowText } from './co
 import { showToast } from './toast.js';
 import { render } from './overlay.js';
 
+// ========== 通用表格辅助函数 ==========
+
+/**
+ * 从任意行元素中提取单元格列表（通用实现）。
+ * 支持：<tr>、[role="row"]、div-based 表格、以及各种非标准表格结构。
+ */
+function getRowCells(rowEl) {
+  if (!rowEl) return [];
+  const tag = rowEl.tagName?.toLowerCase();
+
+  // 1. 标准 HTML 表格 <tr>
+  if (tag === "tr") {
+    return Array.from(rowEl.querySelectorAll("th,td"));
+  }
+
+  // 2. role=row 的 ARIA 表格
+  const role = rowEl.getAttribute?.("role") || "";
+  if (role === "row") {
+    const cells = rowEl.querySelectorAll(
+      '[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]'
+    );
+    if (cells.length) return Array.from(cells);
+  }
+
+  // 3. 找带表格语义属性的子元素（如 scope、headers 等 WCAG 标注）
+  const semanticCells = rowEl.querySelectorAll(
+    'th,td,[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"],[scope]'
+  );
+  if (semanticCells.length) return Array.from(semanticCells);
+
+  // 4. 兜底：取直接子元素中非 script/style/template 的作为单元格
+  const directChildren = Array.from(rowEl.children).filter(c => {
+    const t = c.tagName?.toLowerCase();
+    return t !== "script" && t !== "style" && t !== "template" && t !== "noscript";
+  });
+  return directChildren;
+}
+
+/** 获取任意行元素的单元格数 */
+function getCellCount(rowEl) {
+  return getRowCells(rowEl).length;
+}
+
+/**
+ * 判断行元素是否为表头行（通用实现）。
+ * 检查 th、role=columnheader/rowheader、scope=col/row 等标准表头标记。
+ */
+function isHeaderRow(rowEl) {
+  if (!rowEl) return false;
+  // 标准 th
+  if (rowEl.querySelector("th")) return true;
+  // role-based 表头
+  if (rowEl.querySelector('[role="columnheader"],[role="rowheader"]')) return true;
+  // WCAG 标准：scope 属性标记的表头
+  if (rowEl.querySelector('td[scope="col"],td[scope="row"],th[scope="col"],th[scope="row"]')) return true;
+  return false;
+}
+
+/**
+ * 带诊断的 isVisibleElement — 同时输出失败原因到 console
+ */
+function isVisibleElementDiag(el, label) {
+  if (!el || el.nodeType !== 1) {
+    label && console.log(`[web2ai] isVisible DIAG: ${label}: el is null or not element`);
+    return false;
+  }
+  const style = window.getComputedStyle(el);
+  if (style.display === "none") {
+    console.log(`[web2ai] isVisible DIAG: ${label || el.tagName}: display=none`);
+    return false;
+  }
+  if (style.visibility === "hidden") {
+    console.log(`[web2ai] isVisible DIAG: ${label || el.tagName}: visibility=hidden`);
+    return false;
+  }
+  if (Number(style.opacity || "1") === 0) {
+    console.log(`[web2ai] isVisible DIAG: ${label || el.tagName}: opacity=0`);
+    return false;
+  }
+  const rect = el.getBoundingClientRect?.();
+  if (!rect || rect.width < 2 || rect.height < 2) {
+    console.log(`[web2ai] isVisible DIAG: ${label || el.tagName}: rect w=${rect?.width} h=${rect?.height} (too small)`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 检查行元素是否包含表头单元格（通用实现）。
+ */
+function hasHeaderCells(row) {
+  if (!row) return false;
+  // th 元素
+  if (row.querySelector("th")) return true;
+  // role-based
+  if (row.querySelector('[role="columnheader"], [role="rowheader"]')) return true;
+  // WCAG scope 属性
+  if (row.querySelector('[scope="col"], [scope="row"]')) return true;
+  return false;
+}
+
 function highlightRow(rowEl, on) {
   if (!rowEl) return;
   if (on) {
@@ -41,6 +142,9 @@ function addRowElToContext(rowEl, { silent } = {}) {
   }
   const textPreview = compactOneLine(text).slice(0, 60);
   DEBUG && console.log(`[web2ai] addRowElToContext adding text="${textPreview}"`, rowEl);
+  
+  // 诊断入口：确认函数被调用
+  console.log(`[web2ai] addRowElToContext ENTRY: tagName=${rowEl.tagName} IS_TOP_FRAME=${IS_TOP_FRAME} silent=${!!silent}`);
   const ref = `CTX${STATE.nextCtxNum++}`;
   refs.selectedRowRef.set(rowEl, ref);
   refs.refToRowEl.set(ref, rowEl);
@@ -50,48 +154,98 @@ function addRowElToContext(rowEl, { silent } = {}) {
   } catch {}
   highlightRow(rowEl, true);
   ensurePinnedRowOverlay(rowEl, ref);
-  const isHeaderRow = rowEl.querySelector("th") !== null;
-  const kind = isHeaderRow ? "table-header" : "table-row";
-  const cellCount = rowEl.tagName === "TR"
-    ? rowEl.querySelectorAll("th,td").length
-    : rowEl.getAttribute("role") === "row"
-      ? rowEl.querySelectorAll('[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]').length
-      : 0;
-  if (isHeaderRow) {
+  const isHeader = isHeaderRow(rowEl);
+  const kind = isHeader ? "table-header" : "table-row";
+  const cellCount = getCellCount(rowEl);
+  if (isHeader) {
     DEBUG && console.log(`[web2ai] addRowElToContext HEADER row added: cellCount=${cellCount}`, dumpRowCellDetail(rowEl));
+    // 详细日志：手工选中表头时，输出完整结构信息，方便对比
+    console.log(`[web2ai] addRowElToContext HEADER_MANUAL: ref=${ref} cellCount=${cellCount}`, dumpRowCellDetail(rowEl));
+    const headerTable = rowEl.closest("table");
+    const headerThead = rowEl.closest("thead");
+    console.log(`[web2ai] HEADER_MANUAL structure:`, {
+      tagName: rowEl.tagName,
+      className: rowEl.className?.slice?.(0, 60) || "",
+      role: rowEl.getAttribute?.("role") || "",
+      closestTable: headerTable?.tagName || "none",
+      tableClassName: headerTable?.className?.slice?.(0, 60) || "",
+      inThead: !!headerThead,
+      parentTag: rowEl.parentElement?.tagName || "",
+      parentClassName: rowEl.parentElement?.className?.slice?.(0, 60) || "",
+      cells: rowEl.tagName === "TR" ? Array.from(rowEl.querySelectorAll("th,td")).map((c, i) => ({
+        i, tag: c.tagName, text: c.textContent?.trim?.().slice?.(0, 30) || ""
+      })) : "not TR",
+      ancestorChain: (() => {
+        const chain = [];
+        let e = rowEl.parentElement;
+        let depth = 0;
+        while (e && e !== document.body && depth < 8) {
+          chain.push(e.tagName + (e.id ? "#" + e.id : "") + (e.className ? "." + e.className.slice(0, 20) : ""));
+          e = e.parentElement;
+          depth++;
+        }
+        return chain.join(" > ");
+      })()
+    });
   }
-  if (!isHeaderRow && IS_TOP_FRAME) {
-    const hasHeaderGroup = STATE.tableGroups.some(g => g.header !== null) ||
-      STATE.contexts.some(c => c.kind === "table-header");
-    if (!hasHeaderGroup) {
-      DEBUG && console.log(`[web2ai] addRowElToContext REJECT: no header group found`);
-      showToast("请先选择表格的表头行加入上下文");
-      syncRowCheckboxState(false);
-      highlightRow(rowEl, false);
-      refs.selectedRowRef.delete(rowEl);
-      refs.refToRowEl.delete(ref);
-      refs.refToCheckbox.delete(ref);
-      removePinnedRowOverlay(rowEl);
-      return 0;
-    }
+  if (!isHeader) {
+    // 详细日志：数据行结构信息，方便与表头对比
+    console.log(`[web2ai] addRowElToContext DATA_ROW: ref=${ref} cellCount=${cellCount} IS_TOP_FRAME=${IS_TOP_FRAME}`, dumpRowCellDetail(rowEl));
+    const dataTable = rowEl.closest("table");
+    console.log(`[web2ai] DATA_ROW structure:`, {
+      tagName: rowEl.tagName,
+      className: rowEl.className?.slice?.(0, 60) || "",
+      role: rowEl.getAttribute?.("role") || "",
+      closestTable: dataTable?.tagName || "none",
+      tableClassName: dataTable?.className?.slice?.(0, 60) || "",
+      parentTag: rowEl.parentElement?.tagName || "",
+      parentClassName: rowEl.parentElement?.className?.slice?.(0, 60) || "",
+      ancestorChain: (() => {
+        const chain = [];
+        let e = rowEl.parentElement;
+        let depth = 0;
+        while (e && e !== document.body && depth < 8) {
+          chain.push(e.tagName + (e.id ? "#" + e.id : "") + (e.className ? "." + e.className.slice(0, 20) : ""));
+          e = e.parentElement;
+          depth++;
+        }
+        return chain.join(" > ");
+      })()
+    });
     const headerGroup = STATE.tableGroups.find(g => g.header !== null);
+    let needHeader = false;
     if (headerGroup && headerGroup.header) {
       const headerCellCount = headerGroup.header.cellCount || headerGroup.header.text.split(COL_SEPARATOR).length;
       const rowCellCount = cellCount || text.split(COL_SEPARATOR).length;
       DEBUG && console.log(`[web2ai] addRowElToContext colCheck: rowCellCount=${rowCellCount} headerCellCount=${headerCellCount} (cellCount=${cellCount})`);
-      if (headerGroup.header.rowEl) {
-        DEBUG && console.log(`[web2ai] addRowElToContext HEADER cell details:`, dumpRowCellDetail(headerGroup.header.rowEl));
-      }
       if (rowCellCount !== headerCellCount) {
-        DEBUG && console.log(`[web2ai] addRowElToContext REJECT: column count mismatch row=${rowCellCount} header=${headerCellCount}`);
-        showToast(`当前行有 ${rowCellCount} 列，但表头有 ${headerCellCount} 列，列数不一致。如果是新表格，请先选择它的表头行`);
-        syncRowCheckboxState(false);
-        highlightRow(rowEl, false);
-        refs.selectedRowRef.delete(rowEl);
-        refs.refToRowEl.delete(ref);
-        refs.refToCheckbox.delete(ref);
-        removePinnedRowOverlay(rowEl);
-        return 0;
+        console.log(`[web2ai] addRowElToContext column count mismatch row=${rowCellCount} header=${headerCellCount}, trying to find header above`);
+        needHeader = true;
+      }
+    } else {
+      console.log(`[web2ai] addRowElToContext no header group found, trying to find header above`);
+      needHeader = true;
+    }
+
+    if (needHeader) {
+      const found = findHeaderRowAbove(rowEl);
+      if (found && !isAddedRef(refs.selectedRowRef.get(found))) {
+        // 找到未添加过的表头行，尝试自动添加
+        const headerText = extractTableRowText(found).trim();
+        if (headerText) {
+          const headerCellCount = getCellCount(found);
+          const rowCellCount = cellCount || text.split(COL_SEPARATOR).length;
+          if (headerCellCount === rowCellCount) {
+            console.log(`[web2ai] addRowElToContext auto-adding header row found above, cells=${headerCellCount}`);
+            addRowElToContext(found, { silent: true });
+          } else {
+            console.log(`[web2ai] addRowElToContext header above has different columns (${headerCellCount} vs ${rowCellCount}), proceeding as headerless`);
+          }
+        }
+      } else if (found) {
+        console.log(`[web2ai] addRowElToContext header above already added, skip`);
+      } else {
+        console.log(`[web2ai] addRowElToContext no header found above, proceeding as headerless`);
       }
     }
   }
@@ -107,9 +261,18 @@ function addRowElToContext(rowEl, { silent } = {}) {
     silent: Boolean(silent)
   });
 
-  if (!isHeaderRow) {
+  // 输出加入上下文的行日志，方便对比表头和数据行
+  {
+    const cols = text.split(COL_SEPARATOR);
+    const label = isHeader ? "表头" : "数据行";
+    const detail = cols.map((col, i) => `[${i}] ${col}`).join(", ");
+    console.log(`[web2ai] ${label} ${ref}: ${detail}`);
+  }
+
+  if (!isHeader) {
     refs.batchAnchorRow = rowEl;
-    const parentTableEl = rowEl.tagName === "TR" ? rowEl.closest("table") : null;
+    // 通用：尝试找表格容器
+    const parentTableEl = rowEl.closest("table") || rowEl.closest('[role="grid"]') || rowEl.closest('[role="table"]');
     if (parentTableEl) {
       refs.batchTableRoot = parentTableEl;
       DEBUG && console.log(`[web2ai] addRowElToContext batchTableRoot set:`, parentTableEl, `tableIndex=${Array.from(document.querySelectorAll("table")).indexOf(parentTableEl)}`);
@@ -122,7 +285,35 @@ function addRowElToContext(rowEl, { silent } = {}) {
   }
   const elapsed = performance.now() - t0;
   if (elapsed > 10) DEBUG && console.log(`[web2ai] addRowElToContext SLOW: ${elapsed.toFixed(1)}ms silent=${silent} kind=${kind} ref=${ref}`);
+
+  // 闪光动画 + 自动展开采（silent 模式跳过）
+  if (!silent) {
+    ensureAddedFlashStyle();
+    rowEl.classList.add("web2ai-row-added");
+    setTimeout(() => rowEl.classList.remove("web2ai-row-added"), 800);
+    console.log(`[web2ai] auto-open check: STATE.open=${STATE.open}, silent=${!!silent}`);
+    if (!STATE.open) { STATE.open = true; render(); console.log(`[web2ai] auto-open: set STATE.open=true, called render`); }
+  }
+
   return 1;
+}
+
+/** 注入添加行时的闪光动画 CSS */
+function ensureAddedFlashStyle() {
+  if (document.getElementById("web2ai_added_flash_style")) return;
+  const style = document.createElement("style");
+  style.id = "web2ai_added_flash_style";
+  style.textContent = `
+    @keyframes web2ai-added-flash {
+      0%   { box-shadow: inset 0 0 0 0px rgba(59,130,246,0.45); }
+      30%  { box-shadow: inset 0 0 0 4px rgba(59,130,246,0.35); }
+      100% { box-shadow: inset 0 0 0 12px rgba(59,130,246,0); }
+    }
+    .web2ai-row-added {
+      animation: web2ai-added-flash 0.7s ease-out;
+    }
+  `;
+  document.documentElement.appendChild(style);
 }
 
 function handleRowCheckboxChange(checked) {
@@ -364,14 +555,18 @@ function ensurePinnedRowOverlay(rowEl, ref) {
   if (!rowEl || !ref) return;
   if (refs.pinnedRowOverlays.has(rowEl)) return;
 
-  const isInline = rowEl.tagName === "TR";
+  // 通用判断：TR 或 tbody 内的 row 或 rowgroup 内的 row 用 inline 定位（跟随滚动）
+  const isInline = rowEl.tagName === "TR" ||
+    (rowEl.getAttribute?.("role") === "row" && (
+      rowEl.closest("tbody") || rowEl.closest('[role="rowgroup"]')
+    ));
   const inlineCell = isInline ? getRowInlineAnchorCell(rowEl) : null;
   const node = el("div", {
     style: {
       position: isInline && inlineCell ? "absolute" : "fixed",
       right: isInline && inlineCell ? "6px" : null,
       top: isInline && inlineCell ? "4px" : null,
-      zIndex: "2147483647",
+      zIndex: Z_INDEX,
       display: "flex",
       alignItems: "center",
       gap: "6px",
@@ -426,7 +621,12 @@ function removePinnedRowOverlay(rowEl) {
 }
 
 function positionPinnedRowOverlay(rowEl) {
-  if (rowEl?.tagName === "TR") return;
+  if (!rowEl) return;
+  // 跳过内联定位的行（TR 或在 tbody/rowgroup 内的 role=row）
+  if (rowEl.tagName === "TR") return;
+  if (rowEl.getAttribute?.("role") === "row" && (
+    rowEl.closest("tbody") || rowEl.closest('[role="rowgroup"]')
+  )) return;
   const node = refs.pinnedRowOverlays.get(rowEl);
   if (!node) return;
   if (!rowEl.isConnected) {
@@ -475,7 +675,12 @@ function getRowAnchorRect(rowEl) {
 }
 
 function showTableRowFabAt(rect, rowEl) {
-  if (rowEl?.tagName === "TR") {
+  // 内联定位的行（TR 或在 tbody/rowgroup 内的 role=row）使用内联 FAB
+  const isInline = rowEl?.tagName === "TR" ||
+    (rowEl?.getAttribute?.("role") === "row" && (
+      rowEl?.closest("tbody") || rowEl?.closest('[role="rowgroup"]')
+    ));
+  if (isInline) {
     if (refs.tableRowFab) refs.tableRowFab.style.display = "none";
     showInlineRowFab(rowEl);
     return;
@@ -550,7 +755,7 @@ function ensureBatchBar() {
       position: "fixed",
       left: "12px",
       bottom: "12px",
-      zIndex: "2147483647",
+      zIndex: Z_INDEX,
       display: "none",
       gap: "8px",
       alignItems: "center",
@@ -726,26 +931,60 @@ function updateBatchBar() {
   refs.batchBar.style.display = "flex";
 }
 
+/**
+ * 获取与锚点行同组的所有行（通用实现）。
+ * 不依赖特定容器类型，支持各种表格结构。
+ */
 function getRowGroupRows(anchorRowEl) {
   if (!anchorRowEl) return [];
-  if (anchorRowEl.tagName === "TR") {
-    const tbody = anchorRowEl.closest("tbody");
-    const table = anchorRowEl.closest("table");
-    const container = tbody || table;
-    if (!container) return [];
-    return Array.from(container.querySelectorAll("tr")).filter((tr) => {
-      const cells = tr.querySelectorAll("td,th");
-      return cells && cells.length;
-    });
+
+  // 尝试找最近的语义容器
+  const containers = [
+    anchorRowEl.closest("tbody"),
+    anchorRowEl.closest("table"),
+    anchorRowEl.closest('[role="rowgroup"]'),
+    anchorRowEl.closest('[role="grid"]'),
+    anchorRowEl.closest('[role="table"]'),
+    anchorRowEl.closest('[role="treegrid"]'),
+    anchorRowEl.closest('[role="list"]'),
+  ].filter(Boolean);
+
+  // 取最近（最内层）的容器
+  let container = null;
+  for (const c of containers) {
+    if (!container || c.contains(container)) container = c;
+  }
+  if (!container) {
+    container = anchorRowEl.parentElement;
+    // 尝试向外扩展几层找更合适的容器
+    let p = container;
+    for (let i = 0; i < 3 && p; i++) {
+      const candidate = p.querySelectorAll?.("tr,[role='row']");
+      if (candidate && candidate.length > 1) { container = p; break; }
+      p = p.parentElement;
+    }
+  }
+  if (!container) return [];
+
+  // 在容器内查找所有行
+  const isTbodyOrTable = container.tagName === "TBODY" || container.tagName === "TABLE" ||
+    container.tagName === "THEAD" || container.tagName === "TFOOT";
+  let rows;
+  if (isTbodyOrTable) {
+    rows = container.querySelectorAll("tr");
+  } else {
+    rows = container.querySelectorAll("tr, [role='row']");
   }
 
-  const rowgroup = anchorRowEl.closest('[role="rowgroup"]');
-  const grid = anchorRowEl.closest('[role="grid"],[role="table"]');
-  const container = rowgroup || grid || anchorRowEl.parentElement;
-  if (!container) return [];
-  return Array.from(container.querySelectorAll('[role="row"]')).filter((row) => {
-    const txt = normalizeText(row.innerText || row.textContent || "");
-    return Boolean(txt);
+  return Array.from(rows).filter((row) => {
+    if (!row.isConnected) return false;
+    if (!isVisibleElement(row)) return false;
+    // 必须有可见单元格
+    const cells = getRowCells(row);
+    if (!cells.length) return false;
+    // 如果所有单元格都不可见，跳过
+    const anyVisible = cells.some(c => isVisibleElement(c));
+    return anyVisible;
   });
 }
 
@@ -769,10 +1008,12 @@ function selectAllRowsInSameGroup(opts = {}) {
     if (IS_TOP_FRAME) {
       render();
     } else {
-      chrome.runtime.sendMessage({
-        type: "FORWARD_TO_TOP",
-        payload: { message: { type: "RENDER_UI" } }
-      }).catch(() => void 0);
+      try {
+        chrome.runtime.sendMessage({
+          type: "FORWARD_TO_TOP",
+          payload: { message: { type: "RENDER_UI" } }
+        }).catch(() => void 0);
+      } catch {}
     }
   }
   if (added && !opts?.silent) showToast(`已批量加入 ${added} 行`);
@@ -840,22 +1081,32 @@ function clearSelectedRowRefsInRoot(root) {
 
 function getTableRootForRow(rowEl) {
   if (!rowEl) return null;
-  if (rowEl.tagName === "TR") return rowEl.closest("table") || rowEl.closest("tbody") || rowEl;
-  return (
-    rowEl.closest('[role="grid"]') ||
-    rowEl.closest('[role="table"]') ||
-    rowEl.closest('[role="rowgroup"]') ||
-    rowEl.parentElement ||
-    rowEl
-  );
+  // 通用：沿 DOM 树向上找最近的有表格语义的容器
+  const candidates = [
+    rowEl.closest("table"),
+    rowEl.closest("tbody"),
+    rowEl.closest("thead"),
+    rowEl.closest("tfoot"),
+    rowEl.closest('[role="grid"]'),
+    rowEl.closest('[role="table"]'),
+    rowEl.closest('[role="treegrid"]'),
+    rowEl.closest('[role="rowgroup"]'),
+  ].filter(Boolean);
+  // 返回最近的（最内层的）
+  let best = null;
+  for (const c of candidates) {
+    if (!best || c.contains(best)) best = c;
+  }
+  return best || rowEl.parentElement || rowEl;
 }
 
 function getTableRowCount(root) {
   if (!root) return 0;
-  const rows = root.querySelectorAll?.("tbody tr, tr, [role='rowgroup'] [role='row'], [role='row']") || [];
+  const rows = root.querySelectorAll?.("tbody tr, tr, thead tr, tfoot tr, [role='rowgroup'] [role='row'], [role='row']") || [];
   let count = 0;
   for (const r of rows) {
-    const cells = r.querySelectorAll?.("td,th,[role='cell'],[role='gridcell']") || [];
+    if (!r.isConnected) continue;
+    const cells = getRowCells(r);
     if (cells.length) count++;
   }
   return count;
@@ -1343,42 +1594,206 @@ function initTableListeners() {
   );
 }
 
+/**
+ * 向上追溯查找行对应的表头行（通用版本）。
+ * 
+ * 策略：
+ *   1. 同一 table 内查找（thead 或前面含 th 的 tr）
+ *   2. 沿 DOM 树逐级向上，在每级的父容器中扫描所有兄弟元素
+ *   3. 优先选择 DOM 顺序中"在前面"的元素
+ *   4. 最后在离行最近的 body/dialog 区域内做兜底搜索
+ * 
+ * @param {Element} rowEl - 数据行元素
+ * @returns {Element|null} 找到的表头行元素，或 null
+ */
+function findHeaderRowAbove(rowEl) {
+  if (!rowEl) { console.log("[web2ai] findHeaderRowAbove: rowEl is null"); return null; }
+
+  console.log("[web2ai] findHeaderRowAbove START: rowEl.tagName=" + rowEl.tagName 
+    + " className=" + (rowEl.className?.slice?.(0, 60) || "")
+  );
+
+  // === Step 1: 同表内查找 ===
+  if (rowEl.tagName === "TR") {
+    const table = rowEl.closest("table");
+    if (table) {
+      console.log("[web2ai] findHeaderRowAbove step1: table.rows=" + table.rows.length);
+      const theadRow = table.querySelector("thead tr");
+      if (theadRow && hasHeaderCells(theadRow)) {
+        console.log("[web2ai] findHeaderRowAbove FOUND via step1-thead, cells=" + theadRow.querySelectorAll("th,td").length);
+        return theadRow;
+      }
+      // 在前面 tr 中找含 th 的行
+      const allRows = table.querySelectorAll("tr");
+      let checked = 0;
+      for (const r of allRows) {
+        if (r === rowEl) break;
+        checked++;
+        if (hasHeaderCells(r)) {
+          console.log("[web2ai] findHeaderRowAbove FOUND via step1-tr, index=" + (checked - 1));
+          return r;
+        }
+      }
+      console.log("[web2ai] findHeaderRowAbove step1: checked " + checked + " preceding trs, none had th");
+    } else {
+      console.log("[web2ai] findHeaderRowAbove step1: row is TR but no closest table");
+    }
+  }
+
+  // === Step 2: 逐级向上扫描祖先的兄弟节点 ===
+  let current = rowEl;
+  let depth = 0;
+  while (current && current !== document.body && current !== document.documentElement) {
+    const parent = current.parentElement;
+    if (!parent) { current = current.parentElement; continue; }
+
+    const children = parent.children;
+    if (children.length > 1) {
+      if (depth < 5) {
+        console.log(`[web2ai] step2-depth${depth}: parent=<${parent.tagName}${parent.className ? '.'+parent.className.slice(0,30):''}> children=${children.length}`);
+        for (let i = 0; i < Math.min(children.length, 8); i++) {
+          const c = children[i];
+          const marker = c === current ? " **CURRENT**" : "";
+          console.log(`  [${i}] <${c.tagName}${c.className ? '.'+c.className.slice(0,30):''}>${marker}`);
+        }
+      }
+      const found = scanChildrenForHeader(children, current, rowEl);
+      if (found) return found;
+    }
+    current = parent;
+    depth++;
+  }
+
+  // === Step 3: 兜底 — 在 row 所在的"区域"内搜索 ===
+  const region = rowEl.closest("body, dialog, [role='dialog'], [role='tabpanel'], [role='region']");
+  if (region) {
+    const found = findHeaderRowInElement(region, rowEl);
+    if (found) {
+      console.log("[web2ai] findHeaderRowAbove FOUND via step3-region: " + (region.tagName) + (region.id ? "#" + region.id : ""));
+      return found;
+    }
+  }
+
+  console.log("[web2ai] findHeaderRowAbove RESULT: NOT FOUND");
+  return null;
+}
+
+/**
+ * 在兄弟元素列表中查找表头行。
+ * 优先选 DOM 顺序中"在 currentEl 前面"的元素。
+ */
+function scanChildrenForHeader(children, currentEl, rowEl) {
+  let bestBefore = null;
+  let bestAfter = null;
+
+  for (const child of children) {
+    if (child === currentEl) continue;
+    const headerRow = findHeaderRowInElement(child);
+    if (headerRow) {
+      // 判断 child 在 currentEl 之前还是之后
+      if (child.compareDocumentPosition(currentEl) & Node.DOCUMENT_POSITION_FOLLOWING) {
+        // child 在 currentEl 前面
+        bestBefore = headerRow;
+        console.log(`[web2ai] scanChildren: found BEFORE in <${child.tagName}${child.className ? '.'+child.className.slice(0,30):''}>, header=<${headerRow.tagName}${headerRow.className ? '.'+headerRow.className.slice(0,30):''}>`);
+        break; // 找到前面的就立即返回
+      } else {
+        // child 在 currentEl 后面
+        if (!bestAfter) {
+          bestAfter = headerRow;
+          console.log(`[web2ai] scanChildren: found AFTER in <${child.tagName}${child.className ? '.'+child.className.slice(0,30):''}>, header=<${headerRow.tagName}${headerRow.className ? '.'+headerRow.className.slice(0,30):''}>`);
+        }
+      }
+    } else if (child.children?.length) {
+      // 诊断：children > 0 但没有找到 header，输出一下
+      console.log(`[web2ai] scanChildren: no header in sibling <${child.tagName}${child.className ? '.'+child.className.slice(0,30):''}> (children=${child.children.length})`);
+    }
+  }
+
+  if (bestBefore) {
+    console.log("[web2ai] findHeaderRowAbove FOUND via scanChildren-before: " 
+      + bestBefore.tagName + " cells=" + (bestBefore.querySelectorAll?.("th,td")?.length || "?"));
+    return bestBefore;
+  }
+  if (bestAfter) {
+    console.log("[web2ai] findHeaderRowAbove FOUND via scanChildren-after: " 
+      + bestAfter.tagName + " cells=" + (bestAfter.querySelectorAll?.("th,td")?.length || "?"));
+    return bestAfter;
+  }
+  return null;
+}
+
+/**
+ * 在一个容器元素中查找表头行（通用实现）。
+ * 检测 th、role=columnheader、scope=col/row 等标准表头标记。
+ * @param {Element} container - 容器元素
+ * @param {Element} afterEl - 可选，只查找此元素之前的行（用于同表内顺序查找）
+ */
+function findHeaderRowInElement(container, afterEl) {
+  if (!container || !isVisibleElement(container)) {
+    // 诊断：输出为什么不可见
+    if (container) isVisibleElementDiag(container, `findHeaderRowInElement: <${container.tagName}${container.className ? '.'+container.className.slice(0,30):''}>`);
+    return null;
+  }
+
+  // 优先找 thead
+  const theadRow = container.querySelector?.("thead tr");
+  if (theadRow && hasHeaderCells(theadRow)) return theadRow;
+
+  // 找所有含表头标记的 tr
+  const trs = container.querySelectorAll?.("tr") || [];
+  for (const tr of trs) {
+    if (afterEl && tr === afterEl) break;
+    if (hasHeaderCells(tr)) return tr;
+  }
+
+  // role-based 表格：找有 columnheader 或 scope 的 row
+  const roleContainer = container.querySelector?.('[role="table"], [role="grid"], [role="treegrid"]') || container;
+  const rows = roleContainer.querySelectorAll?.('[role="row"]') || [];
+  for (const row of rows) {
+    if (afterEl && row === afterEl) break;
+    if (hasHeaderCells(row)) return row;
+  }
+
+  // 通用兜底：找容器内任何带了表头标记的子元素
+  const anyHeader = container.querySelector?.(
+    '[scope="col"], [scope="row"], [role="columnheader"], [role="rowheader"]'
+  );
+  if (anyHeader) {
+    // 向上追溯到行级元素
+    const rowLike = anyHeader.closest?.("tr") || anyHeader.closest?.('[role="row"]');
+    if (rowLike) return rowLike;
+  }
+
+  return null;
+}
+
 function dumpRowCellDetail(rowEl) {
   if (!rowEl) return "null";
   const tag = rowEl.tagName?.toLowerCase();
   const role = rowEl.getAttribute?.("role") || "";
   const info = { tag, role, cells: [] };
-  if (tag === "tr") {
-    const cells = rowEl.querySelectorAll("th,td");
-    cells.forEach((c, i) => {
-      info.cells.push({
-        index: i,
-        tag: c.tagName?.toLowerCase(),
-        text: (c.innerText || c.textContent || "").trim().slice(0, 100),
-        colspan: c.getAttribute?.("colspan") || null,
-        rowspan: c.getAttribute?.("rowspan") || null,
-        hidden: c.hidden || false,
-        display: window.getComputedStyle(c).display
-      });
+  const cells = getRowCells(rowEl);
+  cells.forEach((c, i) => {
+    info.cells.push({
+      index: i,
+      tag: c.tagName?.toLowerCase(),
+      role: c.getAttribute?.("role") || "",
+      text: (c.innerText || c.textContent || "").trim().slice(0, 100),
+      colspan: c.getAttribute?.("colspan") || null,
+      rowspan: c.getAttribute?.("rowspan") || null,
+      scope: c.getAttribute?.("scope") || null,
+      hidden: c.hidden || false,
+      display: window.getComputedStyle(c).display
     });
-  } else if (role === "row") {
-    const cells = rowEl.querySelectorAll('[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]');
-    cells.forEach((c, i) => {
-      info.cells.push({
-        index: i,
-        role: c.getAttribute?.("role") || "",
-        text: (c.innerText || c.textContent || "").trim().slice(0, 100),
-        colspan: c.getAttribute?.("colspan") || null,
-        rowspan: c.getAttribute?.("rowspan") || null,
-        hidden: c.hidden || false,
-        display: window.getComputedStyle(c).display
-      });
-    });
-  }
+  });
   return info;
 }
 
 export {
+  getRowCells,
+  getCellCount,
+  isHeaderRow,
+  hasHeaderCells,
   highlightRow,
   addRowElToContext,
   handleRowCheckboxChange,

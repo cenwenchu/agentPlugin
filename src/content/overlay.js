@@ -5,7 +5,6 @@ import { openOptionsPage, streamChat, stopGeneration, initCtxCounterFromBackgrou
 import { addContextSnippet, removeContext, clearAll, buildContextBlock, getContextTotalChars, confirmContextOverflow, extractTableHeadersFromContexts, buildHeaderGuidePrompt, extractPageText } from './context.js';
 import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab } from './table.js';
 import { showToast } from './toast.js';
-import { getSelectionText } from './selection.js';
 
 const OVERLAY_CSS = `
     :host { all: initial; }
@@ -29,7 +28,7 @@ const OVERLAY_CSS = `
     .body.max .sectionBody { max-height: none; }
     .body.max .contextSec { flex: 0 0 340px; width: 340px; }
     .body.max .chatSec { flex: 1; }
-    .tableGroupLabel { font-size: 11px; font-weight: 650; color: #374151; padding: 4px 0 2px 0; margin-top: 4px; }
+    .tableGroupLabel { font-size: 11px; font-weight: 650; color: #dc2626; padding: 4px 0 2px 0; margin-top: 4px; }
     .tableGroupLabel:first-child { margin-top: 0; }
     .contextItem { position: relative; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; padding: 6px 6px; margin-bottom: 6px; background: #fff; }
     .contextMeta { font-size: 11px; color: #6b7280; margin-bottom: 4px; padding-right: 28px; }
@@ -62,7 +61,7 @@ const OVERLAY_CSS = `
     textarea:focus { border-color: rgba(59,130,246,0.7); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
     .composerActions { width: 92px; display: flex; flex-direction: column; gap: 8px; }
     .composerActions .btn { width: 100%; }
-    .backdrop { position: fixed; inset: 0; background: transparent; pointer-events: auto; }
+    .backdrop { position: fixed; inset: 0; background: transparent; pointer-events: none; }
   `;
 
 function scheduleRender() {
@@ -113,7 +112,7 @@ function render() {
       refs.launcherBadge.textContent = label;
       const fabLeft = parseInt(refs.launcherFab.style.left, 10);
       const fabTop = parseInt(refs.launcherFab.style.top, 10);
-      const fabSize = 44;
+      const fabSize = refs.launcherFab.offsetWidth || 44;
       refs.launcherBadge.style.left = `${Math.max(8, fabLeft + fabSize)}px`;
       refs.launcherBadge.style.top = `${Math.max(8, fabTop)}px`;
       refs.launcherBadge.style.transform = "translate(-100%, -100%)";
@@ -141,12 +140,11 @@ function render() {
     class: `wrap ${STATE.open ? "" : "hidden"}${STATE.maximized ? " max" : ""}`
   });
   const backdrop = el("div", {
-    class: `backdrop ${STATE.open ? "" : "hidden"}`,
-    onClick: () => setOpen(false)
+    class: `backdrop ${STATE.open ? "" : "hidden"}`
   });
 
   const header = el("div", { class: "header" }, [
-    el("div", { class: "title" }, ["小聚"]),
+    el("div", { class: "title" }, ["采"]),
     el(
       "button",
       {
@@ -172,6 +170,15 @@ function render() {
         onClick: () => clearAll()
       },
       ["全部清空"]
+    ),
+    el(
+      "button",
+      {
+        class: "btn",
+        style: { width: "28px", padding: "0", fontSize: "16px", lineHeight: "26px" },
+        onClick: () => setOpen(false)
+      },
+      ["\u00d7"]
     )
   ]);
 
@@ -197,8 +204,12 @@ function render() {
         ["×"]
       ),
       el("div", { class: "contextMeta" }, [
-        `${c.kind === "table-header" ? "表结构说明" : c.kind === "table-row" ? "表格内容" : c.kind}${
-          c.lineInfo?.startLine && c.lineInfo?.endLine
+        el("span", {}, [
+          c.kind === "table-header"
+            ? el("span", { style: { color: "#dc2626", fontWeight: "600" } }, ["表结构说明"])
+            : c.kind === "table-row" ? "表格内容" : c.kind
+        ]),
+        `${c.lineInfo?.startLine && c.lineInfo?.endLine
             ? ` · L${c.lineInfo.startLine}-${c.lineInfo.endLine}`
             : ""
         } · ${new Date(c.createdAt).toLocaleString()}`
@@ -393,8 +404,11 @@ async function sendText(rawText, opts = {}) {
   STATE.pending = true;
   render();
 
+  // hoist to be accessible in catch block (some JS environments scope try/catch separately)
+  let requestMessages = [];
+
   try {
-    const requestMessages = [];
+    requestMessages = [];
 
     if (opts.headersOnly) {
       requestMessages.push({ role: "user", content: text });
@@ -526,11 +540,15 @@ async function onSend() {
       const firstRow = g.rows[0];
       return firstRow ? compactOneLine(firstRow.text).slice(0, 200) : "";
     }).filter(Boolean);
-    if (headers.length) {
-      const prompt = buildHeaderGuidePrompt(headers, sampleRowsText);
+    const headerlessSampleRows = STATE.tableGroups
+      .filter(g => !g.header && g.rows.length > 0)
+      .map(g => g.rows.slice(0, 2).map(r => compactOneLine(r.text).slice(0, 200)).join("\n"));
+    const hasData = STATE.tableGroups.length > 0;
+    if (hasData) {
+      const prompt = buildHeaderGuidePrompt(headers, sampleRowsText, headerlessSampleRows);
       await sendText(prompt, { headersOnly: true });
     } else {
-      showToast("请先选择表格中的表头行加入上下文");
+      showToast("请先选择列表数据加入上下文");
     }
     return;
   } else {
@@ -607,10 +625,10 @@ function ensureLauncherFab() {
 
   const size = 44;
   const padding = 16;
-  const defaultLeft = () => Math.max(padding, window.innerWidth - padding - size);
+  const defaultLeft = () => Math.max(padding, window.innerWidth - padding - size * 2);
   const defaultTop = () => Math.max(padding, window.innerHeight - 120 - size);
-  const clampLeft = (x) => clamp(x, padding, window.innerWidth - size - padding);
-  const clampTop = (y) => clamp(y, padding, window.innerHeight - size - padding);
+  const clampLeft = (x) => clamp(x, padding, window.innerWidth - size * 2 - padding);
+  const clampTop = (y) => clamp(y, padding, window.innerHeight - size * 1.5 - padding);
 
   refs.launcherFab = el("div", {
     id: "web2ai_launcher_fab",
@@ -618,23 +636,28 @@ function ensureLauncherFab() {
       position: "fixed",
       left: `${defaultLeft()}px`,
       top: `${defaultTop()}px`,
-      width: `${size}px`,
-      height: `${size}px`,
-      borderRadius: "999px",
-      background: "rgba(255,255,255,0.98)",
-      border: "1px solid rgba(0,0,0,0.16)",
+      width: "auto",
+      height: "auto",
+      borderRadius: "24px",
+      background: "rgba(59,130,246,0.95)",
+      border: "1px solid rgba(59,130,246,0.6)",
       boxShadow: "0 12px 32px rgba(0,0,0,0.22)",
       zIndex: Z_INDEX,
       display: "flex",
+      flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
       cursor: "pointer",
-      touchAction: "none"
+      touchAction: "none",
+      padding: "8px 10px 6px 10px",
+      gap: "2px",
+      fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     }
   });
 
   refs.launcherFab.innerHTML =
-    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 10.5V9.2C7.5 6.77 9.47 4.8 11.9 4.8H12.1C14.53 4.8 16.5 6.77 16.5 9.2V10.5" stroke="#111827" stroke-width="1.6" stroke-linecap="round"/><path d="M6.8 10.5H17.2C18.42 10.5 19.4 11.48 19.4 12.7V15.9C19.4 18.33 17.43 20.3 15 20.3H9C6.57 20.3 4.6 18.33 4.6 15.9V12.7C4.6 11.48 5.58 10.5 6.8 10.5Z" stroke="#111827" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.4 14.1H9.41" stroke="#111827" stroke-width="2.2" stroke-linecap="round"/><path d="M14.6 14.1H14.61" stroke="#111827" stroke-width="2.2" stroke-linecap="round"/><path d="M9.2 17.1C10.2 17.8 11.1 18.1 12 18.1C12.9 18.1 13.8 17.8 14.8 17.1" stroke="#111827" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 10.5V9.2C7.5 6.77 9.47 4.8 11.9 4.8H12.1C14.53 4.8 16.5 6.77 16.5 9.2V10.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><path d="M6.8 10.5H17.2C18.42 10.5 19.4 11.48 19.4 12.7V15.9C19.4 18.33 17.43 20.3 15 20.3H9C6.57 20.3 4.6 18.33 4.6 15.9V12.7C4.6 11.48 5.58 10.5 6.8 10.5Z" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/><path d="M9.4 14.1H9.41" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/><path d="M14.6 14.1H14.61" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/><path d="M9.2 17.1C10.2 17.8 11.1 18.1 12 18.1C12.9 18.1 13.8 17.8 14.8 17.1" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg>' +
+    '<span style="color:#fff;font-size:10px;font-weight:700;line-height:1;white-space:nowrap;">采（问AI）</span>';
 
   let suppressClickUntil = 0;
   let drag = null;
@@ -647,7 +670,7 @@ function ensureLauncherFab() {
     refs.launcherFab.style.left = `${left}px`;
     refs.launcherFab.style.top = `${top}px`;
     if (refs.launcherBadge && refs.launcherBadge.style.display !== "none") {
-       const fabSize = 44;
+       const fabSize = refs.launcherFab.offsetWidth || 44;
        refs.launcherBadge.style.left = `${Math.max(8, left + fabSize)}px`;
        refs.launcherBadge.style.top = `${Math.max(8, top)}px`;
      }
@@ -712,16 +735,6 @@ function ensureLauncherFab() {
 
   refs.launcherFab.addEventListener("click", (e) => {
     if (Date.now() < suppressClickUntil) return;
-    const text = getSelectionText();
-    if (text) {
-      addContextSnippet({
-        kind: "selection",
-        text,
-        url: location.href,
-        title: document.title
-      });
-      return;
-    }
     setOpen(!STATE.open);
   });
   document.documentElement.appendChild(refs.launcherFab);
@@ -736,10 +749,10 @@ function ensureLauncherFab() {
       top: `${defaultTop()}px`,
       padding: "7px 14px",
       borderRadius: "999px",
-      background: "rgba(17,24,39,0.92)",
+      background: "rgba(59,130,246,0.95)",
       color: "#fff",
       fontSize: "12px",
-      fontWeight: "600",
+      fontWeight: "700",
       fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       whiteSpace: "nowrap",
       pointerEvents: "none",

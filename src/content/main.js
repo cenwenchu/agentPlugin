@@ -1,10 +1,15 @@
 import { DEBUG, IS_TOP_FRAME, STATE, refs } from './state.js';
-import { initSelectionListeners } from './selection.js';
 import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar } from './table.js';
 import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, removeContextByRef, extractPageText } from './context.js';
+
+// Guard: bail out if extension context was invalidated (extension reloaded/removed)
+try {
+  if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id || !chrome.runtime.onMessage) {
+    throw new Error('Extension context invalidated');
+  }
 
 // Set up chrome.runtime.onMessage listener
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -17,6 +22,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "ADD_CONTEXT_SNIPPET") {
     DEBUG && console.log(`[web2ai] received ADD_CONTEXT_SNIPPET kind=${message.snippet?.kind} ref=${message.snippet?.ref} IS_TOP_FRAME=${IS_TOP_FRAME}`);
     addContextSnippet(message.snippet);
+    if (!STATE.open) { STATE.open = true; render(); }
     sendResponse({ ok: true });
     return;
   }
@@ -123,7 +129,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 // Initialize
-initSelectionListeners();
 initTableListeners();
 initHighlightStyle();
 initOverlay();
+
+} catch (e) {
+  // Extension context invalidated — silently skip initialization
+}

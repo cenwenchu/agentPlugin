@@ -233,7 +233,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
     if (message?.type === "OPEN_OPTIONS") {
-      chrome.runtime.openOptionsPage();
+      if (chrome?.runtime?.openOptionsPage) chrome.runtime.openOptionsPage();
       sendResponse({ ok: true });
       return;
     }

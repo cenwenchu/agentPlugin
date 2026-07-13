@@ -5,10 +5,12 @@ function showToast(message, duration = 1500) {
   DEBUG && console.log(`[web2ai] showToast called: "${String(message ?? "").slice(0, 60)}" IS_TOP_FRAME=${IS_TOP_FRAME}`);
   // 如果在 iframe 中，转发到 top frame 显示
   if (!IS_TOP_FRAME) {
-    chrome.runtime.sendMessage({
-      type: "BROADCAST_TO_TAB",
-      payload: { message: { type: "TOAST", text: String(message ?? "") } }
-    }).catch(() => void 0);
+    try {
+      chrome.runtime.sendMessage({
+        type: "BROADCAST_TO_TAB",
+        payload: { message: { type: "TOAST", text: String(message ?? "") } }
+      }).catch(() => void 0);
+    } catch {}
     return;
   }
   refs.toastQueue.push(String(message ?? ""));

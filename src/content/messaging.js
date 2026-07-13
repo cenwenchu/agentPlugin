@@ -158,7 +158,11 @@ function stopGeneration() {
 }
 
 function sendToBackground(message) {
-  return chrome.runtime.sendMessage(message).catch(() => void 0);
+  try {
+    return chrome.runtime.sendMessage(message).catch(() => void 0);
+  } catch {
+    return Promise.resolve();
+  }
 }
 
 export {

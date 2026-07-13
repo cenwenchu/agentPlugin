@@ -2,9 +2,17 @@ import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, CONTEXT_CHAR_LIMIT, CONTEXT_
 import { el, getCssSelector, isVisibleElement, getElementLabel } from './dom.js';
 import { storeContextToBackground, removeContextInBackground, clearContextsInBackground } from './messaging.js';
 import { showToast } from './toast.js';
-import { getSelectionLineInfo, getSelectionAnchorElement } from './selection.js';
-import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar } from './table.js';
+import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, getRowCells, hasHeaderCells } from './table.js';
 import { render, clearDraftInput } from './overlay.js';
+
+// 安全版 chrome.runtime.sendMessage — 扩展上下文失效时静默忽略
+function safeSend(msg) {
+  try {
+    return chrome.runtime.sendMessage(msg).catch(() => void 0);
+  } catch {
+    return Promise.resolve();
+  }
+}
 
 function addContextSnippet(snippet) {
   const t0 = performance.now();
@@ -18,13 +26,6 @@ function addContextSnippet(snippet) {
   let anchorSelector = snippet.anchorSelector || "";
   let quote = snippet.quote || "";
   let lineInfo = snippet.lineInfo || null;
-  if (kind === "selection" && (!anchorSelector || !quote)) {
-    lineInfo = lineInfo || getSelectionLineInfo();
-    const anchorEl = getSelectionAnchorElement();
-    anchorSelector = anchorSelector || getCssSelector(anchorEl);
-    quote = quote || normalizeText(text).slice(0, 80);
-    if (lineInfo?.anchorSelector) anchorSelector = lineInfo.anchorSelector;
-  }
   if ((kind === "table-row" || kind === "table-header") && (!anchorSelector || !quote)) {
     const rowEl = snippet.rowEl || snippet.tr;
     anchorSelector = anchorSelector || getCssSelector(rowEl);
@@ -47,12 +48,10 @@ function addContextSnippet(snippet) {
   };
   storeContextToBackground(item);
   if (!IS_TOP_FRAME) {
-    chrome.runtime
-      .sendMessage({
-        type: "FORWARD_TO_TOP",
-        payload: { message: { type: "ADD_CONTEXT_SNIPPET", snippet: item } }
-      })
-      .catch(() => void 0);
+    safeSend({
+      type: "FORWARD_TO_TOP",
+      payload: { message: { type: "ADD_CONTEXT_SNIPPET", snippet: item } }
+    });
     return;
   }
 
@@ -60,48 +59,36 @@ function addContextSnippet(snippet) {
   if (item.kind === "table-header") {
     STATE.tableGroups.unshift({ id: `TG${Date.now()}`, header: item, rows: [] });
   } else if (item.kind === "table-row") {
-    const hasHeader = STATE.tableGroups.some(g => g.header !== null);
-    if (!hasHeader) {
-      DEBUG && console.log(`[web2ai] addContextSnippet REJECT table-row: no header group`);
-      showToast("请先选择表格的表头行加入上下文");
-      STATE.contexts.shift();
-      if (item.ref) {
-        chrome.runtime.sendMessage({
-          type: "BROADCAST_TO_TAB",
-          payload: { message: { type: "UNSELECT_ROW_BY_REF", ref: item.ref } }
-        }).catch(() => void 0);
-      }
-      return;
-    }
     const headerGroup = STATE.tableGroups.find(g => g.header !== null);
+    let colMismatch = false;
     if (headerGroup && headerGroup.header) {
       const headerCols = headerGroup.header.text.split(COL_SEPARATOR).length;
       const rowCols = item.cellCount > 0
         ? item.cellCount
         : item.text.split(COL_SEPARATOR).length;
       DEBUG && console.log(`[web2ai] addContextSnippet colCheck: rowCols=${rowCols} headerCols=${headerCols} cellCount=${item.cellCount}`);
-      DEBUG && console.log(`[web2ai] addContextSnippet HEADER fields (${headerCols}):`, headerGroup.header.text.split(COL_SEPARATOR).map((f, i) => `[${i}] "${f}"`).join(", "));
-      DEBUG && console.log(`[web2ai] addContextSnippet ROW fields (${rowCols}):`, item.text.split(COL_SEPARATOR).map((f, i) => `[${i}] "${f}"`).join(", "));
       if (rowCols !== headerCols) {
-        DEBUG && console.log(`[web2ai] addContextSnippet REJECT table-row: column count mismatch row=${rowCols} header=${headerCols}`);
-        showToast(`当前行有 ${rowCols} 列，但表头有 ${headerCols} 列，列数不一致。如果是新表格，请先选择它的表头行`);
-        STATE.contexts.shift();
-        if (item.ref) {
-          chrome.runtime.sendMessage({
-            type: "BROADCAST_TO_TAB",
-            payload: { message: { type: "UNSELECT_ROW_BY_REF", ref: item.ref } }
-          }).catch(() => void 0);
-        }
-        return;
+        colMismatch = true;
+        console.log(`[web2ai] addContextSnippet WARNING: column count mismatch row=${rowCols} header=${headerCols}, adding to headerless group`);
       }
     }
-    const lastGroup = STATE.tableGroups[0];
-    if (lastGroup && !lastGroup.header) {
-      lastGroup.rows.unshift(item);
-    } else if (lastGroup) {
-      lastGroup.rows.unshift(item);
+
+    if (!headerGroup || colMismatch) {
+      // 没有表头或列数不匹配：放入无表头组
+      const lastGroup = STATE.tableGroups[0];
+      if (lastGroup && !lastGroup.header) {
+        lastGroup.rows.unshift(item);
+      } else {
+        STATE.tableGroups.unshift({ id: `TG${Date.now()}`, header: null, rows: [item] });
+      }
     } else {
-      STATE.tableGroups.unshift({ id: `TG${Date.now()}`, header: null, rows: [item] });
+      // 正常匹配：放入当前表头组
+      const lastGroup = STATE.tableGroups[0];
+      if (lastGroup) {
+        lastGroup.rows.unshift(item);
+      } else {
+        STATE.tableGroups.unshift({ id: `TG${Date.now()}`, header: null, rows: [item] });
+      }
     }
   }
   const elapsed = performance.now() - t0;
@@ -127,12 +114,10 @@ function removeContextByRef(ref, opts = {}) {
   updateBatchBar();
   if (!IS_TOP_FRAME) {
     removeContextInBackground(ref);
-    chrome.runtime
-      .sendMessage({
-        type: "FORWARD_TO_TOP",
-        payload: { message: { type: "REMOVE_CONTEXT_BY_REF", ref } }
-      })
-      .catch(() => void 0);
+    safeSend({
+      type: "FORWARD_TO_TOP",
+      payload: { message: { type: "REMOVE_CONTEXT_BY_REF", ref } }
+    });
     return;
   }
   const ctx = STATE.contexts.find((c) => c.ref === ref);
@@ -149,10 +134,10 @@ function removeContext(id, opts = {}) {
     if (ctx?.ref) {
       console.log(`[web2ai] removeContext ref=${ctx.ref} refToCheckbox.has=${refs.refToCheckbox.has(ctx.ref)} refToRowEl.has=${refs.refToRowEl.has(ctx.ref)}`);
       removeContextInBackground(ctx.ref);
-      chrome.runtime.sendMessage({
+      safeSend({
         type: "BROADCAST_TO_TAB",
         payload: { message: { type: "UNSELECT_ROW_BY_REF", ref: ctx.ref } }
-      }).catch(() => void 0);
+      });
       syncRowCheckboxState(false);
       let rowEl = refs.refToRowEl.get(ctx.ref);
       if (!rowEl && ctx.anchorSelector) {
@@ -183,10 +168,10 @@ function removeContext(id, opts = {}) {
             if (row.ref) removeContextInBackground(row.ref);
           }
           // 广播：让各 frame 通过各自的 refToRowEl 找行并清理
-          chrome.runtime.sendMessage({
+          safeSend({
             type: "BROADCAST_TO_TAB",
             payload: { message: { type: "UNSELECT_ROWS_BY_REFS", refs: rowRefs } }
-          }).catch(() => void 0);
+          });
         }
         refs.batchAnchorRow = null;
         refs.batchContainer = null;
@@ -211,7 +196,25 @@ function removeFromTableGroups(ref) {
     const idx = g.rows.findIndex(r => r.ref === ref);
     if (idx !== -1) {
       g.rows.splice(idx, 1);
-      if (g.rows.length === 0 && !g.header) {
+      if (g.rows.length === 0) {
+        // 所有行被移除后，也清理表头的 context 和页面上的 check
+        if (g.header?.ref) {
+          STATE.contexts = STATE.contexts.filter(c => c.ref !== g.header.ref);
+          removeContextInBackground(g.header.ref);
+          const headerRowEl = refs.refToRowEl.get(g.header.ref);
+          if (headerRowEl) {
+            removePinnedRowOverlay(headerRowEl);
+            highlightRow(headerRowEl, false);
+            refs.selectedRowRef.delete(headerRowEl);
+          }
+          refs.refToRowEl.delete(g.header.ref);
+          refs.refToCheckbox.delete(g.header.ref);
+          // 广播到所有 frame 清理表头的视觉状态（处理 iframe 场景，表头 DOM 不在 top frame）
+          safeSend({
+            type: "BROADCAST_TO_TAB",
+            payload: { message: { type: "UNSELECT_ROW_BY_REF", ref: g.header.ref } }
+          });
+        }
         STATE.tableGroups.splice(gi, 1);
       }
       return;
@@ -235,9 +238,7 @@ function clearContext() {
   syncRowCheckboxState(false);
   if (refs.batchBar) refs.batchBar.style.display = "none";
   // 广播到其他 frames（iframe 等），由各 frame 自行清理 refToRowEl/refToCheckbox
-  chrome.runtime
-    .sendMessage({ type: "BROADCAST_TO_TAB", payload: { message: { type: "CLEAR_ROW_UI" } } })
-    .catch(() => void 0);
+  safeSend({ type: "BROADCAST_TO_TAB", payload: { message: { type: "CLEAR_ROW_UI" } } });
   render();
 }
 
@@ -269,6 +270,7 @@ function buildContextBlock(contexts, compact = false) {
       if (!tableItems.length) continue;
 
       const tableLines = [];
+      const isHeaderless = !g.header;
       for (const c of tableItems) {
         if (compact) {
           tableLines.push(c.text);
@@ -279,12 +281,19 @@ function buildContextBlock(contexts, compact = false) {
               ? ` | L${c.lineInfo.startLine}-${c.lineInfo.endLine}`
               : "";
           const header = `${ref} ${c.kind.toUpperCase()}${lineInfo} | ${c.title || "(no title)"} | ${c.url || ""}`;
-          tableLines.push(`${header}\n${c.text}`);
+          if (isHeaderless && c.kind === "table-row") {
+            // 无表头行：为每列添加序号，方便 LLM 理解
+            const cols = c.text.split(COL_SEPARATOR);
+            const indexedCols = cols.map((col, i) => `  [列${i + 1}] ${col}`).join("\n");
+            tableLines.push(`${header}\n${indexedCols}`);
+          } else {
+            tableLines.push(`${header}\n${c.text}`);
+          }
         }
       }
       const tableLabel = g.header
         ? `[TABLE ${gi + 1} - Columns: ${g.header.text}]`
-        : `[TABLE ${gi + 1} - (no column headers)]`;
+        : `[TABLE ${gi + 1} - (无列名，每行按 ||| 分隔列，列序号已标注)]`;
       tableChunks.push(`${tableLabel}\n${tableLines.join("\n\n")}`);
     }
     chunks = tableChunks.join("\n\n---\n\n");
@@ -412,9 +421,19 @@ function extractTableHeadersFromContexts(contexts) {
   return cols.length ? [cols] : [];
 }
 
-function buildHeaderGuidePrompt(headers, sampleRowsText) {
+function getTableGroupCount() {
+  return STATE.tableGroups.length || 0;
+}
+
+function getHeaderlessGroupCount() {
+  return STATE.tableGroups.filter(g => !g.header).length;
+}
+
+function buildHeaderGuidePrompt(headers, sampleRowsText, headerlessSampleRows) {
+  const totalGroups = getTableGroupCount();
+  const headerlessCount = getHeaderlessGroupCount();
   let tablesSection = "";
-  if (headers.length) {
+  if (headers.length > 0) {
     const parts = [];
     for (let ti = 0; ti < headers.length; ti++) {
       const cols = headers[ti];
@@ -427,25 +446,45 @@ function buildHeaderGuidePrompt(headers, sampleRowsText) {
     }
     tablesSection = "\n" + parts.join("\n\n");
   }
+  if (headerlessCount > 0) {
+    tablesSection += `\n（另有 ${headerlessCount} 组数据没有列名，请根据实际数据内容进行分析。数据按 "|||" 分隔，[列1] [列2] 等为系统自动添加的列序号）`;
+    if (headerlessSampleRows && headerlessSampleRows.length > 0) {
+      for (let i = 0; i < headerlessSampleRows.length; i++) {
+        tablesSection += `\n无列名数据 ${i + 1} 的前两行样例：${headerlessSampleRows[i]}`;
+      }
+    }
+  }
 
-  return `用户选中了 ${headers.length} 个表格的数据，但还没有想好具体要问什么。以下是用户选中的数据：${tablesSection}
+  const totalDesc = totalGroups > 0 ? `${totalGroups} 组` : "数据";
+  const hasNamedHeaders = headers.length > 0;
 
-请根据以上多个表格的列和数据样例，给用户提供 3-5 个可以直接点击使用的分析方向建议，每个建议用一句话描述，格式如：
+  const analysisHint = hasNamedHeaders
+    ? "请根据以上数据的列名和数据样例"
+    : "请根据以上数据的实际内容";
+
+  return `用户选中了 ${totalDesc}数据，但还没有想好具体要问什么。以下是用户选中的数据：${tablesSection}
+
+${analysisHint}，给用户提供 3-5 个可以直接点击使用的分析方向建议，每个建议用一句话描述，格式如：
 - 📊 建议标题：具体分析内容说明
 
 要求：
 1. 每个建议必须具体、可执行，用户复制粘贴就能直接提问
-2. 覆盖不同的分析角度（如概览、对比、异常、趋势等），并且要贴合实际数据的含义（从列名和数据样例推断）
-3. 如果涉及多个表格，可以给出跨表格联合分析的建议
+2. 覆盖不同的分析角度（如概览、对比、异常、趋势等），并且要贴合实际数据的含义
+3. 如果涉及多组数据，可以给出跨组联合分析的建议
 4. 语气轻松友好，降低用户的使用门槛
 5. 不要反问用户问题，而是直接给出可用的分析方向
 
 在所有建议的最后，加一句引导：当然，你也可以直接输入你想问的问题，我来帮你分析。`;
 }
 
+/**
+ * 从容器中提取表头列名（通用实现）。
+ * 支持：thead th、role=columnheader、scope=col、div-based 表格等
+ */
 function extractTableHeaders(container) {
+  // 1. 直接检查标准表头
   const directHeaders = container.querySelectorAll(
-    'thead th, thead td, [role="columnheader"], [role="rowheader"]'
+    'thead th, thead td, [role="columnheader"], [role="rowheader"], [scope="col"]'
   );
   if (directHeaders.length) {
     const cols = Array.from(directHeaders)
@@ -454,22 +493,20 @@ function extractTableHeaders(container) {
     if (cols.length) return cols;
   }
 
+  // 2. 向上追溯找兄弟中的表头
   let ancestor = container.parentElement;
   let level = 0;
   while (ancestor) {
+    // 在祖先的子元素中找包含 th/columnheader 的兄弟
     if (level % 2 === 0) {
-      const xpath = `./*[.//th]`;
-      const siblings = document.evaluate(
-        xpath,
-        ancestor,
-        null,
-        XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
-        null
+      const siblings = Array.from(ancestor.children).filter(
+        c => c !== container && !c.contains(container)
       );
-      for (let i = 0; i < siblings.snapshotLength; i++) {
-        const sib = siblings.snapshotItem(i);
-        if (sib === container || sib.contains(container)) continue;
-        const cells = sib.querySelectorAll('th, [role="columnheader"], [role="rowheader"]');
+      for (const sib of siblings) {
+        if (!isVisibleElement(sib)) continue;
+        const cells = sib.querySelectorAll(
+          'th, [role="columnheader"], [role="rowheader"], [scope="col"]'
+        );
         if (cells.length) {
           const cols = Array.from(cells)
             .map((cell) => normalizeText(cell.innerText || cell.textContent || ""))
@@ -486,7 +523,8 @@ function extractTableHeaders(container) {
 }
 
 function extractTableRowText(rowEl) {
-  const tag = rowEl?.tagName?.toLowerCase();
+  if (!rowEl) return "";
+
   const stripInjected = (cell) => {
     const injectedEls = cell.querySelectorAll("[id^='web2ai_']");
     for (const el of injectedEls) el.style.display = "none";
@@ -494,22 +532,16 @@ function extractTableRowText(rowEl) {
     for (const el of injectedEls) el.style.display = "";
     return t || "-";  // 空单元格用 "-" 占位，避免 ||| 连续导致 split 后列数丢失
   };
-  if (tag === "tr") {
-    const cells = Array.from(rowEl.querySelectorAll("th,td"));
+
+  // 使用通用 getRowCells，拿到单元格列表
+  const cells = getRowCells(rowEl);
+  if (cells.length) {
     const parts = cells.map(stripInjected);
     return normalizeText(parts.join(COL_SEPARATOR));
   }
 
-  const role = rowEl?.getAttribute?.("role");
-  if (role === "row") {
-    const cells = Array.from(
-      rowEl.querySelectorAll('[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]')
-    );
-    const parts = cells.map(stripInjected);
-    if (parts.length) return normalizeText(parts.join(COL_SEPARATOR));
-  }
-
-  return normalizeText(rowEl?.innerText || rowEl?.textContent || "");
+  // 兜底
+  return normalizeText(rowEl.innerText || rowEl.textContent || "");
 }
 
 function extractPageText() {
@@ -588,11 +620,16 @@ function buildPageUsageSnapshot() {
     lines.push("");
     lines.push("TABLES:");
     tables.forEach((table, i) => {
-      const headerCells = Array.from(table.querySelectorAll("thead th"))
+      const headerCells = Array.from(table.querySelectorAll(
+        "thead th, thead td, [scope='col'], [role='columnheader']"
+      ))
         .map((th) => compactOneLine(th.innerText || th.textContent || ""))
         .filter(Boolean);
-      const headerLine = headerCells.length ? headerCells.join(" | ") : "(no thead headers)";
-      const rows = Array.from(table.querySelectorAll("tbody tr")).slice(0, 3);
+      const headerLine = headerCells.length ? headerCells.join(" | ") : "(no headers found)";
+      const rows = Array.from(table.querySelectorAll("tbody tr, tr")).filter(tr => {
+        const cells = getRowCells(tr);
+        return cells.length > 0 && !hasHeaderCells(tr);
+      }).slice(0, 3);
       const samples = rows
         .map((tr) => compactOneLine(extractTableRowText(tr)))
         .filter(Boolean)

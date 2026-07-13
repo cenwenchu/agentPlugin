@@ -17,7 +17,7 @@ const STATE = {
 const COL_SEPARATOR = " ||| ";
 const CONTEXT_CHAR_LIMIT = 50000;
 const CONTEXT_WARN_LIMIT = 100000;
-const Z_INDEX = "2147483647";
+const Z_INDEX = "1000";
 
 function uid() {
   return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
