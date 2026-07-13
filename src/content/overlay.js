@@ -657,7 +657,11 @@ function ensureLauncherFab() {
 
   refs.launcherFab.innerHTML =
     '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 10.5V9.2C7.5 6.77 9.47 4.8 11.9 4.8H12.1C14.53 4.8 16.5 6.77 16.5 9.2V10.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><path d="M6.8 10.5H17.2C18.42 10.5 19.4 11.48 19.4 12.7V15.9C19.4 18.33 17.43 20.3 15 20.3H9C6.57 20.3 4.6 18.33 4.6 15.9V12.7C4.6 11.48 5.58 10.5 6.8 10.5Z" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/><path d="M9.4 14.1H9.41" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/><path d="M14.6 14.1H14.61" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/><path d="M9.2 17.1C10.2 17.8 11.1 18.1 12 18.1C12.9 18.1 13.8 17.8 14.8 17.1" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg>' +
+<<<<<<< HEAD
     '<span style="color:#fff;font-size:10px;font-weight:700;line-height:1;white-space:nowrap;">采（问AI）</span>';
+=======
+    '<span style="color:#fff;font-size:10px;font-weight:700;line-height:1;white-space:nowrap;">小聚（问AI）</span>';
+>>>>>>> ac05560d25835653a988208238ea8b27ec31a8ba
 
   let suppressClickUntil = 0;
   let drag = null;
