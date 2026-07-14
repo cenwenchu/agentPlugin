@@ -18,11 +18,10 @@ const IS_TOP_FRAME = window.top === window;
 /**
  * 全局应用状态对象。
  * @property {boolean} open - 面板是否打开
- * @property {Array} contexts - 当前上下文列表
- * @property {Array} tableGroups - 表格分组 [{id, header, rows}]
- * @property {Array} messages - 对话消息列表
+ * @property {Array} contexts - 当前标签页的扁平上下文列表；enabled=false 时不发送
+ * @property {Array} tableGroups - 从 contexts 派生的表格视图 [{id, tableId, header, rows}]
+ * @property {Array} messages - 当前页面内存中的对话；刷新后清空
  * @property {boolean} pending - 是否正在等待 AI 响应
- * @property {number} nextCtxNum - 下一个上下文编号
  * @property {string} draftText - 输入框草稿文本
  * @property {Object|null} lastInputCursor - 输入框光标位置 {start, end}
  * @property {boolean} suppressAutoSuggest - 是否禁用自动建议
@@ -33,8 +32,9 @@ const STATE = {
   contexts: [],
   tableGroups: [],
   messages: [],
+  /** 首次无输入时生成的欢迎语和快捷问题，不进入模型对话历史 */
+  onboarding: null,
   pending: false,
-  nextCtxNum: 1,
   draftText: "",
   lastInputCursor: null,
   suppressAutoSuggest: false,
@@ -43,9 +43,9 @@ const STATE = {
 
 /** 表格列分隔符 */
 const COL_SEPARATOR = " ||| ";
-/** 上下文字符数软上限（超过时截断提交） */
+/** @deprecated 仅供旧版字符确认弹窗兼容；发送主路径使用模型 token 预算。 */
 const CONTEXT_CHAR_LIMIT = 50000;
-/** 上下文字符数警告阈值（超过时弹窗确认） */
+/** @deprecated 仅供旧版字符确认弹窗兼容；发送主路径使用模型 token 预算。 */
 const CONTEXT_WARN_LIMIT = 100000;
 /** 全局 z-index 基准值 */
 const Z_INDEX = "1000";
@@ -132,6 +132,8 @@ const refs = {
   pinnedRowOverlays: new Map(),
   /** 批量操作的锚点行 */
   batchAnchorRow: null,
+  /** 页面左下角批量操作栏 */
+  batchBar: null,
   /** 表格根元素 */
   batchTableRoot: null,
   /** 批量操作的容器（如抽屉、弹窗） */

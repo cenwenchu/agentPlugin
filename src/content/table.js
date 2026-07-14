@@ -18,6 +18,7 @@ import { el, getCssSelector, getOverlayBoundsForElement, findRowElementFromEvent
 import { addContextSnippet, removeContextByRef, extractTableRowText } from './context.js';
 import { showToast } from './toast.js';
 import { render } from './overlay.js';
+import { createContextRef, isContextRef } from './context-ref.js';
 
 // ========== UI 框架类名常量（避免硬编码） ==========
 
@@ -186,7 +187,8 @@ function addRowElToContext(rowEl, { silent } = {}) {
   
   // 诊断入口：确认函数被调用
   DEBUG && console.log(`[web2ai] addRowElToContext ENTRY: tagName=${rowEl.tagName} IS_TOP_FRAME=${IS_TOP_FRAME} silent=${!!silent}`);
-  const ref = `CTX${STATE.nextCtxNum++}`;
+  // 每个 frame 都能独立采集，随机 ref 避免 iframe 之间的递增编号冲突。
+  const ref = createContextRef();
   refs.selectedRowRef.set(rowEl, ref);
   refs.refToRowEl.set(ref, rowEl);
   try {
@@ -1128,7 +1130,7 @@ function clearAllRowsInSameGroup(opts = {}) {
 }
 
 function isAddedRef(ref) {
-  return typeof ref === "string" && /^CTX\d+$/.test(ref);
+  return isContextRef(ref);
 }
 
 function getAddedRowCountInGroup(anchorRowEl) {

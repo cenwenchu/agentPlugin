@@ -4,8 +4,8 @@
  * 核心职责：
  * 1. 右键菜单管理（添加选中/整页内容到 AI 上下文、打开浮层）
  * 2. AI API 请求代理（非流式 + 流式 SSE）
- * 3. 按 tab 维度管理上下文（chrome.storage.session）
- * 4. 长连接管理（流式 AI 对话的 Port 通信）
+ * 3. 长连接管理（流式 AI 对话的 Port 通信）
+ * 4. 设置分层：普通配置存 sync，API Key 存 local
  */
 
 import { DEFAULT_SETTINGS } from "./shared.js";
@@ -15,7 +15,7 @@ import { createSseDataParser } from "./sse.js";
 
 /**
  * 获取用户设置（合并默认值）。
- * @returns {Promise<{baseUrl:string, model:string, apiKey:string}>}
+ * @returns {Promise<{baseUrl:string, model:string, contextWindow:number, maxOutputTokens:number, apiKey:string}>}
  */
 async function getSettings() {
   const [syncData, localData] = await Promise.all([
@@ -23,7 +23,7 @@ async function getSettings() {
     chrome.storage.local.get(["apiKey"])
   ]);
   const synced = syncData.settings ?? {};
-  // Lazy migration for installations that previously synced the credential.
+  // 旧版本曾把密钥放入 sync；首次读取时迁移到 local 并清除同步副本。
   if (!localData.apiKey && synced.apiKey) {
     await chrome.storage.local.set({ apiKey: synced.apiKey });
     const { apiKey: _removed, ...safeSettings } = synced;
@@ -193,48 +193,6 @@ function sendToFrame(tabId, frameId, message) {
 /** @deprecated sendToTab 的别名，兼容旧调用 */
 const broadcastToTab = sendToTab;
 
-// ========== 上下文存储（按 tab） ==========
-
-/**
- * 生成上下文存储的 storage key。
- * @param {number} tabId
- * @returns {string}
- */
-function contextsKey(tabId) {
-  return `web2ai_contexts_${tabId}`;
-}
-
-/**
- * 获取指定 tab 的上下文列表。
- * @param {number} tabId
- * @returns {Promise<Array>}
- */
-async function getTabContexts(tabId) {
-  const key = contextsKey(tabId);
-  const data = await chrome.storage.session.get([key]);
-  const contexts = data?.[key];
-  return Array.isArray(contexts) ? contexts : [];
-}
-
-/**
- * 设置指定 tab 的上下文列表。
- * @param {number} tabId
- * @param {Array} contexts
- */
-async function setTabContexts(tabId, contexts) {
-  const key = contextsKey(tabId);
-  await chrome.storage.session.set({ [key]: contexts });
-}
-
-/**
- * 清除指定 tab 的上下文。
- * @param {number} tabId
- */
-async function clearTabContexts(tabId) {
-  const key = contextsKey(tabId);
-  await chrome.storage.session.remove([key]);
-}
-
 // ========== 安装 & 右键菜单 ==========
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -325,45 +283,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     const tabId = sender?.tab?.id;
-    // 存储上下文
-    if (message?.type === "STORE_CONTEXT") {
-      if (!tabId) throw new Error("Missing tabId");
-      const context = message.payload?.context;
-      if (!context?.ref) throw new Error("Missing context.ref");
-      const list = await getTabContexts(tabId);
-      const next = [context, ...list.filter((c) => c?.ref !== context.ref)].slice(0, 50);
-      await setTabContexts(tabId, next);
-      sendResponse({ ok: true, data: { count: next.length } });
-      return;
-    }
-
-    // 移除上下文
-    if (message?.type === "REMOVE_CONTEXT") {
-      if (!tabId) throw new Error("Missing tabId");
-      const ref = message.payload?.ref;
-      const list = await getTabContexts(tabId);
-      const next = list.filter((c) => c?.ref !== ref);
-      await setTabContexts(tabId, next);
-      sendResponse({ ok: true, data: { count: next.length } });
-      return;
-    }
-
-    // 清除所有上下文
-    if (message?.type === "CLEAR_CONTEXTS") {
-      if (!tabId) throw new Error("Missing tabId");
-      await clearTabContexts(tabId);
-      sendResponse({ ok: true });
-      return;
-    }
-
-    // 列出所有上下文
-    if (message?.type === "LIST_CONTEXTS") {
-      if (!tabId) throw new Error("Missing tabId");
-      const list = await getTabContexts(tabId);
-      sendResponse({ ok: true, data: { contexts: list } });
-      return;
-    }
-
     // 转发消息到 top frame
     if (message?.type === "FORWARD_TO_TOP") {
       if (!tabId) throw new Error("Missing tabId");
@@ -388,12 +307,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   })().catch((e) => sendResponse({ ok: false, error: String(e?.message ?? e) }));
 
   return true; // 保持 sendResponse 通道打开（异步响应）
-});
-
-// ========== Tab 生命周期 ==========
-
-chrome.tabs.onRemoved.addListener((tabId) => {
-  clearTabContexts(tabId).catch(() => void 0);
 });
 
 // ========== 流式对话长连接管理 ==========

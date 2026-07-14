@@ -12,12 +12,14 @@
  * content script → messaging.js (Port) → background.js (fetch SSE) → messaging.js → scheduleRender
  */
 
-import { DEBUG, IS_TOP_FRAME, STATE, Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
 import { el } from './dom.js';
 import { renderMarkdown } from './markdown.js';
-import { openOptionsPage, streamChat, stopGeneration, initCtxCounterFromBackground, hydrateContextsFromBackground, sendToBackground } from './messaging.js';
-import { addContextSnippet, removeContext, clearAll, buildContextBlock, extractTableHeadersFromContexts, buildHeaderGuidePrompt, extractPageText } from './context.js';
+import { openOptionsPage, streamChat, stopGeneration, sendToBackground } from './messaging.js';
+import { addContextSnippet, removeContext, clearAll, buildContextBlock, extractPageText } from './context.js';
 import { calculateContextBudget, estimateTokens, selectContextsWithinTokenBudget } from './token-budget.js';
+import { tableGroupToCsv, tableGroupToMarkdown } from './table-export.js';
+import { buildOnboardingPrompt, createFallbackOnboarding, parseOnboardingResponse } from './onboarding.js';
 import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab } from './table.js';
 import { showToast } from './toast.js';
 
@@ -71,6 +73,15 @@ const OVERLAY_CSS = `
     .bubble.assistant h3 { font-size: 13px; }
     .bubble.assistant h4 { font-size: 12px; }
     .bubble.assistant a { color: #2563eb; text-decoration: underline; }
+    .onboarding { border: 1px solid rgba(59,130,246,.2); background: #f8fbff; border-radius: 12px; padding: 12px; color: #111827; }
+    .onboardingWelcome { font-size: 14px; font-weight: 650; margin-bottom: 6px; }
+    .onboardingSummary { font-size: 12px; line-height: 1.55; color: #374151; }
+    .suggestions { display: grid; gap: 7px; margin-top: 10px; }
+    .suggestion { text-align: left; border: 1px solid rgba(59,130,246,.25); background: #fff; color: #1d4ed8; border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+    .suggestion:hover { background: #eff6ff; }
+    .suggestionLabel { display: block; font-size: 12px; font-weight: 650; }
+    .suggestionReason { display: block; margin-top: 2px; color: #6b7280; font-size: 10px; }
+    .onboardingHint { margin-top: 9px; color: #6b7280; font-size: 11px; }
     .composer { display: flex; gap: 10px; padding: 10px; border-top: 1px solid rgba(0,0,0,0.08); background: rgba(248,250,252,0.9); }
     textarea { flex: 1; resize: none; height: 92px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.14); padding: 8px 10px; font-size: 12px; outline: none; background: #fff; color: #111827; }
     textarea:focus { border-color: rgba(59,130,246,0.7); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
@@ -213,6 +224,16 @@ function render() {
         ? `${fullText.slice(0, tipLimit)}…（已省略 ${fullText.length - tipLimit} 字符）`
         : fullText;
     return el("div", { class: "contextItem" }, [
+      el("input", {
+        type: "checkbox",
+        checked: c.enabled !== false ? true : null,
+        title: c.enabled !== false ? "发送时包含此项" : "此项不会发送给 AI",
+        style: { position: "absolute", right: "30px", top: "8px" },
+        onChange: (event) => {
+          c.enabled = Boolean(event.target.checked);
+          render();
+        }
+      }),
       el(
         "button",
         { class: "ctxRemove", title: "移除", onClick: () => removeContext(c.id) },
@@ -245,7 +266,11 @@ function render() {
       const g = groups[gi];
       const rowCount = g.rows.length;
       const label = g.header ? `表格 ${gi + 1}（${rowCount} 条）` : `未命名表格（${rowCount} 条）`;
-      els.push(el("div", { class: "tableGroupLabel" }, [label]));
+      els.push(el("div", { class: "tableGroupLabel", style: { display: "flex", alignItems: "center", gap: "6px" } }, [
+        el("span", { style: { flex: "1" } }, [label]),
+        el("button", { class: "btn", style: { padding: "0 6px", height: "22px", fontSize: "10px" }, onClick: () => downloadTableGroup(g, "markdown", gi) }, ["MD"]),
+        el("button", { class: "btn", style: { padding: "0 6px", height: "22px", fontSize: "10px" }, onClick: () => downloadTableGroup(g, "csv", gi) }, ["CSV"])
+      ]));
       if (g.header) {
         els.push(renderContextItem(g.header));
       }
@@ -282,7 +307,9 @@ function render() {
             }
             return bubble;
           })
-        : [el("div", { style: { fontSize: "12px", color: "#6b7280" } }, ["输入问题开始对话。"])]
+        : STATE.onboarding
+          ? [renderOnboarding(STATE.onboarding)]
+          : [el("div", { style: { fontSize: "12px", color: "#6b7280" } }, ["输入问题开始对话；也可以直接点击“问一下”获取分析建议。"])]
     ),
     el("div", { class: "composer" }, [
       el("textarea", {
@@ -414,6 +441,7 @@ async function sendText(rawText, opts = {}) {
   const text = normalizeText(rawText);
   if (!text) return;
   if (STATE.pending) return;
+  STATE.onboarding = null;
 
   const pendingUserMessage = { role: "user", content: text, ts: Date.now() };
   STATE.messages.push(pendingUserMessage);
@@ -449,11 +477,12 @@ async function sendText(rawText, opts = {}) {
         maxOutputTokens: Math.max(256, Number(settings.maxOutputTokens) || 4096),
         messages: historyMessages
       });
-      const contextTokens = STATE.contexts.reduce((sum, context) => sum + estimateTokens(context.text) + 24, 0);
-      const selection = selectContextsWithinTokenBudget(STATE.contexts, budget.availableTokens);
+      const enabledContexts = STATE.contexts.filter((context) => context.enabled !== false);
+      const contextTokens = enabledContexts.reduce((sum, context) => sum + estimateTokens(context.text) + 24, 0);
+      const selection = selectContextsWithinTokenBudget(enabledContexts, budget.availableTokens);
       const contextsToUse = selection.contexts;
-      if (contextsToUse.length < STATE.contexts.length) {
-        showToast(`上下文超出模型预算，已保留表头和最近数据（${contextsToUse.length}/${STATE.contexts.length} 条）`);
+      if (contextsToUse.length < enabledContexts.length) {
+        showToast(`上下文超出模型预算，已保留表头和最近数据（${contextsToUse.length}/${enabledContexts.length} 条）`);
       }
       DEBUG && console.log(`[web2ai] token budget context=${contextTokens} available=${budget.availableTokens} selected=${contextsToUse.length}`);
       const contextBlock = buildContextBlock(contextsToUse, !isFirstTurn);
@@ -533,7 +562,8 @@ async function onSend() {
   ensureOverlay();
   const raw = STATE.draftText;
   const hasInput = !!normalizeText(raw);
-  const hasContext = STATE.contexts.length > 0;
+  const enabledContexts = STATE.contexts.filter((context) => context.enabled !== false);
+  const hasContext = enabledContexts.length > 0;
   const isFirstTurn = STATE.messages.length === 0;
 
   if (!isFirstTurn && !hasInput) {
@@ -551,24 +581,72 @@ async function onSend() {
       showToast("请先选择列表数据加入上下文");
       return;
     }
-    const headers = extractTableHeadersFromContexts(STATE.contexts);
-    const sampleRowsText = STATE.tableGroups.map(g => {
-      const firstRow = g.rows[0];
-      return firstRow ? compactOneLine(firstRow.text).slice(0, 200) : "";
-    }).filter(Boolean);
-    const headerlessSampleRows = STATE.tableGroups
-      .filter(g => !g.header && g.rows.length > 0)
-      .map(g => g.rows.slice(0, 2).map(r => compactOneLine(r.text).slice(0, 200)).join("\n"));
-    const hasData = STATE.tableGroups.length > 0;
+    const enabledGroups = STATE.tableGroups.map((group) => ({
+      ...group,
+      header: group.header?.enabled !== false ? group.header : null,
+      rows: group.rows.filter((row) => row.enabled !== false)
+    })).filter((group) => group.header || group.rows.length);
+    const hasData = enabledGroups.length > 0;
     if (hasData) {
-      const prompt = buildHeaderGuidePrompt(headers, sampleRowsText, headerlessSampleRows);
-      await sendText(prompt, { headersOnly: true });
+      await generateOnboarding(enabledGroups);
     } else {
       showToast("请先选择列表数据加入上下文");
     }
     return;
   } else {
     await sendText(raw);
+  }
+}
+
+function renderOnboarding(onboarding) {
+  return el("div", { class: "onboarding" }, [
+    el("div", { class: "onboardingWelcome" }, [onboarding.welcome]),
+    el("div", { class: "onboardingSummary" }, [onboarding.summary]),
+    el("div", { class: "suggestions" }, onboarding.suggestions.map((suggestion) =>
+      el("button", {
+        class: "suggestion",
+        title: suggestion.prompt,
+        onClick: () => {
+          STATE.draftText = suggestion.prompt;
+          STATE.lastInputCursor = { start: suggestion.prompt.length, end: suggestion.prompt.length };
+          applyDraftToInputIfPresent();
+          refs.overlayShadow?.getElementById("web2ai_input")?.focus();
+        }
+      }, [
+        el("span", { class: "suggestionLabel" }, [suggestion.label]),
+        el("span", { class: "suggestionReason" }, [suggestion.reason])
+      ])
+    )),
+    el("div", { class: "onboardingHint" }, [onboarding.freeInputHint])
+  ]);
+}
+
+async function generateOnboarding(groups) {
+  if (STATE.pending) return;
+  STATE.pending = true;
+  STATE.onboarding = null;
+  render();
+  try {
+    const pages = new Set(groups.flatMap((group) => group.rows.map((row) => row.pageIndex).filter(Boolean)));
+    const prompt = buildOnboardingPrompt(groups, { pageCount: Math.max(1, pages.size) });
+    const resp = await sendToBackground({
+      type: "AI_CHAT",
+      payload: {
+        messages: [
+          { role: "system", content: "You generate structured onboarding suggestions for a data analysis UI. Return valid JSON only." },
+          { role: "user", content: prompt }
+        ]
+      }
+    });
+    if (!resp?.ok) throw new Error(resp?.error || "Onboarding request failed");
+    STATE.onboarding = parseOnboardingResponse(resp.data?.content);
+  } catch (error) {
+    DEBUG && console.log(`[web2ai] onboarding fallback: ${String(error?.message ?? error)}`);
+    STATE.onboarding = createFallbackOnboarding(groups);
+    showToast("智能建议暂时不可用，已提供常用分析入口");
+  } finally {
+    STATE.pending = false;
+    render();
   }
 }
 
@@ -783,14 +861,31 @@ function ensureLauncherFab() {
 
 function initOverlay() {
   ensureTableRowFab();
-  initCtxCounterFromBackground();
 
   if (IS_TOP_FRAME) {
     ensureHotkeys();
     ensureOverlay();
     ensureLauncherFab();
-    hydrateContextsFromBackground();
   }
+}
+
+function downloadTableGroup(group, format, index) {
+  const enabledGroup = {
+    ...group,
+    header: group.header?.enabled !== false ? group.header : null,
+    rows: group.rows.filter((row) => row.enabled !== false)
+  };
+  const isCsv = format === "csv";
+  const content = isCsv
+    ? `\uFEFF${tableGroupToCsv(enabledGroup, COL_SEPARATOR)}`
+    : tableGroupToMarkdown(enabledGroup, COL_SEPARATOR);
+  const blob = new Blob([content], { type: isCsv ? "text/csv;charset=utf-8" : "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `web2ai-table-${index + 1}.${isCsv ? "csv" : "md"}`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export {

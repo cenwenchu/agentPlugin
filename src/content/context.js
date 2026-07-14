@@ -3,24 +3,25 @@
  *
  * 职责：
  * - 添加/删除/清空上下文片段
- * - 表格分组管理（表头 + 行数据按列自动匹配分组）
+ * - 表格分组管理（优先按 headerRef，随后按 tableId，最后兼容旧数据）
  * - 构建发送给 AI 的上下文块（含列名标注）
  * - 页面快照生成和页面分析功能
- * - 上下文溢出确认弹窗
+ * - 兼容旧版字符阈值确认弹窗（当前发送主路径使用 token-budget.js）
  *
  * 关键概念：
  * - `STATE.contexts`：所有上下文片段的扁平列表
- * - `STATE.tableGroups`：表格分组 `[{id, header, rows}]`，按表头和列匹配自动分组
- * - `ref`：每个上下文的唯一引用标记（格式 `CTX{num}`），用于跨 frame 同步
+ * - `STATE.tableGroups`：由扁平 contexts 派生的表格视图，不单独持久化
+ * - `ref`：每个上下文的唯一引用标记（当前格式 `CTX_<uid>`，兼容旧 `CTX<num>`）
+ * - `tableId`：表格 DOM 身份；`headerRef`：数据行与实际表头的显式关联
  */
 
 import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, Z_INDEX, uid, normalizeText, truncateText, compactOneLine, refs } from './state.js';
 import { el, getCssSelector, isVisibleElement, getElementLabel } from './dom.js';
-import { storeContextToBackground, removeContextInBackground, clearContextsInBackground } from './messaging.js';
 import { showToast } from './toast.js';
 import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, getRowCells, hasHeaderCells } from './table.js';
 import { render, clearDraftInput } from './overlay.js';
 import { buildContextBlockFromContexts, groupTableContexts } from './context-model.js';
+import { createContextRef } from './context-ref.js';
 
 // 安全版 chrome.runtime.sendMessage — 扩展上下文失效时静默忽略
 function safeSend(msg) {
@@ -48,7 +49,7 @@ function addContextSnippet(snippet) {
     anchorSelector = anchorSelector || getCssSelector(rowEl);
     quote = quote || normalizeText(text).slice(0, 80);
   }
-  const ref = snippet.ref || `CTX${STATE.nextCtxNum++}`;
+  const ref = snippet.ref || createContextRef();
   const item = {
     id: uid(),
     ref,
@@ -62,11 +63,11 @@ function addContextSnippet(snippet) {
     lineInfo,
     silent: snippet.silent,
     cellCount: snippet.cellCount || 0,
+    // tableId 区分同列结构的不同表格；固定表头/表体拆分时由 headerRef 跨 tableId 关联。
     tableId: snippet.tableId || "",
     headerRef: snippet.headerRef || "",
     pageIndex: Number.isFinite(snippet.pageIndex) ? snippet.pageIndex : null
   };
-  storeContextToBackground(item);
   if (!IS_TOP_FRAME) {
     safeSend({
       type: "FORWARD_TO_TOP",
@@ -76,6 +77,7 @@ function addContextSnippet(snippet) {
   }
 
   STATE.contexts.unshift(item);
+  STATE.onboarding = null;
   STATE.tableGroups = groupTableContexts(STATE.contexts);
   const elapsed = performance.now() - t0;
   if (elapsed > 5) DEBUG && console.log(`[web2ai] addContextSnippet done: ${elapsed.toFixed(1)}ms silent=${snippet.silent} kind=${snippet?.kind}`);
@@ -99,7 +101,6 @@ function removeContextByRef(ref, opts = {}) {
   syncRowCheckboxState(false);
   updateBatchBar();
   if (!IS_TOP_FRAME) {
-    removeContextInBackground(ref);
     safeSend({
       type: "FORWARD_TO_TOP",
       payload: { message: { type: "REMOVE_CONTEXT_BY_REF", ref } }
@@ -119,7 +120,6 @@ function removeContext(id, opts = {}) {
     DEBUG && console.log(`[web2ai] removeContext refs: selectedRowRef=${refs.selectedRowRef.size} refToRowEl=${refs.refToRowEl.size} refToCheckbox=${refs.refToCheckbox.size} batchAnchorRow=${!!refs.batchAnchorRow}`);
     if (ctx?.ref) {
       DEBUG && console.log(`[web2ai] removeContext ref=${ctx.ref} refToCheckbox.has=${refs.refToCheckbox.has(ctx.ref)} refToRowEl.has=${refs.refToRowEl.has(ctx.ref)}`);
-      removeContextInBackground(ctx.ref);
       safeSend({
         type: "BROADCAST_TO_TAB",
         payload: { message: { type: "UNSELECT_ROW_BY_REF", ref: ctx.ref } }
@@ -139,6 +139,7 @@ function removeContext(id, opts = {}) {
       refs.refToCheckbox.delete(ctx.ref);
     }
     STATE.contexts = STATE.contexts.filter((c) => c.id !== id);
+    STATE.onboarding = null;
     if (ctx?.ref) {
       // 如果是表头，广播所有下属行的引用给各 frame 自行清理
       if (ctx.kind === "table-header") {
@@ -151,7 +152,6 @@ function removeContext(id, opts = {}) {
           // 从 STATE.contexts 移除所有行
           for (const row of group.rows) {
             STATE.contexts = STATE.contexts.filter((c) => c.id !== row.id);
-            if (row.ref) removeContextInBackground(row.ref);
           }
           // 广播：让各 frame 通过各自的 refToRowEl 找行并清理
           safeSend({
@@ -186,7 +186,6 @@ function removeFromTableGroups(ref) {
         // 所有行被移除后，也清理表头的 context 和页面上的 check
         if (g.header?.ref) {
           STATE.contexts = STATE.contexts.filter(c => c.ref !== g.header.ref);
-          removeContextInBackground(g.header.ref);
           const headerRowEl = refs.refToRowEl.get(g.header.ref);
           if (headerRowEl) {
             removePinnedRowOverlay(headerRowEl);
@@ -212,7 +211,7 @@ function clearContext() {
   DEBUG && console.log(`[web2ai] clearContext refToCheckbox size=${refs.refToCheckbox.size} refToRowEl size=${refs.refToRowEl.size} pinnedRowOverlays size=${refs.pinnedRowOverlays.size}`);
   STATE.contexts = [];
   STATE.tableGroups = [];
-  clearContextsInBackground();
+  STATE.onboarding = null;
   // 直接清理当前 frame 的行选中 UI
   for (const rowEl of Array.from(refs.pinnedRowOverlays.keys())) {
     removePinnedRowOverlay(rowEl);
@@ -332,7 +331,7 @@ function confirmContextOverflow(contexts, limit) {
 }
 
 function extractTableHeadersFromContexts(contexts) {
-  const groups = STATE.tableGroups;
+  const groups = groupTableContexts(contexts);
   if (groups.length > 0) {
     const result = [];
     for (const g of groups) {
@@ -586,7 +585,7 @@ async function analyzeCurrentPage() {
   }
   if (STATE.pending) return;
   const snapshot = buildPageUsageSnapshot();
-  const ref = `CTX${STATE.nextCtxNum++}`;
+  const ref = createContextRef();
   addContextSnippet({
     kind: "page-snapshot",
     text: snapshot,

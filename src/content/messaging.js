@@ -2,14 +2,14 @@
  * @fileoverview 内容脚本与 Background Service Worker 之间的消息通信层。
  *
  * 职责：
- * - 将上下文数据持久化到 background（chrome.storage.session）
  * - 管理流式 AI 请求的长连接（chrome.runtime.connect）
- * - 从 background 恢复上下文（tab 刷新后重新挂载）
+ * - 向 background 请求设置、消息转发等非流式操作
+ *
+ * 上下文和对话只保存在顶层 content script 内存中，页面刷新后清空。
  */
 
 import { uid, STATE, refs } from './state.js';
 import { showToast } from './toast.js';
-import { groupTableContexts } from './context-model.js';
 
 /**
  * 打开扩展设置页。
@@ -27,106 +27,6 @@ async function openOptionsPage() {
     });
   } catch (e) {
     showToast(`打开设置失败：${String(e?.message ?? e)}`);
-  }
-}
-
-/**
- * 将上下文数据保存到 background（chrome.storage.session）。
- * @param {Object} context - 上下文对象
- */
-async function storeContextToBackground(context) {
-  try {
-    await chrome.runtime.sendMessage({ type: "STORE_CONTEXT", payload: { context } });
-  } catch {
-    void 0;
-  }
-}
-
-/**
- * 从 background 移除指定 ref 的上下文。
- * @param {string} ref - 上下文引用标记
- */
-async function removeContextInBackground(ref) {
-  try {
-    await chrome.runtime.sendMessage({ type: "REMOVE_CONTEXT", payload: { ref } });
-  } catch {
-    void 0;
-  }
-}
-
-/**
- * 清除 background 中的所有上下文。
- */
-async function clearContextsInBackground() {
-  try {
-    await chrome.runtime.sendMessage({ type: "CLEAR_CONTEXTS" });
-  } catch {
-    void 0;
-  }
-}
-
-/**
- * 从上下文列表中解析最大 CTX 编号。
- * @param {Array<{ref:string}>} contexts
- * @returns {number}
- */
-function parseMaxCtxNum(contexts) {
-  return contexts
-    .map((c) => String(c?.ref || ""))
-    .map((r) => {
-      const m = r.match(/^CTX(\d+)$/);
-      return m ? Number(m[1]) : 0;
-    })
-    .reduce((a, b) => Math.max(a, b), 0);
-}
-
-/**
- * 从 background 恢复上下文（用于 tab 刷新后）。
- * 重建 STATE.contexts、STATE.tableGroups 和 refToRowEl 映射。
- */
-async function hydrateContextsFromBackground() {
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: "LIST_CONTEXTS" });
-    if (!resp?.ok) return;
-    const contexts = Array.isArray(resp.data?.contexts) ? resp.data.contexts : [];
-    STATE.nextCtxNum = Math.max(1, parseMaxCtxNum(contexts) + 1);
-
-    for (const c of contexts) {
-      if (!c?.ref) {
-        c.ref = `CTX${STATE.nextCtxNum++}`;
-        storeContextToBackground(c);
-      }
-      if (c.kind === "table-row" && c.anchorSelector) {
-        try {
-          const rowEl = document.querySelector(c.anchorSelector);
-          if (rowEl && rowEl.isConnected) {
-            refs.refToRowEl.set(c.ref, rowEl);
-          }
-        } catch {}
-      }
-    }
-
-    STATE.contexts = contexts;
-    STATE.tableGroups = groupTableContexts(contexts);
-    // 动态 import 避免循环依赖（overlay.js → messaging.js）
-    const { render } = await import('./overlay.js');
-    render();
-  } catch {
-    void 0;
-  }
-}
-
-/**
- * 初始化上下文计数器（不需渲染，仅同步编号）。
- */
-async function initCtxCounterFromBackground() {
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: "LIST_CONTEXTS" });
-    if (!resp?.ok) return;
-    const contexts = Array.isArray(resp.data?.contexts) ? resp.data.contexts : [];
-    STATE.nextCtxNum = Math.max(STATE.nextCtxNum, parseMaxCtxNum(contexts) + 1);
-  } catch {
-    void 0;
   }
 }
 
@@ -208,11 +108,6 @@ function sendToBackground(message) {
 
 export {
   openOptionsPage,
-  storeContextToBackground,
-  removeContextInBackground,
-  clearContextsInBackground,
-  hydrateContextsFromBackground,
-  initCtxCounterFromBackground,
   getChatPort,
   streamChat,
   stopGeneration,

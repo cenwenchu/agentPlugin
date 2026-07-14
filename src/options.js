@@ -1,10 +1,20 @@
 /**
  * @fileoverview 扩展设置页逻辑。
- * 支持配置 DeepSeek API 的 Base URL、Model 和 API Key，
- * 并提供"测试连接"功能验证配置是否正确。
+ * 支持 DeepSeek/OpenAI 兼容/自定义 Chat Completions 服务，
+ * 并配置模型上下文窗口、输出预留和本地 API Key。
  */
 
 import { DEFAULT_SETTINGS } from "./shared.js";
+
+const PROVIDERS = {
+  deepseek: { baseUrl: "https://api.deepseek.com" },
+  openai: { baseUrl: "https://api.openai.com" }
+};
+
+function detectProvider(baseUrl) {
+  const normalized = String(baseUrl || "").replace(/\/+$/, "");
+  return Object.entries(PROVIDERS).find(([, provider]) => provider.baseUrl === normalized)?.[0] || "custom";
+}
 
 /**
  * 通过 ID 获取 DOM 元素，若不存在则抛出异常。
@@ -26,7 +36,7 @@ function setStatus(text) {
 }
 
 /**
- * 从 chrome.storage.sync 加载已保存的设置并填充表单。
+ * 普通设置从 sync 加载；API Key 从 local 加载。
  */
 async function load() {
   const [syncData, localData] = await Promise.all([
@@ -35,6 +45,7 @@ async function load() {
   ]);
   const settings = { ...DEFAULT_SETTINGS, ...(syncData.settings ?? {}) };
   $("baseUrl").value = settings.baseUrl ?? "";
+  $("provider").value = detectProvider(settings.baseUrl);
   $("model").value = settings.model ?? "";
   $("contextWindow").value = settings.contextWindow ?? DEFAULT_SETTINGS.contextWindow;
   $("maxOutputTokens").value = settings.maxOutputTokens ?? DEFAULT_SETTINGS.maxOutputTokens;
@@ -42,7 +53,7 @@ async function load() {
 }
 
 /**
- * 将表单中的设置保存到 chrome.storage.sync。
+ * 普通设置保存到 sync；API Key 单独保存到 local，避免账号同步。
  */
 async function save() {
   const baseUrl = $("baseUrl").value.trim();
@@ -89,6 +100,14 @@ async function testConnection() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   await load();
+
+  $("provider").addEventListener("change", () => {
+    const provider = PROVIDERS[$("provider").value];
+    if (provider) $("baseUrl").value = provider.baseUrl;
+  });
+  $("baseUrl").addEventListener("input", () => {
+    $("provider").value = detectProvider($("baseUrl").value);
+  });
 
   $("save").addEventListener("click", async () => {
     try {

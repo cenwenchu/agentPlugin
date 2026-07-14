@@ -35,7 +35,8 @@ label > span {
   margin: 0 0 6px;
 }
 
-input {
+input,
+select {
   width: 100%;
   box-sizing: border-box;
   height: 36px;
@@ -45,7 +46,8 @@ input {
   outline: none;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }

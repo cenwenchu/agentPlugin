@@ -4,7 +4,7 @@
  */
 
 /**
- * 默认设置：DeepSeek API 兼容接口参数。
+ * 默认的 OpenAI Chat Completions 兼容接口参数和客户端 token 预算。
  * API Key 单独保存在 chrome.storage.local，不进入同步设置。
  */
 export const DEFAULT_SETTINGS = {

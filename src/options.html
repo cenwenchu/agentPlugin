@@ -13,6 +13,15 @@
 
       <div class="form">
         <label>
+          <span>供应商预设</span>
+          <select id="provider">
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI 兼容</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
+
+        <label>
           <span>Base URL</span>
           <input id="baseUrl" type="text" placeholder="https://api.deepseek.com 或 https://你的域名/v1" />
         </label>

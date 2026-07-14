@@ -1,4 +1,7 @@
-/** Conservative tokenizer-free estimates suitable for client-side budget guards. */
+/**
+ * 无 tokenizer 依赖的保守 token 估算，只用于客户端预算保护，不等同于供应商计费 token。
+ * 中文/非 ASCII 近似 1 字符 1 token，连续 ASCII 近似 4 字符 1 token。
+ */
 function estimateTokens(text) {
   let tokens = 0;
   let asciiRun = 0;

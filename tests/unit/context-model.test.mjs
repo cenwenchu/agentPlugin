@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { buildContextBlockFromContexts, groupTableContexts } from "../../src/content/context-model.js";
 import { createSseDataParser } from "../../src/sse.js";
 import { calculateContextBudget, estimateTokens, selectContextsWithinTokenBudget } from "../../src/content/token-budget.js";
+import { tableGroupToCsv, tableGroupToMarkdown } from "../../src/content/table-export.js";
+import { createContextRef, isContextRef } from "../../src/content/context-ref.js";
+import { buildOnboardingPrompt, parseOnboardingResponse } from "../../src/content/onboarding.js";
 
 test("groups same-width tables by stable tableId", () => {
   const contexts = [
@@ -64,4 +67,40 @@ test("structured token trimming keeps headers before recent rows", () => {
   ];
   const selected = selectContextsWithinTokenBudget(contexts, 50).contexts;
   assert.deepEqual(selected.map((context) => context.ref), ["H1"]);
+});
+
+test("exports table groups as Markdown and escaped CSV", () => {
+  const group = {
+    header: { text: "名称 ||| 备注" },
+    rows: [{ text: 'A ||| 包含,逗号和"引号"' }]
+  };
+  assert.match(tableGroupToMarkdown(group), /\| 名称 \| 备注 \|/);
+  assert.match(tableGroupToCsv(group), /A,"包含,逗号和""引号"""/);
+});
+
+test("adds generated headers when exporting a headerless table", () => {
+  const csv = tableGroupToCsv({ header: null, rows: [{ text: "A ||| B" }] });
+  assert.equal(csv, "列1,列2\r\nA,B");
+});
+
+test("accepts both legacy and cross-frame-safe context refs", () => {
+  assert.equal(isContextRef("CTX12"), true);
+  assert.equal(isContextRef(createContextRef()), true);
+  assert.equal(isContextRef("CTX_bad"), false);
+});
+
+test("builds data-aware onboarding prompt without full rows", () => {
+  const prompt = buildOnboardingPrompt([{
+    header: { text: "客户 ||| 金额" },
+    rows: [{ text: "A ||| 100" }, { text: "B ||| 200" }, { text: "C ||| 300" }]
+  }]);
+  assert.match(prompt, /已选数据行数：3/);
+  assert.match(prompt, /客户 \|\|\| 金额/);
+  assert.doesNotMatch(prompt, /C \|\|\| 300/);
+});
+
+test("parses fenced onboarding JSON and validates suggestions", () => {
+  const parsed = parseOnboardingResponse('```json\n{"welcome":"你好","summary":"订单数据","suggestions":[{"label":"看概览","prompt":"请概括这些数据","reason":"理解整体"}],"freeInputHint":"也可自由提问"}\n```');
+  assert.equal(parsed.suggestions[0].prompt, "请概括这些数据");
+  assert.equal(parsed.welcome, "你好");
 });

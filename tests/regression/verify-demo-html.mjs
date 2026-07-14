@@ -254,7 +254,10 @@ function main() {
 
   const srcFiles = [
     "src/content/context-model.js",
+    "src/content/context-ref.js",
+    "src/content/onboarding.js",
     "src/content/token-budget.js",
+    "src/content/table-export.js",
     "src/content/table.js",
     "src/content/context.js",
     "src/content/state.js",
