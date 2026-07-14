@@ -19,7 +19,7 @@ const IS_TOP_FRAME = window.top === window;
  * 全局应用状态对象。
  * @property {boolean} open - 面板是否打开
  * @property {Array} contexts - 当前标签页的扁平上下文列表；enabled=false 时不发送
- * @property {Array} tableGroups - 从 contexts 派生的表格视图 [{id, tableId, header, rows}]
+ * @property {Array} tableGroups - 从 contexts 派生的表格视图，含 tableNumber/addedAt/header/rows
  * @property {Array} messages - 当前页面内存中的对话；刷新后清空
  * @property {boolean} pending - 是否正在等待 AI 响应
  * @property {string} draftText - 输入框草稿文本
@@ -49,10 +49,8 @@ const CONTEXT_CHAR_LIMIT = 50000;
 const CONTEXT_WARN_LIMIT = 100000;
 /** 全局 z-index 基准值 */
 const Z_INDEX = "1000";
-/** 表格 check/bar 常规层级；固定表格需要保持高优先级。 */
-const TABLE_UI_Z_INDEX = "1000";
-/** 站点 Drawer/Modal 打开时临时降低，避免盖住菜单。 */
-const TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX = "900";
+/** 表格 check/bar：高于普通列表，低于常见 Drawer/Modal（通常从 1000 起）。 */
+const TABLE_UI_Z_INDEX = "999";
 
 /**
  * 生成唯一 ID。
@@ -146,7 +144,7 @@ const refs = {
   refToRenderedRowIdentity: new Map(),
   /** Map: tableKey + rowKey/内容指纹 → ref，DOM 绑定丢失时仍可阻止批量重复加入 */
   renderedRowIdentityToRef: new Map(),
-  /** Map: ref → {tableId, pageIndex, kind}，动态行被回收后仍可统计和批量取消 */
+  /** Map: ref → {tableId(tableKey), pageIndex, kind}，DOM 回收后仍可统计和批量取消 */
   refToRowMeta: new Map(),
   /** Map: ref → 行 checkbox 元素 */
   refToCheckbox: new Map(),
@@ -172,8 +170,6 @@ const refs = {
   multiPageProgress: null,
   /** 当前悬停的行元素 */
   hoveredRow: null,
-  /** 页面是否存在可见的站点 Drawer/Modal */
-  siteOverlayActive: false,
   /** 浮动启动器按钮 */
   launcherFab: null,
   /** 行级别浮动操作按钮（通用） */
@@ -208,7 +204,6 @@ export {
   CONTEXT_WARN_LIMIT,
   Z_INDEX,
   TABLE_UI_Z_INDEX,
-  TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX,
   uid,
   clamp,
   normalizeText,

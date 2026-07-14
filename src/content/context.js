@@ -12,7 +12,8 @@
  * - `STATE.contexts`：所有上下文片段的扁平列表
  * - `STATE.tableGroups`：由扁平 contexts 派生的表格视图，不单独持久化
  * - `ref`：每个上下文的唯一引用标记（当前格式 `CTX_<uid>`，兼容旧 `CTX<num>`）
- * - `tableId`：表格 DOM 身份；`headerRef`：数据行与实际表头的显式关联
+ * - `tableId`：兼容字段名，值为页面生命周期内的组件实例 tableKey
+ * - `headerRef`：数据行与实际表头的显式关联
  */
 
 import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, Z_INDEX, uid, normalizeText, truncateText, compactOneLine, refs } from './state.js';
@@ -63,7 +64,7 @@ function addContextSnippet(snippet) {
     lineInfo,
     silent: snippet.silent,
     cellCount: snippet.cellCount || 0,
-    // tableId 区分同列结构的不同表格；固定表头/表体拆分时由 headerRef 跨 tableId 关联。
+    // tableId 保存运行时组件 tableKey；固定表头/表体拆分时由 headerRef 跨组件关联。
     tableId: snippet.tableId || "",
     headerRef: snippet.headerRef || "",
     pageIndex: Number.isFinite(snippet.pageIndex) ? snippet.pageIndex : null,

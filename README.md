@@ -9,7 +9,8 @@
 - 鼠标悬停表格行时显示 checkbox，可逐行或批量选中表格数据加入上下文
 - 支持跨页批量选择（自动识别 Ant Design / Arco Design 分页器，自动翻页）
 - 浮层内支持流式 AI 对话（SSE），每次发送自动带上当前上下文片段
-- 上下文按表格分组管理，通过 `headerRef` / `tableId` 区分同列结构的不同表格
+- 上下文按表格组件实例分组，通过 `headerRef` / 运行时 `tableKey` 隔离同页多个相似表格
+- 表格按首次加入顺序编号，后加入的表格编号更大并显示在顶部；无表头表格参与同一排序
 - 每条上下文可单独启用或停用，每组表格可导出 Markdown / CSV
 - 支持 DeepSeek、OpenAI 兼容及自定义接口，可配置 Base URL / Model / API Key
 - 根据模型上下文窗口自动计算 token 预算，超限时优先保留表头与最近数据
@@ -44,6 +45,8 @@
 - 鼠标悬停表格行 → 勾选 checkbox → 行内容加入上下文
 - 点击底部"全选当前页"批量添加当前表格所有行
 - 虚拟滚动表格支持手动滚动后继续添加；已加入的行即使被页面回收也会保留为数据快照
+- ArtTable 使用组件实例、页码、`data-rowindex` 与前两列稳定指纹联合去重，支持“先单选、再全选当前页”
+- 固化底部汇总行不会显示插件 check，也不会被单选或批量加入
 - 点击"跨页选择"输入页数，自动翻页并收集数据
 - 在上下文列表取消勾选可暂时排除数据，无需删除
 - 点击表格组右侧 `MD` / `CSV` 导出当前启用的数据
@@ -67,7 +70,7 @@ src/
     ├── context-model.js         # 纯表格分组与 prompt 上下文模型
     ├── token-budget.js          # token 估算、窗口预算和结构化裁剪
     ├── table-export.js          # Markdown / CSV 表格导出
-    ├── table.js                 # 表格交互（行检测、选择、跨页翻页）
+    ├── table.js                 # 表格交互（组件隔离、虚拟行恢复、选择、跨页翻页）
     ├── table-adapters.js        # Ant / Arco / ArtTable / ARIA / native 组件作用域与 rowKey
     ├── selection.js             # 文本选中浮动按钮
     ├── messaging.js             # 与 background 的消息通信层
@@ -121,5 +124,15 @@ src/
 npm test
 npm run test:e2e  # 启动本机 Google Chrome，需要允许本地临时 HTTP 服务
 ```
+
+`npm test` 是默认提交门槛。E2E 会启动独立 Chrome 配置并加载当前工作区扩展；如果本机 Chrome 不允许加载临时扩展，测试会在等待扩展入口时超时，此时应先确认浏览器启动参数和扩展加载状态。
+
+## 表格行为说明
+
+- `tableKey` 由 frame 运行实例与组件根节点实例共同组成；同 URL 的多个 iframe 也彼此隔离，不用于刷新恢复。
+- 固定表头和表体只要位于同一组件 wrapper，便共享同一个 `tableKey`；不同 wrapper 永不共享选中状态。
+- 普通无业务 key 表格使用前三个非空列生成轻量指纹；ArtTable 使用前两个非空列，并额外记录页码与 `data-rowindex`。
+- 虚拟列表回收 DOM 时只解除旧节点的 UI 绑定，已加入的文本快照不会丢失；重新渲染同一行时自动恢复 check。
+- 表格 check/bar 固定使用 999 层级，高于普通列表，低于常见的 Drawer/Modal（1000+）。
 
 更完整的状态模型、表格身份、存储边界和扩展路线见 [DESIGN.md](./DESIGN.md)。

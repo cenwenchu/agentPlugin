@@ -13,7 +13,7 @@
  * 通用设计：不依赖特定 UI 框架，通过标准 HTML 语义和 ARIA 属性识别表格。
  */
 
-import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, refs, clamp, normalizeText, compactOneLine, TABLE_UI_Z_INDEX, TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, refs, clamp, normalizeText, compactOneLine, uid, TABLE_UI_Z_INDEX } from './state.js';
 import { el, getCssSelector, getOverlayBoundsForElement, findRowElementFromEventTarget, isVisibleElement } from './dom.js';
 import { addContextSnippet, removeContextByRef, extractTableRowText } from './context.js';
 import { showToast } from './toast.js';
@@ -32,30 +32,20 @@ const ANT_PAGINATION_DISABLED = "ant-pagination-disabled";
 /** Arco Design 分页禁用 class */
 const ARCO_PAGINATION_DISABLED = "arco-pagination-item-disabled";
 
+/** 同 URL 的多个 iframe 也必须拥有不同的表格命名空间。 */
+const FRAME_TABLE_SCOPE = uid();
+
 // ========== 通用表格辅助函数 ==========
 
 /**
- * 临时诊断记录：用于真实虚拟表格复现，最多保留 120 条并镜像到隐藏节点供调试读取。
- * 只记录前几列摘要、身份和 ref，不记录整页 HTML。
+ * 开发态诊断记录。仅保存在内容脚本隔离世界的内存中，不写入页面 DOM，
+ * 避免业务页面脚本读取已选行摘要，也避免生产环境持续 JSON 序列化。
  */
 function recordTableDiagnostic(event, detail = {}) {
+  if (!DEBUG) return;
   const entry = { at: Date.now(), event, ...detail };
   refs.tableDiagnostics.push(entry);
   if (refs.tableDiagnostics.length > 120) refs.tableDiagnostics.splice(0, refs.tableDiagnostics.length - 120);
-  let node = document.getElementById("web2ai_table_diagnostics");
-  if (!node) {
-    node = document.createElement("script");
-    node.id = "web2ai_table_diagnostics";
-    node.type = "application/json";
-    node.hidden = true;
-    document.documentElement.appendChild(node);
-  }
-  node.textContent = JSON.stringify({
-    href: location.href,
-    trace: refs.tableDiagnostics,
-    rowMeta: Array.from(refs.refToRowMeta.entries()),
-    identities: Array.from(refs.renderedRowIdentityToRef.entries())
-  });
 }
 
 /**
@@ -178,7 +168,7 @@ function getTableIdForRow(rowEl) {
   let tableKey = refs.tableRootToKey.get(root);
   if (!tableKey) {
     const selector = getCssSelector(root) || root.tagName?.toLowerCase?.() || "table";
-    tableKey = `${location.href}::${adapter.name}::instance:${refs.nextTableInstanceId++}::${selector}`;
+    tableKey = `${location.href}::frame:${FRAME_TABLE_SCOPE}::${adapter.name}::instance:${refs.nextTableInstanceId++}::${selector}`;
     refs.tableRootToKey.set(root, tableKey);
   }
   return tableKey;
@@ -213,20 +203,6 @@ function highlightRow(rowEl, on) {
   } else {
     delete rowEl.dataset.web2aiSelected;
   }
-}
-
-function syncTableUiLayer() {
-  const candidates = document.querySelectorAll(
-    ".ant-drawer-open, .ant-drawer-content-wrapper, .arco-drawer, .arco-drawer-wrapper, [role='dialog']"
-  );
-  refs.siteOverlayActive = Array.from(candidates).some((node) =>
-    !node.closest?.("[data-web2ai-ui]") && isVisibleElement(node)
-  );
-  const zIndex = refs.siteOverlayActive ? TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX : TABLE_UI_Z_INDEX;
-  if (refs.batchBar) refs.batchBar.style.zIndex = zIndex;
-  if (refs.tableRowFab) refs.tableRowFab.style.zIndex = zIndex;
-  if (refs.inlineRowFab) refs.inlineRowFab.style.zIndex = zIndex;
-  for (const node of refs.pinnedRowOverlays.values()) node.style.zIndex = zIndex;
 }
 
 function getVirtualRowPositionKey(rowEl, tableId = getTableIdForRow(rowEl)) {
@@ -1973,27 +1949,6 @@ function getRowInlineAnchorCell(rowEl) {
 }
 
 function initTableListeners() {
-  let _layerRafPending = false;
-  const layerObserver = new MutationObserver((mutations) => {
-    const onlyPluginUi = mutations.every((mutation) =>
-      mutation.target?.closest?.("[data-web2ai-ui], [id^='web2ai_']")
-    );
-    if (onlyPluginUi) return;
-    if (_layerRafPending) return;
-    _layerRafPending = true;
-    requestAnimationFrame(() => {
-      _layerRafPending = false;
-      syncTableUiLayer();
-    });
-  });
-  layerObserver.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["class", "style", "aria-hidden"]
-  });
-  syncTableUiLayer();
-
   let _rafPending = false;
   document.addEventListener(
     "mousemove",

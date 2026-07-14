@@ -191,5 +191,8 @@ initHighlightStyle();
 initOverlay();
 
 } catch (e) {
-  // 扩展上下文失效 — 静默跳过初始化
+  const message = e?.message || String(e);
+  if (!message.includes('Extension context invalidated') && !message.includes('context invalidated')) {
+    console.error('[web2ai] Content initialization failed:', e);
+  }
 }

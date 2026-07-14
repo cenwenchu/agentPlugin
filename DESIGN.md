@@ -36,7 +36,7 @@
 | `kind` | `selection`、`page`、`table-header`、`table-row` 等 |
 | `text` | 发送与展示使用的规范化文本 |
 | `enabled` | `false` 表示保留但不发送、不导出 |
-| `tableId` | 表格 DOM 身份，用于区分列结构相同的不同表格 |
+| `tableId` | 兼容字段名，实际保存当前页面生命周期内的组件实例 `tableKey` |
 | `headerRef` | 数据行对应表头的显式引用，优先级高于 `tableId` |
 | `pageIndex` | 跨页采集时的来源页码 |
 | `anchorSelector` / `quote` | 刷新后尝试定位原页面元素 |
@@ -49,17 +49,23 @@
 
 1. 数据行的 `headerRef` 指向具体表头。
 2. 没有显式表头引用时使用 `tableId`。
-3. 升级前的旧数据按相邻表头顺序兼容恢复。
+3. 旧格式数据按相邻表头顺序兼容分组（仅内存兼容，不提供刷新恢复）。
 
 `headerRef` 用于处理固定表头和表体被框架拆成两个 `<table>` 的情况；`tableId` 用于避免页面上两个列名相同的表格被合并。列数和表头文本只用于发现与校验，不作为主要身份。
 
-表格身份由 `table-adapters.js` 解析组件级作用域：Ant Design 使用 `.ant-table-wrapper`，Arco 使用 `.arco-table`，ArtTable 严格使用组件根 `.art-table`（不能使用会命中 `.art-table-row` 和 `.art-table-cell` 的模糊类名选择器），随后回退到 ARIA 和原生 table。最终 key 由 frame URL、adapter 名称和组件容器 selector 组成。固定表头与表体因此共享 key，而相同列结构的不同 wrapper 保持隔离。
+表格身份由 `table-adapters.js` 解析组件级作用域：Ant Design 使用 `.ant-table-wrapper`，Arco 使用 `.arco-table`，ArtTable 严格使用组件根 `.art-table`，随后回退到 ARIA 和原生 table。每个 frame 先生成运行实例命名空间，每个实际根节点再通过 `WeakMap` 获得组件实例编号，两者共同组成当前页面生命周期内唯一的 `tableKey`。固定表头与表体共享 wrapper 时共享 key；同 URL 的多个 iframe、两个结构和列内容完全相同的 wrapper 也不会碰撞。项目已删除刷新恢复，因此无需用脆弱的 CSS selector 换取跨刷新稳定性。
 
-虚拟滚动优先读取 `data-row-key`、`data-key`、`data-id`、`row-key` 等业务标识；没有显式 key 时，使用前三个非空业务列的规范化值生成内容指纹，并跳过常见的空 checkbox/操作列。选中时立即保存文本快照。用户手动滚动后，如果框架把同一 DOM 节点复用于新行，业务 key 或内容指纹变化会解除旧节点的高亮绑定，但旧上下文继续保留，新行仍可继续加入。表头不参与节点复用判断，避免排序和筛选状态变化导致选中渲染丢失。
+虚拟滚动优先读取 `data-row-key`、`data-key`、`data-id`、`row-key` 等业务标识。普通表格没有显式 key 时使用前三个非空业务列的规范化指纹；ArtTable 使用前两个非空业务列，并额外维护 `tableKey + pageIndex + data-rowindex` 的位置身份，覆盖顶部常驻行和回收行。选中时立即保存文本快照。DOM 节点复用于新数据时只解除旧节点 UI 绑定，不删除旧快照；同一数据重新渲染时自动恢复 check、高亮和原 ref。
+
+`tfoot`、ArtTable footer、Ant Design summary/footer 与 Arco summary/footer 被视为非业务行，不参与悬停、单选、批量选择或滚动恢复，避免总计行与第一条数据共享 `data-rowindex`。
 
 批量计数和“取消当前页已选”基于 `tableKey + pageIndex` 的行快照元数据，不依赖当前 DOM。虚拟滚动回收顶部节点后，已加入数量仍然准确，也可以一次取消当前页所有已加入快照。
 
 选择去重同时维护正反向索引：`refToRenderedRowIdentity` 用于检测节点复用，`renderedRowIdentityToRef` 用于在 DOM WeakMap 因虚拟重绘丢失时阻止重复加入。因此先单选若干行再全选当前页，只会补充尚未加入的指纹。
+
+表格组以首次加入时间编号：最早为表格 1，之后递增。展示层按新到旧排序，因此顶部表格编号最大。有表头与无表头表格遵循完全相同的排序规则；后续向已有表格追加行不改变编号。
+
+表格 check/bar 固定使用 999 层级：高于普通列表、固定列和页面内容，低于通常从 1000 起的 Drawer/Modal。该策略不监听站点浮层事件，避免引入全局 MutationObserver 和框架耦合。
 
 ## 4. 发送流程与 token 预算
 
@@ -137,4 +143,4 @@ token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，
 npm test
 ```
 
-当前单元测试覆盖分组、固定表头关联、adapter/rowKey、上下文隔离、token 预算、SSE chunk 边界、onboarding 以及 Markdown/CSV 导出。静态回归负责语法、调试日志、demo HTML 结构和关键导出检查。真实 Chrome E2E 覆盖固定表头、同源 iframe 注入、分页式 DOM 替换和刷新后内存清空。
+当前单元测试覆盖分组与时间编号、固定表头关联、adapter/rowKey、上下文隔离、token 预算、SSE chunk 边界、onboarding 以及 Markdown/CSV 导出。静态回归负责语法、调试日志、demo HTML 结构和关键导出检查。真实 Chrome E2E 覆盖固定表头、同页相似表格隔离、底部汇总行排除、同源 iframe 注入、虚拟节点复用、分页式 DOM 替换和刷新后内存清空。

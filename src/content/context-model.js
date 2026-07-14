@@ -1,6 +1,7 @@
 /**
  * 无 DOM 依赖的上下文模型工具。
- * 表格归属优先使用明确的 headerRef，其次使用 tableId；旧数据按相邻表头兼容恢复。
+ * 表格归属优先使用明确的 headerRef，其次使用 tableId（运行时 tableKey）；
+ * 旧数据仅在当前内存中按相邻表头兼容分组。
  */
 
 function makeGroup(id, header = null) {

@@ -12,7 +12,7 @@
  * content script → messaging.js (Port) → background.js (fetch SSE) → messaging.js → scheduleRender
  */
 
-import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, Z_INDEX, TABLE_UI_Z_INDEX, TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, Z_INDEX, TABLE_UI_Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
 import { el } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { openOptionsPage, streamChat, stopGeneration, sendToBackground } from './messaging.js';
@@ -155,9 +155,7 @@ function render() {
   // 最大化时将所有浮动 UI 的 z-index 降到聊天面板下方，防止遮挡
   const isMaximized = STATE.open && STATE.maximized;
   const floatingZIndex = isMaximized ? "1" : Z_INDEX;
-  const tableUiZIndex = isMaximized
-    ? "1"
-    : (refs.siteOverlayActive ? TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX : TABLE_UI_Z_INDEX);
+  const tableUiZIndex = isMaximized ? "1" : TABLE_UI_Z_INDEX;
   if (refs.launcherFab) refs.launcherFab.style.zIndex = floatingZIndex;
   if (refs.batchBar) refs.batchBar.style.zIndex = tableUiZIndex;
   if (refs.tableRowFab) refs.tableRowFab.style.zIndex = tableUiZIndex;

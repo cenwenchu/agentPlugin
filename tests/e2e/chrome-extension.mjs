@@ -25,8 +25,16 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new"
 
 try {
   const page = await browser.newPage();
+  const browserDiagnostics = [];
+  page.on("console", (message) => browserDiagnostics.push(`[console:${message.type()}] ${message.text()}`));
+  page.on("pageerror", (error) => browserDiagnostics.push(`[pageerror] ${error.message}`));
   await page.goto(url);
-  await page.waitForSelector("#web2ai_overlay_host");
+  try {
+    await page.waitForSelector("#web2ai_overlay_host");
+  } catch (error) {
+    const detail = browserDiagnostics.length ? `\n${browserDiagnostics.join("\n")}` : "\nNo page diagnostics were emitted.";
+    throw new Error(`Extension entry did not initialize.${detail}`, { cause: error });
+  }
 
   const firstRow = await page.$("#orders tbody tr");
   await firstRow.hover();
@@ -39,6 +47,10 @@ try {
   const firstRowStillSelected = await page.$eval("#order-1", (row) => row.dataset.web2aiSelected);
   assert.equal(headerStillSelected, "1", "plugin check UI must not change a header's rendered identity");
   assert.equal(firstRowStillSelected, "1", "selected data row must retain its check rendering");
+  const secondaryRowSelected = await page.$eval("#secondary-order-1", (row) => row.dataset.web2aiSelected || "");
+  const footerRowSelected = await page.$eval("#orders-total", (row) => row.dataset.web2aiSelected || "");
+  assert.equal(secondaryRowSelected, "", "two identical table components must not share selection state");
+  assert.equal(footerRowSelected, "", "a fixed summary row must never inherit the first data row selection");
 
   const secondDataRow = await page.$("#order-2");
   await secondDataRow.hover();
