@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Web-to-AI Context Chat - Chrome Extension",
   "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/unit/*.test.mjs && node tests/regression/verify-demo-html.mjs"
+  },
   "devDependencies": {
     "jsdom": "^29.1.1"
   }

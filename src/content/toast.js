@@ -1,6 +1,19 @@
+/**
+ * @fileoverview Toast 提示组件。
+ * 在页面底部居中显示错误/提示信息，支持自动排队。
+ * 如果在 iframe 中调用，会转发到 top frame 显示。
+ */
+
 import { DEBUG, IS_TOP_FRAME, refs, Z_INDEX } from './state.js';
 import { el } from './dom.js';
 
+/**
+ * 显示一条 toast 提示。
+ * - 多消息自动排队，逐条展示
+ * - iframe 中会通过 chrome.runtime.sendMessage 转发到 top frame
+ * @param {string} message - 提示内容
+ * @param {number} [duration=1500] - 每条消息的展示时长（毫秒）
+ */
 function showToast(message, duration = 1500) {
   DEBUG && console.log(`[web2ai] showToast called: "${String(message ?? "").slice(0, 60)}" IS_TOP_FRAME=${IS_TOP_FRAME}`);
   // 如果在 iframe 中，转发到 top frame 显示
@@ -46,6 +59,7 @@ function showToast(message, duration = 1500) {
     document.documentElement.appendChild(node);
     DEBUG && console.log(`[web2ai] showToast: created toast node`);
   }
+  /** 从队列中取下一条并展示 */
   const showNext = () => {
     if (!refs.toastQueue.length) { refs.toastTimer = null; node.style.display = "none"; DEBUG && console.log(`[web2ai] showToast: queue empty, hidden`); return; }
     const msg = refs.toastQueue.shift();

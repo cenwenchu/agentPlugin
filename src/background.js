@@ -1,23 +1,69 @@
-import { DEFAULT_SETTINGS } from "./shared.js";
+/**
+ * @fileoverview Background Service Worker (Manifest V3)。
+ *
+ * 核心职责：
+ * 1. 右键菜单管理（添加选中/整页内容到 AI 上下文、打开浮层）
+ * 2. AI API 请求代理（非流式 + 流式 SSE）
+ * 3. 按 tab 维度管理上下文（chrome.storage.session）
+ * 4. 长连接管理（流式 AI 对话的 Port 通信）
+ */
 
+import { DEFAULT_SETTINGS } from "./shared.js";
+import { createSseDataParser } from "./sse.js";
+
+// ========== 设置 ==========
+
+/**
+ * 获取用户设置（合并默认值）。
+ * @returns {Promise<{baseUrl:string, model:string, apiKey:string}>}
+ */
 async function getSettings() {
-  const data = await chrome.storage.sync.get(["settings"]);
-  return { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
+  const [syncData, localData] = await Promise.all([
+    chrome.storage.sync.get(["settings"]),
+    chrome.storage.local.get(["apiKey"])
+  ]);
+  const synced = syncData.settings ?? {};
+  // Lazy migration for installations that previously synced the credential.
+  if (!localData.apiKey && synced.apiKey) {
+    await chrome.storage.local.set({ apiKey: synced.apiKey });
+    const { apiKey: _removed, ...safeSettings } = synced;
+    await chrome.storage.sync.set({ settings: safeSettings });
+    return { ...DEFAULT_SETTINGS, ...safeSettings, apiKey: synced.apiKey };
+  }
+  return { ...DEFAULT_SETTINGS, ...synced, apiKey: localData.apiKey ?? "" };
 }
 
+/**
+ * 确保首次安装时有默认设置。
+ */
 async function ensureDefaultSettings() {
   const data = await chrome.storage.sync.get(["settings"]);
   if (!data.settings) {
     await chrome.storage.sync.set({ settings: DEFAULT_SETTINGS });
+  } else if (data.settings.apiKey) {
+    await getSettings();
   }
 }
 
+// ========== AI API 请求 ==========
+
+/**
+ * 构建 Chat Completions API URL。
+ * 自动补充 /v1/chat/completions 后缀。
+ * @param {string} baseUrl
+ * @returns {string}
+ */
 function buildChatCompletionsUrl(baseUrl) {
   const normalized = baseUrl.replace(/\/+$/, "");
   if (normalized.endsWith("/v1")) return `${normalized}/chat/completions`;
   return `${normalized}/v1/chat/completions`;
 }
 
+/**
+ * 发送非流式 AI 对话请求。
+ * @param {{messages: Array}} params
+ * @returns {Promise<{raw: Object, content: string}>}
+ */
 async function chatCompletions({ messages }) {
   const settings = await getSettings();
   if (!settings.apiKey) {
@@ -34,7 +80,8 @@ async function chatCompletions({ messages }) {
     body: JSON.stringify({
       model: settings.model,
       messages,
-      temperature: 0.2
+      temperature: 0.2,
+      max_tokens: settings.maxOutputTokens
     })
   });
 
@@ -48,6 +95,11 @@ async function chatCompletions({ messages }) {
   return { raw: json, content };
 }
 
+/**
+ * 发送流式 AI 对话请求（SSE）。
+ * 逐行解析 data: 开头的 JSON 片段，提取 delta 内容。
+ * @param {{messages: Array, signal: AbortSignal, onDelta: Function}} params
+ */
 async function streamChatCompletions({ messages, signal, onDelta }) {
   const settings = await getSettings();
   if (!settings.apiKey) {
@@ -65,6 +117,7 @@ async function streamChatCompletions({ messages, signal, onDelta }) {
       model: settings.model,
       messages,
       temperature: 0.2,
+      max_tokens: settings.maxOutputTokens,
       stream: true
     }),
     signal
@@ -78,41 +131,38 @@ async function streamChatCompletions({ messages, signal, onDelta }) {
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = "";
+  let doneReceived = false;
+  const parser = createSseDataParser((data) => {
+    if (data === "[DONE]") {
+      doneReceived = true;
+      return;
+    }
+    try {
+      const json = JSON.parse(data);
+      const delta = json?.choices?.[0]?.delta?.content ?? json?.choices?.[0]?.message?.content ?? json?.choices?.[0]?.text ?? "";
+      if (delta) onDelta(delta);
+    } catch {
+      void 0;
+    }
+  });
 
-  while (true) {
+  while (!doneReceived) {
     const { value, done } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    let idx;
-    while ((idx = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, idx).trimEnd();
-      buffer = buffer.slice(idx + 1);
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      if (!trimmed.startsWith("data:")) continue;
-
-      const data = trimmed.slice(5).trim();
-      if (data === "[DONE]") return;
-
-      let json;
-      try {
-        json = JSON.parse(data);
-      } catch {
-        continue;
-      }
-
-      const delta =
-        json?.choices?.[0]?.delta?.content ??
-        json?.choices?.[0]?.message?.content ??
-        json?.choices?.[0]?.text ??
-        "";
-      if (delta) onDelta(delta);
-    }
+    parser.feed(decoder.decode(value, { stream: true }));
   }
+  parser.feed(decoder.decode());
+  parser.end();
 }
 
+// ========== Tab 消息通信 ==========
+
+/**
+ * 向指定 tab 发送消息。
+ * @param {number} tabId
+ * @param {Object} message
+ * @returns {Promise}
+ */
 function sendToTab(tabId, message) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {
@@ -123,6 +173,13 @@ function sendToTab(tabId, message) {
   });
 }
 
+/**
+ * 向指定 frame 发送消息。
+ * @param {number} tabId
+ * @param {number} frameId
+ * @param {Object} message
+ * @returns {Promise}
+ */
 function sendToFrame(tabId, frameId, message) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, message, { frameId }, (response) => {
@@ -133,13 +190,25 @@ function sendToFrame(tabId, frameId, message) {
   });
 }
 
-// broadcastToTab 与 sendToTab 功能相同，保留别名以兼容现有调用
+/** @deprecated sendToTab 的别名，兼容旧调用 */
 const broadcastToTab = sendToTab;
 
+// ========== 上下文存储（按 tab） ==========
+
+/**
+ * 生成上下文存储的 storage key。
+ * @param {number} tabId
+ * @returns {string}
+ */
 function contextsKey(tabId) {
   return `web2ai_contexts_${tabId}`;
 }
 
+/**
+ * 获取指定 tab 的上下文列表。
+ * @param {number} tabId
+ * @returns {Promise<Array>}
+ */
 async function getTabContexts(tabId) {
   const key = contextsKey(tabId);
   const data = await chrome.storage.session.get([key]);
@@ -147,15 +216,26 @@ async function getTabContexts(tabId) {
   return Array.isArray(contexts) ? contexts : [];
 }
 
+/**
+ * 设置指定 tab 的上下文列表。
+ * @param {number} tabId
+ * @param {Array} contexts
+ */
 async function setTabContexts(tabId, contexts) {
   const key = contextsKey(tabId);
   await chrome.storage.session.set({ [key]: contexts });
 }
 
+/**
+ * 清除指定 tab 的上下文。
+ * @param {number} tabId
+ */
 async function clearTabContexts(tabId) {
   const key = contextsKey(tabId);
   await chrome.storage.session.remove([key]);
 }
+
+// ========== 安装 & 右键菜单 ==========
 
 chrome.runtime.onInstalled.addListener(async () => {
   await ensureDefaultSettings();
@@ -220,18 +300,24 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+// ========== 消息路由 ==========
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    // 非流式 AI 请求
     if (message?.type === "AI_CHAT") {
       const data = await chatCompletions(message.payload);
       sendResponse({ ok: true, data });
       return;
     }
+    // 获取设置
     if (message?.type === "GET_SETTINGS") {
       const settings = await getSettings();
-      sendResponse({ ok: true, data: settings });
+      const { apiKey, ...safeSettings } = settings;
+      sendResponse({ ok: true, data: { ...safeSettings, hasApiKey: Boolean(apiKey) } });
       return;
     }
+    // 打开设置页
     if (message?.type === "OPEN_OPTIONS") {
       if (chrome?.runtime?.openOptionsPage) chrome.runtime.openOptionsPage();
       sendResponse({ ok: true });
@@ -239,6 +325,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     const tabId = sender?.tab?.id;
+    // 存储上下文
     if (message?.type === "STORE_CONTEXT") {
       if (!tabId) throw new Error("Missing tabId");
       const context = message.payload?.context;
@@ -250,6 +337,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    // 移除上下文
     if (message?.type === "REMOVE_CONTEXT") {
       if (!tabId) throw new Error("Missing tabId");
       const ref = message.payload?.ref;
@@ -260,6 +348,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    // 清除所有上下文
     if (message?.type === "CLEAR_CONTEXTS") {
       if (!tabId) throw new Error("Missing tabId");
       await clearTabContexts(tabId);
@@ -267,6 +356,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    // 列出所有上下文
     if (message?.type === "LIST_CONTEXTS") {
       if (!tabId) throw new Error("Missing tabId");
       const list = await getTabContexts(tabId);
@@ -274,6 +364,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    // 转发消息到 top frame
     if (message?.type === "FORWARD_TO_TOP") {
       if (!tabId) throw new Error("Missing tabId");
       const msg = message.payload?.message;
@@ -283,6 +374,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    // 广播消息到 tab（所有 frame）
     if (message?.type === "BROADCAST_TO_TAB") {
       if (!tabId) throw new Error("Missing tabId");
       const msg = message.payload?.message;
@@ -295,17 +387,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: false, error: "Unknown message type" });
   })().catch((e) => sendResponse({ ok: false, error: String(e?.message ?? e) }));
 
-  return true;
+  return true; // 保持 sendResponse 通道打开（异步响应）
 });
+
+// ========== Tab 生命周期 ==========
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearTabContexts(tabId).catch(() => void 0);
 });
 
+// ========== 流式对话长连接管理 ==========
+
+/** 活跃的流式请求 Map<requestId, AbortController> */
 const ACTIVE_STREAMS = new Map();
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "web2ai_chat") return;
+  /** 该 port 上发起的流请求 ID 集合 */
   const portStreams = new Set();
 
   port.onMessage.addListener((message) => {

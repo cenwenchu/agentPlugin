@@ -1,13 +1,27 @@
+/**
+ * @fileoverview 文本选中处理。
+ * 监听 selectionchange 事件，在选中文本附近显示浮动"问AI"按钮。
+ * 用户点击后将选中内容添加到 AI 上下文中。
+ */
+
 import { DEBUG, refs, clamp, normalizeText, Z_INDEX } from './state.js';
 import { el, getCssSelector } from './dom.js';
 import { addContextSnippet } from './context.js';
 
+/**
+ * 获取当前选中的文本（规范化后）。
+ * @returns {string}
+ */
 function getSelectionText() {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return "";
   return normalizeText(sel.toString());
 }
 
+/**
+ * 获取当前选中区域的边界矩形。
+ * @returns {DOMRect|null}
+ */
 function getSelectionRect() {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return null;
@@ -17,6 +31,10 @@ function getSelectionRect() {
   return rect;
 }
 
+/**
+ * 获取选中起始位置的祖先元素。
+ * @returns {Element|null}
+ */
 function getSelectionAnchorElement() {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return null;
@@ -25,6 +43,10 @@ function getSelectionAnchorElement() {
   return node?.nodeType === 1 ? node : node?.parentElement ?? null;
 }
 
+/**
+ * 获取选中区域的行号信息（仅在 pre/code 容器内有效）。
+ * @returns {{anchorSelector: string, startLine: number, endLine: number}|null}
+ */
 function getSelectionLineInfo() {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return null;
@@ -53,6 +75,9 @@ function getSelectionLineInfo() {
   };
 }
 
+/**
+ * 确保"问AI"浮动按钮已创建（懒初始化）。
+ */
 function ensureSelectionFab() {
   if (refs.selectionFab) return;
   refs.selectionFab = el("button", {
@@ -97,6 +122,10 @@ function ensureSelectionFab() {
   document.documentElement.appendChild(refs.selectionFab);
 }
 
+/**
+ * 显示选中文本的浮动按钮。
+ * @param {{text:string, rect:DOMRect, anchorSelector:string, quote:string, lineInfo:Object}} snapshot
+ */
 function showSelectionFab(snapshot) {
   ensureSelectionFab();
   refs.lastSelectionSnapshot = snapshot;
@@ -115,12 +144,20 @@ function showSelectionFab(snapshot) {
   refs.selectionFab.style.display = "inline-flex";
 }
 
+/**
+ * 隐藏选中文本的浮动按钮。
+ */
 function hideSelectionFab() {
   if (!refs.selectionFab) return;
   refs.selectionFab.style.display = "none";
   refs.lastSelectionSnapshot = null;
 }
 
+/**
+ * 初始化选中文本监听器。
+ * - 使用 debounce（100ms）监听 selectionchange
+ * - 滚动/缩放时自动隐藏
+ */
 function initSelectionListeners() {
   let selectionDebounceTimer = null;
   document.addEventListener(
@@ -140,6 +177,7 @@ function initSelectionListeners() {
           return;
         }
         const anchorEl = getSelectionAnchorElement();
+        // 避免在 overlay 内的选中也触发外部按钮
         if (refs.overlayHost && anchorEl && refs.overlayHost.contains(anchorEl)) {
           hideSelectionFab();
           return;

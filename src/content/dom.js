@@ -1,5 +1,20 @@
+/**
+ * @fileoverview DOM 工具函数。
+ * 提供简化的元素创建、CSS 选择器生成、可见性判断等辅助方法。
+ */
+
 import { clamp, normalizeText } from './state.js';
 
+/**
+ * 声明式 DOM 元素创建。
+ * @param {string} tag - HTML 标签名
+ * @param {Object} [attrs={}] - 属性对象：
+ *   - `style`: 样式对象（赋值到 node.style）
+ *   - `onXxx`: 事件处理器（如 onClick, onSubmit，自动 addEventListener）
+ *   - 其他: 作为 HTML attribute 设置（true → 空属性，false/null → 跳过）
+ * @param {Array<string|Node>} [children=[]] - 子节点：字符串会转为 TextNode
+ * @returns {HTMLElement}
+ */
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -17,6 +32,11 @@ function el(tag, attrs = {}, children = []) {
   return node;
 }
 
+/**
+ * 生成元素的可复用 CSS 选择器（最多向上追溯 5 层）。
+ * @param {Element} node - 目标元素
+ * @returns {string} CSS 选择器字符串（如 `#header` 或 `div:nth-of-type(2) > span`）
+ */
 function getCssSelector(node) {
   if (!node || node.nodeType !== 1) return "";
   const elNode = node;
@@ -43,6 +63,11 @@ function getCssSelector(node) {
   return parts.join(" > ");
 }
 
+/**
+ * 判断元素是否可见（display !== none, visibility !== hidden, opacity > 0, 尺寸 ≥ 2px）。
+ * @param {Element} el - 目标元素
+ * @returns {boolean}
+ */
 function isVisibleElement(el) {
   if (!el || el.nodeType !== 1) return false;
   const style = window.getComputedStyle(el);
@@ -54,6 +79,11 @@ function isVisibleElement(el) {
   return true;
 }
 
+/**
+ * 获取元素的可读标签（优先级：aria-label > title > placeholder > textContent）。
+ * @param {Element} el - 目标元素
+ * @returns {string}
+ */
 function getElementLabel(el) {
   if (!el) return "";
   const aria = (el.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
@@ -66,6 +96,12 @@ function getElementLabel(el) {
   return txt;
 }
 
+/**
+ * 计算元素的可用布局边界（沿 DOM 树向上查找 overflow 容器）。
+ * 用于将 FAB 按钮限制在目标元素的可见区域内。
+ * @param {Element} targetEl - 目标元素
+ * @returns {{left:number, top:number, right:number, bottom:number}}
+ */
 function getOverlayBoundsForElement(targetEl) {
   let bounds = {
     left: 0,
@@ -102,6 +138,13 @@ function getOverlayBoundsForElement(targetEl) {
   return bounds;
 }
 
+/**
+ * 从事件目标中查找最近的表格行元素。
+ * 支持 `<tr>` 标签和 `[role="row"]`。
+ * @param {EventTarget} target - 事件目标
+ * @param {Array<EventTarget>} [composedPath] - 事件传播路径
+ * @returns {Element|null}
+ */
 function findRowElementFromEventTarget(target, composedPath) {
   const path = Array.isArray(composedPath) && composedPath.length ? composedPath : null;
   const candidates = path?.length ? path : [target];

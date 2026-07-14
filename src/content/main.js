@@ -1,3 +1,16 @@
+/**
+ * @fileoverview 内容脚本主入口。
+ * 当 content_script 注入到页面后在所有 frame 中运行。
+ *
+ * 职责：
+ * - 注册 chrome.runtime.onMessage 监听器，处理来自 background 的消息
+ * - 监听 chrome.storage 变更（如面板最大化状态）
+ * - 初始化表格监听器、高亮样式和 overlay
+ *
+ * 注意：整个初始化代码被 try/catch 包裹，
+ * 扩展上下文失效时静默退出（不过 loader.js 已做了同样的保护）。
+ */
+
 import { DEBUG, IS_TOP_FRAME, STATE, refs } from './state.js';
 import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar } from './table.js';
 import { initHighlightStyle } from './highlight.js';
@@ -11,14 +24,17 @@ try {
     throw new Error('Extension context invalidated');
   }
 
-// Set up chrome.runtime.onMessage listener
+// ========== 消息监听 ==========
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // 打开面板
   if (message?.type === "OPEN_PANEL") {
     setOpen(true);
     sendResponse({ ok: true });
     return;
   }
 
+  // 添加上下文片段
   if (message?.type === "ADD_CONTEXT_SNIPPET") {
     DEBUG && console.log(`[web2ai] received ADD_CONTEXT_SNIPPET kind=${message.snippet?.kind} ref=${message.snippet?.ref} IS_TOP_FRAME=${IS_TOP_FRAME}`);
     addContextSnippet(message.snippet);
@@ -27,12 +43,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  // 按 ref 移除上下文
   if (message?.type === "REMOVE_CONTEXT_BY_REF") {
     removeContextByRef(message.ref);
     sendResponse({ ok: true });
     return;
   }
 
+  // 批量取消选中行（通过 ref 列表）
   if (message?.type === "UNSELECT_ROWS_BY_REFS") {
     const refs_arr = message.refs;
     if (Array.isArray(refs_arr)) {
@@ -53,6 +71,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  // 取消选中单行（通过 ref）
   if (message?.type === "UNSELECT_ROW_BY_REF") {
     const ref = message.ref;
     DEBUG && console.log(`[web2ai] UNSELECT_ROW_BY_REF ref=${ref} refToRowEl.has=${refs.refToRowEl.has(ref)} refToCheckbox.has=${refs.refToCheckbox.has(ref)}`);
@@ -70,6 +89,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  // 清除所有行的 UI 状态
   if (message?.type === "CLEAR_ROW_UI") {
     for (const rowEl of Array.from(refs.pinnedRowOverlays.keys())) {
       removePinnedRowOverlay(rowEl);
@@ -79,6 +99,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     refs.refToRowEl.clear();
     refs.refToCheckbox.clear();
     refs.batchAnchorRow = null;
+    refs.batchTableRoot = null;
     refs.batchContainer = null;
     syncRowCheckboxState(false);
     hideTableRowFab();
@@ -87,6 +108,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  // 捕获当前页面文本
   if (message?.type === "CAPTURE_PAGE") {
     const text = extractPageText();
     const snippet = {
@@ -99,12 +121,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  // 渲染 UI
   if (message?.type === "RENDER_UI") {
     if (IS_TOP_FRAME) render();
     sendResponse({ ok: true });
     return;
   }
 
+  // 显示 Toast
   if (message?.type === "TOAST") {
     if (IS_TOP_FRAME) showToast(message.text);
     sendResponse({ ok: true });
@@ -112,7 +136,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-// Set up chrome.storage listeners
+// ========== 监听 storage 变更 ==========
+
 chrome.storage.sync
   .get(["panelMaximized"])
   .then((data) => {
@@ -128,11 +153,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   render();
 });
 
-// Initialize
+// ========== 初始化 ==========
+
 initTableListeners();
 initHighlightStyle();
 initOverlay();
 
 } catch (e) {
-  // Extension context invalidated — silently skip initialization
+  // 扩展上下文失效 — 静默跳过初始化
 }

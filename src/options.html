@@ -9,7 +9,7 @@
   <body>
     <div class="container">
       <h1>Web-to-AI Context Chat</h1>
-      <p class="sub">配置 DeepSeek（OpenAI 兼容）接口参数（API Key 只保存在你的浏览器 storage 中）。</p>
+      <p class="sub">配置 DeepSeek（OpenAI 兼容）接口参数。API Key 仅保存在当前浏览器的本地扩展存储中，不参与账号同步。</p>
 
       <div class="form">
         <label>
@@ -25,6 +25,16 @@
         <label>
           <span>API Key</span>
           <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+        </label>
+
+        <label>
+          <span>模型上下文窗口（tokens）</span>
+          <input id="contextWindow" type="number" min="8192" step="1024" />
+        </label>
+
+        <label>
+          <span>预留最大输出（tokens）</span>
+          <input id="maxOutputTokens" type="number" min="256" step="256" />
         </label>
 
         <div class="row">

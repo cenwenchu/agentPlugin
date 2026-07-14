@@ -1,3 +1,23 @@
+/**
+ * @fileoverview 简易 Markdown → HTML 渲染器。
+ * 用正则将 AI 返回的 Markdown 文本转为 HTML，用于 overlay 中的对话气泡。
+ *
+ * 支持的语法：
+ * - 代码块（``` ... ```）和行内代码（`...`）
+ * - 表格（GFM 风格）
+ * - 标题（#, ##, ###）
+ * - 粗体（**）、斜体（*）、粗斜体（***）
+ * - 链接（[text](url)）
+ * - 无序列表（- 或 *）和有序列表（1. ...）
+ * - 段落和换行
+ */
+
+/**
+ * 将 Markdown 文本转为 HTML 字符串。
+ * 做了基础的 XSS 防护（HTML 转义 + URL 协议白名单）。
+ * @param {string} text - Markdown 格式文本
+ * @returns {string} HTML 字符串
+ */
 function renderMarkdown(text) {
   if (!text) return "";
   let html = text;
@@ -87,6 +107,11 @@ function renderMarkdown(text) {
   return html;
 }
 
+/**
+ * 解析 Markdown 表格的一行，返回单元格数组。
+ * @param {string} line - 表格行文本
+ * @returns {string[]} 单元格内容数组
+ */
 function parseTableRow(line) {
   // 去掉首尾的 |
   const trimmed = line.replace(/^\s*\||\|\s*$/g, "");

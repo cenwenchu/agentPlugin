@@ -1,6 +1,19 @@
+/**
+ * @fileoverview 内容脚本与 Background Service Worker 之间的消息通信层。
+ *
+ * 职责：
+ * - 将上下文数据持久化到 background（chrome.storage.session）
+ * - 管理流式 AI 请求的长连接（chrome.runtime.connect）
+ * - 从 background 恢复上下文（tab 刷新后重新挂载）
+ */
+
 import { uid, STATE, refs } from './state.js';
 import { showToast } from './toast.js';
+import { groupTableContexts } from './context-model.js';
 
+/**
+ * 打开扩展设置页。
+ */
 async function openOptionsPage() {
   try {
     if (chrome?.runtime?.openOptionsPage) chrome.runtime.openOptionsPage();
@@ -17,6 +30,10 @@ async function openOptionsPage() {
   }
 }
 
+/**
+ * 将上下文数据保存到 background（chrome.storage.session）。
+ * @param {Object} context - 上下文对象
+ */
 async function storeContextToBackground(context) {
   try {
     await chrome.runtime.sendMessage({ type: "STORE_CONTEXT", payload: { context } });
@@ -25,6 +42,10 @@ async function storeContextToBackground(context) {
   }
 }
 
+/**
+ * 从 background 移除指定 ref 的上下文。
+ * @param {string} ref - 上下文引用标记
+ */
 async function removeContextInBackground(ref) {
   try {
     await chrome.runtime.sendMessage({ type: "REMOVE_CONTEXT", payload: { ref } });
@@ -33,6 +54,9 @@ async function removeContextInBackground(ref) {
   }
 }
 
+/**
+ * 清除 background 中的所有上下文。
+ */
 async function clearContextsInBackground() {
   try {
     await chrome.runtime.sendMessage({ type: "CLEAR_CONTEXTS" });
@@ -41,6 +65,11 @@ async function clearContextsInBackground() {
   }
 }
 
+/**
+ * 从上下文列表中解析最大 CTX 编号。
+ * @param {Array<{ref:string}>} contexts
+ * @returns {number}
+ */
 function parseMaxCtxNum(contexts) {
   return contexts
     .map((c) => String(c?.ref || ""))
@@ -51,6 +80,10 @@ function parseMaxCtxNum(contexts) {
     .reduce((a, b) => Math.max(a, b), 0);
 }
 
+/**
+ * 从 background 恢复上下文（用于 tab 刷新后）。
+ * 重建 STATE.contexts、STATE.tableGroups 和 refToRowEl 映射。
+ */
 async function hydrateContextsFromBackground() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: "LIST_CONTEXTS" });
@@ -74,20 +107,8 @@ async function hydrateContextsFromBackground() {
     }
 
     STATE.contexts = contexts;
-    STATE.tableGroups = [];
-    for (const c of contexts) {
-      if (c.kind === "table-header") {
-        STATE.tableGroups.push({ id: `TG${Date.now()}_${Math.random().toString(36).slice(2,6)}`, header: c, rows: [] });
-      } else if (c.kind === "table-row") {
-        const lastGroup = STATE.tableGroups[STATE.tableGroups.length - 1];
-        if (lastGroup) {
-          lastGroup.rows.push(c);
-        } else {
-          STATE.tableGroups.push({ id: `TG${Date.now()}_${Math.random().toString(36).slice(2,6)}`, header: null, rows: [c] });
-        }
-      }
-    }
-    // Dynamic import to avoid circular dependency (overlay.js -> messaging.js)
+    STATE.tableGroups = groupTableContexts(contexts);
+    // 动态 import 避免循环依赖（overlay.js → messaging.js）
     const { render } = await import('./overlay.js');
     render();
   } catch {
@@ -95,6 +116,9 @@ async function hydrateContextsFromBackground() {
   }
 }
 
+/**
+ * 初始化上下文计数器（不需渲染，仅同步编号）。
+ */
 async function initCtxCounterFromBackground() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: "LIST_CONTEXTS" });
@@ -106,6 +130,10 @@ async function initCtxCounterFromBackground() {
   }
 }
 
+/**
+ * 获取或创建与 background 的流式通信 port。
+ * @returns {Port}
+ */
 function getChatPort() {
   if (refs.chatPort) return refs.chatPort;
   refs.chatPort = chrome.runtime.connect({ name: "web2ai_chat" });
@@ -126,6 +154,11 @@ function getChatPort() {
   return refs.chatPort;
 }
 
+/**
+ * 发起流式 AI 对话请求。
+ * @param {{messages: Array, onChunk: Function}} params
+ * @returns {Promise<void>}
+ */
 function streamChat({ messages, onChunk }) {
   const requestId = uid();
   const port = getChatPort();
@@ -145,6 +178,9 @@ function streamChat({ messages, onChunk }) {
   });
 }
 
+/**
+ * 停止当前正在生成的 AI 回复（断开 port）。
+ */
 function stopGeneration() {
   if (refs.chatPort) {
     refs.chatPort.disconnect();
@@ -153,10 +189,15 @@ function stopGeneration() {
   refs.streamHandlers.clear();
   refs.streamingMsgRef = null;
   STATE.pending = false;
-  // Dynamic import to avoid circular dependency
+  // 动态 import 避免循环依赖
   import('./overlay.js').then(({ render }) => render());
 }
 
+/**
+ * 向 background 发送消息（安全版本，错误静默忽略）。
+ * @param {Object} message
+ * @returns {Promise}
+ */
 function sendToBackground(message) {
   try {
     return chrome.runtime.sendMessage(message).catch(() => void 0);

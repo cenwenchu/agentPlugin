@@ -1,8 +1,23 @@
-import { DEBUG, IS_TOP_FRAME, STATE, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
+/**
+ * @fileoverview AI 对话浮层 UI。
+ *
+ * 职责：
+ * - 渲染侧边栏聊天面板（Shadow DOM 隔离样式）
+ * - 管理对话消息列表、输入框、流式渲染
+ * - 上下文片段列表渲染（按表格分组）
+ * - 可拖拽的浮动启动器（Launcher FAB）
+ * - 面板最大化/还原、ESC 关闭等交互
+ *
+ * 通信流程：
+ * content script → messaging.js (Port) → background.js (fetch SSE) → messaging.js → scheduleRender
+ */
+
+import { DEBUG, IS_TOP_FRAME, STATE, Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
 import { el } from './dom.js';
 import { renderMarkdown } from './markdown.js';
-import { openOptionsPage, streamChat, stopGeneration, initCtxCounterFromBackground, hydrateContextsFromBackground } from './messaging.js';
-import { addContextSnippet, removeContext, clearAll, buildContextBlock, getContextTotalChars, confirmContextOverflow, extractTableHeadersFromContexts, buildHeaderGuidePrompt, extractPageText } from './context.js';
+import { openOptionsPage, streamChat, stopGeneration, initCtxCounterFromBackground, hydrateContextsFromBackground, sendToBackground } from './messaging.js';
+import { addContextSnippet, removeContext, clearAll, buildContextBlock, extractTableHeadersFromContexts, buildHeaderGuidePrompt, extractPageText } from './context.js';
+import { calculateContextBudget, estimateTokens, selectContextsWithinTokenBudget } from './token-budget.js';
 import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab } from './table.js';
 import { showToast } from './toast.js';
 
@@ -400,7 +415,8 @@ async function sendText(rawText, opts = {}) {
   if (!text) return;
   if (STATE.pending) return;
 
-  STATE.messages.push({ role: "user", content: text, ts: Date.now() });
+  const pendingUserMessage = { role: "user", content: text, ts: Date.now() };
+  STATE.messages.push(pendingUserMessage);
   STATE.pending = true;
   render();
 
@@ -414,26 +430,10 @@ async function sendText(rawText, opts = {}) {
       requestMessages.push({ role: "user", content: text });
       DEBUG && console.log(`[web2ai] sendText headersOnly mode, prompt length=${text.length}`);
     } else {
-      let contextsToUse = STATE.contexts;
-      const totalChars = getContextTotalChars(contextsToUse);
-      DEBUG && console.log(`[web2ai] sendText contexts=${contextsToUse.length} totalChars=${totalChars} warnLimit=${CONTEXT_WARN_LIMIT}`);
-      if (totalChars > CONTEXT_WARN_LIMIT) {
-        const chosen = await confirmContextOverflow(contextsToUse, CONTEXT_CHAR_LIMIT);
-        if (chosen === null) {
-          STATE.pending = false;
-          render();
-          return;
-        }
-        contextsToUse = chosen;
-      }
       const isFirstTurn = STATE.messages.length <= 1;
-      const contextBlock = buildContextBlock(contextsToUse, !isFirstTurn);
-      if (contextBlock) requestMessages.push({ role: "system", content: contextBlock });
-
       const recentMessages = sliceRecentRounds(STATE.messages);
       const latestUserTs = STATE.messages.filter((m) => m.role === "user").pop()?.ts;
-      requestMessages.push(
-        ...recentMessages.map((m) => {
+      const historyMessages = recentMessages.map((m) => {
           if (m.role === "user") {
             const isLatest = m.ts === latestUserTs;
             return isLatest
@@ -441,8 +441,24 @@ async function sendText(rawText, opts = {}) {
               : { role: "user", content: m.content };
           }
           return { role: m.role, content: m.content };
-        })
-      );
+        });
+      const settingsResp = await sendToBackground({ type: "GET_SETTINGS" });
+      const settings = settingsResp?.data || {};
+      const budget = calculateContextBudget({
+        contextWindow: Math.max(8192, Number(settings.contextWindow) || 64000),
+        maxOutputTokens: Math.max(256, Number(settings.maxOutputTokens) || 4096),
+        messages: historyMessages
+      });
+      const contextTokens = STATE.contexts.reduce((sum, context) => sum + estimateTokens(context.text) + 24, 0);
+      const selection = selectContextsWithinTokenBudget(STATE.contexts, budget.availableTokens);
+      const contextsToUse = selection.contexts;
+      if (contextsToUse.length < STATE.contexts.length) {
+        showToast(`上下文超出模型预算，已保留表头和最近数据（${contextsToUse.length}/${STATE.contexts.length} 条）`);
+      }
+      DEBUG && console.log(`[web2ai] token budget context=${contextTokens} available=${budget.availableTokens} selected=${contextsToUse.length}`);
+      const contextBlock = buildContextBlock(contextsToUse, !isFirstTurn);
+      if (contextBlock) requestMessages.push({ role: "system", content: contextBlock });
+      requestMessages.push(...historyMessages);
 
       DEBUG && console.log(`[web2ai] sendText requestMessages=${requestMessages.length}`, JSON.stringify({
         systemLen: requestMessages[0]?.content?.length || 0,
