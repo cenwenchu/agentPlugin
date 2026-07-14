@@ -118,14 +118,16 @@ src/
 
 ## 开发
 
+开发与测试要求 Node.js 20.19 或更高版本。Chrome E2E 使用有界面 Chrome，因为扩展加载通过 Puppeteer 官方 `enableExtensions` 通道完成。
+
 ```bash
 # 项目无构建依赖，直接加载到 Chrome 即可
 # 如需开发调试，将 state.js 中的 DEBUG 设为 true
 npm test
-npm run test:e2e  # 启动本机 Google Chrome，需要允许本地临时 HTTP 服务
+npm run test:e2e  # 启动有界面 Google Chrome，并加载临时扩展副本
 ```
 
-`npm test` 是默认提交门槛。E2E 会启动独立 Chrome 配置并加载当前工作区扩展；如果本机 Chrome 不允许加载临时扩展，测试会在等待扩展入口时超时，此时应先确认浏览器启动参数和扩展加载状态。
+`npm test` 是默认提交门槛。E2E 会先验证扩展 service worker 已启动，再打开本地 fixture；扩展未加载和内容脚本未初始化会给出不同错误。
 
 ## 表格行为说明
 

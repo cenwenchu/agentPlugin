@@ -11,7 +11,7 @@
 <button id="replace">替换分页数据</button>
 <button id="reuse">复用首行节点</button>
 <button id="reuse-no-key">复用无 key 行节点</button>
-<iframe id="frame" srcdoc="<table><tbody><tr data-row-key='frame-1'><td>iframe row</td></tr></tbody></table>"></iframe>
+<iframe id="frame" src="/frame"></iframe>
 <script>
 document.querySelector('#replace').onclick = () => {
   document.querySelector('#body').outerHTML = '<tbody id="body"><tr id="order-3" class="art-table-row odd" data-rowindex="3"><td></td><td>4</td><td>C</td><td>300</td></tr></tbody>';

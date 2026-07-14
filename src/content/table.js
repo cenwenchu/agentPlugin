@@ -251,9 +251,8 @@ function reconcileRecycledRow(rowEl) {
   const text = extractTableRowText(rowEl).trim();
   const currentIdentity = getRowRenderedIdentity(rowEl, tableId, businessRowKey, text);
   const previousIdentity = refs.refToRenderedRowIdentity.get(previousRef);
-  const currentVirtualPosition = getVirtualRowPositionKey(rowEl, tableId);
-  const previousVirtualPosition = refs.refToVirtualRowPosition.get(previousRef);
-  if (currentVirtualPosition && currentVirtualPosition === previousVirtualPosition) return;
+  // 虚拟列表会在相同 data-rowindex 上复用 DOM 节点。位置只能帮助重新绑定，
+  // 不能覆盖身份判断；无业务 row key 时必须让内容指纹识别数据已变化。
   if (!previousIdentity || previousIdentity === currentIdentity) return;
 
   recordTableDiagnostic("reconcile-changed", {
@@ -282,9 +281,9 @@ function restoreSelectedRowBinding(rowEl, { tableId, businessRowKey, text, rende
   if (!text) return null;
   renderedIdentity ||= getRowRenderedIdentity(rowEl, tableId, businessRowKey, text);
   const rowKey = businessRowKey ? `${tableId || location.href}::${businessRowKey}` : "";
-  const virtualPosition = getVirtualRowPositionKey(rowEl, tableId);
-  const ref = (virtualPosition && refs.virtualRowPositionToRef.get(virtualPosition)) ||
-    (rowKey && refs.rowKeyToRef.get(rowKey)) ||
+  // 虚拟位置会被下一条业务数据复用，不能作为恢复身份的依据。
+  // 有 key 用业务 key；无 key 用包含前导列内容的渲染指纹。
+  const ref = (rowKey && refs.rowKeyToRef.get(rowKey)) ||
     (renderedIdentity && refs.renderedRowIdentityToRef.get(renderedIdentity));
   if (!isAddedRef(ref)) return null;
 
@@ -332,11 +331,6 @@ function addRowElToContext(rowEl, { silent } = {}) {
   const tableId = getTableIdForRow(rowEl);
   const businessRowKey = getBusinessRowKey(rowEl);
   const virtualPosition = getVirtualRowPositionKey(rowEl, tableId);
-  if (virtualPosition && isAddedRef(refs.virtualRowPositionToRef.get(virtualPosition))) {
-    const ref = restoreSelectedRowBinding(rowEl, { tableId, businessRowKey });
-    recordTableDiagnostic("skip-virtual-position", { virtualPosition, ref });
-    return 0;
-  }
   // 相同业务 key 可能出现在页面上的不同表格，必须绑定组件级 tableId。
   const rowKey = businessRowKey ? `${tableId || location.href}::${businessRowKey}` : "";
   if (rowKey && isAddedRef(refs.rowKeyToRef.get(rowKey))) {
