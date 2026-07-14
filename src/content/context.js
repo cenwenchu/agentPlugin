@@ -20,7 +20,7 @@ import { el, getCssSelector, isVisibleElement, getElementLabel } from './dom.js'
 import { showToast } from './toast.js';
 import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, getRowCells, hasHeaderCells } from './table.js';
 import { render, clearDraftInput } from './overlay.js';
-import { buildContextBlockFromContexts, groupTableContexts } from './context-model.js';
+import { buildContextBlockFromContexts, getTableContextIdentity, groupTableContexts } from './context-model.js';
 import { createContextRef } from './context-ref.js';
 
 // 安全版 chrome.runtime.sendMessage — 扩展上下文失效时静默忽略
@@ -66,13 +66,20 @@ function addContextSnippet(snippet) {
     // tableId 区分同列结构的不同表格；固定表头/表体拆分时由 headerRef 跨 tableId 关联。
     tableId: snippet.tableId || "",
     headerRef: snippet.headerRef || "",
-    pageIndex: Number.isFinite(snippet.pageIndex) ? snippet.pageIndex : null
+    pageIndex: Number.isFinite(snippet.pageIndex) ? snippet.pageIndex : null,
+    rowKey: snippet.rowKey || ""
   };
   if (!IS_TOP_FRAME) {
     safeSend({
       type: "FORWARD_TO_TOP",
       payload: { message: { type: "ADD_CONTEXT_SNIPPET", snippet: item } }
     });
+    return;
+  }
+
+  // DOM/UI 层已经去重，这里再做最终幂等保护，避免单选与批量事件紧邻触发时重复写入。
+  const identity = getTableContextIdentity(item);
+  if (identity && STATE.contexts.some((context) => getTableContextIdentity(context) === identity)) {
     return;
   }
 
@@ -137,6 +144,18 @@ function removeContext(id, opts = {}) {
         refs.refToRowEl.delete(ctx.ref);
       }
       refs.refToCheckbox.delete(ctx.ref);
+      const rowKey = refs.refToRowKey.get(ctx.ref);
+      if (rowKey) refs.rowKeyToRef.delete(rowKey);
+      refs.refToRowKey.delete(ctx.ref);
+      const virtualPosition = refs.refToVirtualRowPosition.get(ctx.ref);
+      if (virtualPosition) refs.virtualRowPositionToRef.delete(virtualPosition);
+      refs.refToVirtualRowPosition.delete(ctx.ref);
+      const renderedIdentity = refs.refToRenderedRowIdentity.get(ctx.ref);
+      if (renderedIdentity && refs.renderedRowIdentityToRef.get(renderedIdentity) === ctx.ref) {
+        refs.renderedRowIdentityToRef.delete(renderedIdentity);
+      }
+      refs.refToRenderedRowIdentity.delete(ctx.ref);
+      refs.refToRowMeta.delete(ctx.ref);
     }
     STATE.contexts = STATE.contexts.filter((c) => c.id !== id);
     STATE.onboarding = null;
@@ -220,6 +239,10 @@ function clearContext() {
   }
   refs.batchAnchorRow = null;
   refs.batchContainer = null;
+  refs.rowKeyToRef.clear();
+  refs.refToRowKey.clear();
+  refs.virtualRowPositionToRef.clear();
+  refs.refToVirtualRowPosition.clear();
   syncRowCheckboxState(false);
   if (refs.batchBar) refs.batchBar.style.display = "none";
   // 广播到其他 frames（iframe 等），由各 frame 自行清理 refToRowEl/refToCheckbox
@@ -453,7 +476,7 @@ function extractTableRowText(rowEl) {
   if (!rowEl) return "";
 
   const stripInjected = (cell) => {
-    const injectedEls = cell.querySelectorAll("[id^='web2ai_']");
+    const injectedEls = cell.querySelectorAll("[id^='web2ai_'],[data-web2ai-ui]");
     for (const el of injectedEls) el.style.display = "none";
     const t = normalizeText(cell.innerText || cell.textContent || "").replace(/\n/g, " ");
     for (const el of injectedEls) el.style.display = "";

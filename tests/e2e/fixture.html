@@ -1,0 +1,23 @@
+<!doctype html><meta charset="utf-8"><title>Web2AI E2E</title>
+<div class="art-table" id="orders">
+  <table><thead><tr class="art-table-header-row"><th></th><th>序号</th><th>订单号</th><th>标签</th></tr></thead></table>
+  <table><tbody id="body"><tr id="order-1" class="art-table-row even" data-rowindex="0"><td></td><td>1</td><td>A</td><td>100</td></tr><tr id="order-2" class="art-table-row odd" data-rowindex="1"><td></td><td>2</td><td>B</td><td>200</td></tr><tr id="no-key-row" class="art-table-row even" data-rowindex="2"><td></td><td>3</td><td>No key</td><td>150</td></tr></tbody></table>
+</div>
+<button id="replace">替换分页数据</button>
+<button id="reuse">复用首行节点</button>
+<button id="reuse-no-key">复用无 key 行节点</button>
+<iframe id="frame" srcdoc="<table><tbody><tr data-row-key='frame-1'><td>iframe row</td></tr></tbody></table>"></iframe>
+<script>
+document.querySelector('#replace').onclick = () => {
+  document.querySelector('#body').outerHTML = '<tbody id="body"><tr id="order-3" class="art-table-row odd" data-rowindex="3"><td></td><td>4</td><td>C</td><td>300</td></tr></tbody>';
+};
+document.querySelector('#reuse').onclick = () => {
+  const row = document.querySelector('#body tr');
+  row.id = 'order-reused';
+  row.dataset.rowindex = '10';
+  row.innerHTML = '<td></td><td>11</td><td>Reused</td><td>250</td>';
+};
+document.querySelector('#reuse-no-key').onclick = () => {
+  document.querySelector('#no-key-row').innerHTML = '<td></td><td>12</td><td>No key reused</td><td>175</td>';
+};
+</script>

@@ -256,6 +256,7 @@ function main() {
     "src/content/context-model.js",
     "src/content/context-ref.js",
     "src/content/onboarding.js",
+    "src/content/table-adapters.js",
     "src/content/token-budget.js",
     "src/content/table-export.js",
     "src/content/table.js",

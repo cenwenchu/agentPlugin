@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildContextBlockFromContexts, groupTableContexts } from "../../src/content/context-model.js";
+import { buildContextBlockFromContexts, getTableContextIdentity, groupTableContexts } from "../../src/content/context-model.js";
 import { createSseDataParser } from "../../src/sse.js";
 import { calculateContextBudget, estimateTokens, selectContextsWithinTokenBudget } from "../../src/content/token-budget.js";
 import { tableGroupToCsv, tableGroupToMarkdown } from "../../src/content/table-export.js";
 import { createContextRef, isContextRef } from "../../src/content/context-ref.js";
 import { buildOnboardingPrompt, parseOnboardingResponse } from "../../src/content/onboarding.js";
+import { getBusinessRowKey, getRenderedRowIdentity, getRowContentFingerprint, resolveTableAdapter } from "../../src/content/table-adapters.js";
 
 test("groups same-width tables by stable tableId", () => {
   const contexts = [
@@ -29,6 +30,30 @@ test("groups split fixed-header and body tables through headerRef", () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0].header.ref, "H1");
   assert.deepEqual(groups[0].rows.map((row) => row.ref), ["R1"]);
+});
+
+test("numbers tables chronologically and keeps the newest headerless table on top", () => {
+  const contexts = [
+    { ref: "R3", kind: "table-row", text: "newest", tableId: "table-c", createdAt: 300 },
+    { ref: "H2", kind: "table-header", text: "B", tableId: "table-b", createdAt: 200 },
+    { ref: "R2", kind: "table-row", text: "middle", tableId: "table-b", createdAt: 201 },
+    { ref: "H1", kind: "table-header", text: "A", tableId: "table-a", createdAt: 100 },
+    { ref: "R1", kind: "table-row", text: "oldest", tableId: "table-a", createdAt: 101 }
+  ];
+  const groups = groupTableContexts(contexts);
+  assert.deepEqual(groups.map((group) => group.tableId), ["table-c", "table-b", "table-a"]);
+  assert.deepEqual(groups.map((group) => group.tableNumber), [3, 2, 1]);
+  assert.equal(groups[0].header, null);
+});
+
+test("builds an idempotent identity for single then batch selection", () => {
+  const first = { kind: "table-row", rowKey: "table-a::order-1", text: "A", anchorSelector: "tr:nth-of-type(1)" };
+  const repeated = { ...first, ref: "another-ref" };
+  assert.equal(getTableContextIdentity(first), getTableContextIdentity(repeated));
+  assert.notEqual(
+    getTableContextIdentity(first),
+    getTableContextIdentity({ ...first, rowKey: "table-a::order-2" })
+  );
 });
 
 test("context builder only includes supplied contexts", () => {
@@ -103,4 +128,46 @@ test("parses fenced onboarding JSON and validates suggestions", () => {
   const parsed = parseOnboardingResponse('```json\n{"welcome":"你好","summary":"订单数据","suggestions":[{"label":"看概览","prompt":"请概括这些数据","reason":"理解整体"}],"freeInputHint":"也可自由提问"}\n```');
   assert.equal(parsed.suggestions[0].prompt, "请概括这些数据");
   assert.equal(parsed.welcome, "你好");
+});
+
+test("resolves component scope and stable business row key", () => {
+  const scope = { id: "wrapper" };
+  const row = {
+    closest: (selector) => selector === ".ant-table-wrapper" ? scope : null,
+    getAttribute: (name) => name === "data-row-key" ? "order-42" : null,
+    querySelector: () => null
+  };
+  assert.equal(resolveTableAdapter(row).scope, scope);
+  assert.equal(getBusinessRowKey(row), "ant:data-row-key:order-42");
+});
+
+test("uses the ArtTable component root instead of an art-table row as scope", () => {
+  const componentRoot = { className: "art-table" };
+  const row = {
+    closest: (selector) => selector === ".art-table" ? componentRoot : null,
+    getAttribute: () => null,
+    querySelector: () => null
+  };
+  const resolved = resolveTableAdapter(row);
+  assert.equal(resolved.adapter.name, "art");
+  assert.equal(resolved.scope, componentRoot);
+});
+
+test("distinguishes recycled virtual rows by business key or leading-column fingerprint", () => {
+  assert.notEqual(
+    getRenderedRowIdentity("orders", "row:1", "same text"),
+    getRenderedRowIdentity("orders", "row:2", "same text")
+  );
+  assert.equal(
+    getRowContentFingerprint("- ||| A   Corp ||| 100 ||| ignored"),
+    getRowContentFingerprint("A Corp ||| 100 ||| ignored")
+  );
+  assert.notEqual(
+    getRenderedRowIdentity("orders", "", "A ||| 100"),
+    getRenderedRowIdentity("orders", "", "B ||| 100")
+  );
+  assert.equal(
+    getRowContentFingerprint("1 ||| ORDER-1 ||| 待处理", 2),
+    getRowContentFingerprint("1 ||| ORDER-1 ||| 已刷新", 2)
+  );
 });

@@ -64,6 +64,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           refs.refToRowEl.delete(ref);
         }
         refs.refToCheckbox.delete(ref);
+        const rowKey = refs.refToRowKey.get(ref);
+        if (rowKey) refs.rowKeyToRef.delete(rowKey);
+        refs.refToRowKey.delete(ref);
+        const virtualPosition = refs.refToVirtualRowPosition.get(ref);
+        if (virtualPosition) refs.virtualRowPositionToRef.delete(virtualPosition);
+        refs.refToVirtualRowPosition.delete(ref);
+        const renderedIdentity = refs.refToRenderedRowIdentity.get(ref);
+        if (renderedIdentity && refs.renderedRowIdentityToRef.get(renderedIdentity) === ref) {
+          refs.renderedRowIdentityToRef.delete(renderedIdentity);
+        }
+        refs.refToRenderedRowIdentity.delete(ref);
+        refs.refToRowMeta.delete(ref);
       }
       updateBatchBar();
     }
@@ -84,6 +96,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       refs.refToRowEl.delete(ref);
     }
     refs.refToCheckbox.delete(ref);
+    const rowKey = refs.refToRowKey.get(ref);
+    if (rowKey) refs.rowKeyToRef.delete(rowKey);
+    refs.refToRowKey.delete(ref);
+    const virtualPosition = refs.refToVirtualRowPosition.get(ref);
+    if (virtualPosition) refs.virtualRowPositionToRef.delete(virtualPosition);
+    refs.refToVirtualRowPosition.delete(ref);
+    const renderedIdentity = refs.refToRenderedRowIdentity.get(ref);
+    if (renderedIdentity && refs.renderedRowIdentityToRef.get(renderedIdentity) === ref) {
+      refs.renderedRowIdentityToRef.delete(renderedIdentity);
+    }
+    refs.refToRenderedRowIdentity.delete(ref);
+    refs.refToRowMeta.delete(ref);
     updateBatchBar();
     sendResponse({ ok: true });
     return;
@@ -98,6 +122,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     refs.refToRowEl.clear();
     refs.refToCheckbox.clear();
+    refs.rowKeyToRef.clear();
+    refs.refToRowKey.clear();
+    refs.virtualRowPositionToRef.clear();
+    refs.refToVirtualRowPosition.clear();
+    refs.refToRenderedRowIdentity.clear();
+    refs.renderedRowIdentityToRef.clear();
+    refs.refToRowMeta.clear();
     refs.batchAnchorRow = null;
     refs.batchTableRoot = null;
     refs.batchContainer = null;

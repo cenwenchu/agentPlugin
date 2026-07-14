@@ -13,12 +13,13 @@
  * 通用设计：不依赖特定 UI 框架，通过标准 HTML 语义和 ARIA 属性识别表格。
  */
 
-import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, refs, clamp, normalizeText, compactOneLine, Z_INDEX } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, refs, clamp, normalizeText, compactOneLine, TABLE_UI_Z_INDEX, TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX } from './state.js';
 import { el, getCssSelector, getOverlayBoundsForElement, findRowElementFromEventTarget, isVisibleElement } from './dom.js';
 import { addContextSnippet, removeContextByRef, extractTableRowText } from './context.js';
 import { showToast } from './toast.js';
 import { render } from './overlay.js';
 import { createContextRef, isContextRef } from './context-ref.js';
+import { getBusinessRowKey, getRenderedRowIdentity, getRowContentFingerprint, resolveTableAdapter } from './table-adapters.js';
 
 // ========== UI 框架类名常量（避免硬编码） ==========
 
@@ -32,6 +33,30 @@ const ANT_PAGINATION_DISABLED = "ant-pagination-disabled";
 const ARCO_PAGINATION_DISABLED = "arco-pagination-item-disabled";
 
 // ========== 通用表格辅助函数 ==========
+
+/**
+ * 临时诊断记录：用于真实虚拟表格复现，最多保留 120 条并镜像到隐藏节点供调试读取。
+ * 只记录前几列摘要、身份和 ref，不记录整页 HTML。
+ */
+function recordTableDiagnostic(event, detail = {}) {
+  const entry = { at: Date.now(), event, ...detail };
+  refs.tableDiagnostics.push(entry);
+  if (refs.tableDiagnostics.length > 120) refs.tableDiagnostics.splice(0, refs.tableDiagnostics.length - 120);
+  let node = document.getElementById("web2ai_table_diagnostics");
+  if (!node) {
+    node = document.createElement("script");
+    node.id = "web2ai_table_diagnostics";
+    node.type = "application/json";
+    node.hidden = true;
+    document.documentElement.appendChild(node);
+  }
+  node.textContent = JSON.stringify({
+    href: location.href,
+    trace: refs.tableDiagnostics,
+    rowMeta: Array.from(refs.refToRowMeta.entries()),
+    identities: Array.from(refs.renderedRowIdentityToRef.entries())
+  });
+}
 
 /**
  * 从任意行元素中提取单元格列表（通用实现）。
@@ -132,16 +157,31 @@ function hasHeaderCells(row) {
   return false;
 }
 
-function getStableTableRoot(rowEl) {
-  return rowEl?.closest?.("table,[role='grid'],[role='table'],[role='treegrid']") || rowEl?.parentElement || null;
+function isTableFooterOrSummaryRow(rowEl) {
+  return Boolean(rowEl?.closest?.(
+    "tfoot, .art-table-footer, .ant-table-summary, .ant-table-footer, " +
+    ".arco-table-footer, .arco-table-summary, [role='rowgroup'][aria-label*='summary' i]"
+  ));
 }
 
-/** 页面刷新后仍可复用的表格身份；frame URL 用于隔离不同 iframe 中相同 selector 的表格。 */
+function getStableTableRoot(rowEl) {
+  return resolveTableAdapter(rowEl).scope;
+}
+
+/**
+ * 组件容器级表格身份。项目不再做刷新恢复，因此使用当前页面生命周期内的实例 key：
+ * 固定表头和表体共享同一根节点；同页结构完全相同的多个组件也绝不会碰撞。
+ */
 function getTableIdForRow(rowEl) {
-  const root = getStableTableRoot(rowEl);
+  const { adapter, scope: root } = resolveTableAdapter(rowEl);
   if (!root) return "";
-  const selector = getCssSelector(root);
-  return selector ? `${location.href}::${selector}` : "";
+  let tableKey = refs.tableRootToKey.get(root);
+  if (!tableKey) {
+    const selector = getCssSelector(root) || root.tagName?.toLowerCase?.() || "table";
+    tableKey = `${location.href}::${adapter.name}::instance:${refs.nextTableInstanceId++}::${selector}`;
+    refs.tableRootToKey.set(root, tableKey);
+  }
+  return tableKey;
 }
 
 function getCurrentPageIndex(rowEl) {
@@ -175,13 +215,168 @@ function highlightRow(rowEl, on) {
   }
 }
 
+function syncTableUiLayer() {
+  const candidates = document.querySelectorAll(
+    ".ant-drawer-open, .ant-drawer-content-wrapper, .arco-drawer, .arco-drawer-wrapper, [role='dialog']"
+  );
+  refs.siteOverlayActive = Array.from(candidates).some((node) =>
+    !node.closest?.("[data-web2ai-ui]") && isVisibleElement(node)
+  );
+  const zIndex = refs.siteOverlayActive ? TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX : TABLE_UI_Z_INDEX;
+  if (refs.batchBar) refs.batchBar.style.zIndex = zIndex;
+  if (refs.tableRowFab) refs.tableRowFab.style.zIndex = zIndex;
+  if (refs.inlineRowFab) refs.inlineRowFab.style.zIndex = zIndex;
+  for (const node of refs.pinnedRowOverlays.values()) node.style.zIndex = zIndex;
+}
+
+function getVirtualRowPositionKey(rowEl, tableId = getTableIdForRow(rowEl)) {
+  const rowIndex = rowEl?.getAttribute?.("data-rowindex");
+  if (rowIndex == null || rowIndex === "") return "";
+  const { adapter } = resolveTableAdapter(rowEl);
+  // ArtTable 的 data-rowindex 是组件提供的数据位置。它的虚拟占位布局不保证
+  // scrollHeight/clientHeight 比例稳定，因此不能用滚动高度来决定是否启用去重。
+  if (adapter.name !== "art" && !detectVirtualScroll(rowEl, 0)) return "";
+  const pageIndex = getCurrentPageIndex(rowEl) ?? 1;
+  return `${tableId || location.href}::page:${pageIndex}::virtual-index:${rowIndex}`;
+}
+
+/**
+ * ArtTable 顶部常驻行与虚拟行必须使用同一种稳定身份。其后续业务列可能异步刷新，
+ * 因此无业务 key 时以“序号 + 订单号”这前两个非空列识别；其他表格仍用通用三列指纹。
+ */
+function getRowRenderedIdentity(rowEl, tableId, businessRowKey, text) {
+  const { adapter } = resolveTableAdapter(rowEl);
+  if (!businessRowKey && adapter.name === "art") {
+    const fingerprint = getRowContentFingerprint(text, 2);
+    return fingerprint ? `${tableId || "unknown-table"}::${fingerprint}` : "";
+  }
+  return getRenderedRowIdentity(tableId, businessRowKey, text);
+}
+
+/**
+ * 虚拟滚动会把一个仍连接在 DOM 中的行节点改写为另一条数据。此时只解除旧快照
+ * 与该节点的 UI 绑定，不能删除旧上下文；旧内容已经作为文本快照安全保存在内存中。
+ */
+function reconcileRecycledRow(rowEl) {
+  const previousRef = refs.selectedRowRef.get(rowEl);
+  if (!isAddedRef(previousRef)) return;
+  if (isTableFooterOrSummaryRow(rowEl)) {
+    removePinnedRowOverlay(rowEl);
+    highlightRow(rowEl, false);
+    refs.selectedRowRef.delete(rowEl);
+    if (refs.refToRowEl.get(previousRef) === rowEl) refs.refToRowEl.delete(previousRef);
+    refs.refToCheckbox.delete(previousRef);
+    return;
+  }
+  // 表头不是虚拟数据行，排序/筛选状态改变也不应取消其选中渲染。
+  if (isHeaderRow(rowEl)) return;
+  const tableId = getTableIdForRow(rowEl);
+  const businessRowKey = getBusinessRowKey(rowEl);
+  const text = extractTableRowText(rowEl).trim();
+  const currentIdentity = getRowRenderedIdentity(rowEl, tableId, businessRowKey, text);
+  const previousIdentity = refs.refToRenderedRowIdentity.get(previousRef);
+  const currentVirtualPosition = getVirtualRowPositionKey(rowEl, tableId);
+  const previousVirtualPosition = refs.refToVirtualRowPosition.get(previousRef);
+  if (currentVirtualPosition && currentVirtualPosition === previousVirtualPosition) return;
+  if (!previousIdentity || previousIdentity === currentIdentity) return;
+
+  recordTableDiagnostic("reconcile-changed", {
+    ref: previousRef,
+    rowIndex: rowEl.getAttribute?.("data-rowindex") || "",
+    previousIdentity,
+    currentIdentity
+  });
+
+  removePinnedRowOverlay(rowEl);
+  highlightRow(rowEl, false);
+  refs.selectedRowRef.delete(rowEl);
+  if (refs.refToRowEl.get(previousRef) === rowEl) refs.refToRowEl.delete(previousRef);
+  refs.refToCheckbox.delete(previousRef);
+}
+
+/**
+ * 虚拟表格可能销毁旧行节点，再为同一条业务数据创建新节点。上下文快照仍然有效，
+ * 因此这里按业务 key/内容指纹把新节点重新绑定到原 ref，恢复勾选和高亮，而不是重复加入。
+ */
+function restoreSelectedRowBinding(rowEl, { tableId, businessRowKey, text, renderedIdentity } = {}) {
+  if (!rowEl || isHeaderRow(rowEl) || isTableFooterOrSummaryRow(rowEl)) return null;
+  tableId ||= getTableIdForRow(rowEl);
+  businessRowKey ||= getBusinessRowKey(rowEl);
+  if (text == null) text = extractTableRowText(rowEl).trim();
+  if (!text) return null;
+  renderedIdentity ||= getRowRenderedIdentity(rowEl, tableId, businessRowKey, text);
+  const rowKey = businessRowKey ? `${tableId || location.href}::${businessRowKey}` : "";
+  const virtualPosition = getVirtualRowPositionKey(rowEl, tableId);
+  const ref = (virtualPosition && refs.virtualRowPositionToRef.get(virtualPosition)) ||
+    (rowKey && refs.rowKeyToRef.get(rowKey)) ||
+    (renderedIdentity && refs.renderedRowIdentityToRef.get(renderedIdentity));
+  if (!isAddedRef(ref)) return null;
+
+  const previousRowEl = refs.refToRowEl.get(ref);
+  if (previousRowEl && previousRowEl !== rowEl) {
+    removePinnedRowOverlay(previousRowEl);
+    highlightRow(previousRowEl, false);
+    if (refs.selectedRowRef.get(previousRowEl) === ref) refs.selectedRowRef.delete(previousRowEl);
+  }
+  refs.selectedRowRef.set(rowEl, ref);
+  refs.refToRowEl.set(ref, rowEl);
+  highlightRow(rowEl, true);
+  ensurePinnedRowOverlay(rowEl, ref);
+  recordTableDiagnostic("restore-binding", {
+    ref,
+    rowIndex: rowEl.getAttribute?.("data-rowindex") || "",
+    renderedIdentity
+  });
+  return ref;
+}
+
+function findRefByRenderedIdentity(renderedIdentity) {
+  if (!renderedIdentity) return null;
+  const direct = refs.renderedRowIdentityToRef.get(renderedIdentity);
+  if (isAddedRef(direct)) return direct;
+  // 双向索引可能因跨 frame UI 清理短暂不同步；反向索引仍是可靠的已加入证据。
+  for (const [ref, identity] of refs.refToRenderedRowIdentity.entries()) {
+    if (identity !== renderedIdentity || !isAddedRef(ref)) continue;
+    refs.renderedRowIdentityToRef.set(renderedIdentity, ref);
+    return ref;
+  }
+  return null;
+}
+
 function addRowElToContext(rowEl, { silent } = {}) {
   if (!rowEl) return 0;
+  if (isTableFooterOrSummaryRow(rowEl)) return 0;
   const t0 = performance.now();
+  reconcileRecycledRow(rowEl);
   const existing = refs.selectedRowRef.get(rowEl);
-  if (isAddedRef(existing)) return 0;
+  if (isAddedRef(existing)) {
+    recordTableDiagnostic("skip-dom-ref", { ref: existing, rowIndex: rowEl.getAttribute?.("data-rowindex") || "" });
+    return 0;
+  }
+  const tableId = getTableIdForRow(rowEl);
+  const businessRowKey = getBusinessRowKey(rowEl);
+  const virtualPosition = getVirtualRowPositionKey(rowEl, tableId);
+  if (virtualPosition && isAddedRef(refs.virtualRowPositionToRef.get(virtualPosition))) {
+    const ref = restoreSelectedRowBinding(rowEl, { tableId, businessRowKey });
+    recordTableDiagnostic("skip-virtual-position", { virtualPosition, ref });
+    return 0;
+  }
+  // 相同业务 key 可能出现在页面上的不同表格，必须绑定组件级 tableId。
+  const rowKey = businessRowKey ? `${tableId || location.href}::${businessRowKey}` : "";
+  if (rowKey && isAddedRef(refs.rowKeyToRef.get(rowKey))) {
+    const ref = restoreSelectedRowBinding(rowEl, { tableId, businessRowKey });
+    recordTableDiagnostic("skip-row-key", { rowKey, ref });
+    return 0;
+  }
   const text = extractTableRowText(rowEl).trim();
   if (!text) return 0;
+  const renderedIdentity = getRowRenderedIdentity(rowEl, tableId, businessRowKey, text);
+  const identityRef = findRefByRenderedIdentity(renderedIdentity);
+  if (isAddedRef(identityRef)) {
+    const ref = restoreSelectedRowBinding(rowEl, { tableId, businessRowKey, text, renderedIdentity });
+    recordTableDiagnostic("skip-fingerprint", { renderedIdentity, ref });
+    return 0;
+  }
   const textPreview = compactOneLine(text).slice(0, 60);
   DEBUG && console.log(`[web2ai] addRowElToContext adding text="${textPreview}"`, rowEl);
   
@@ -191,6 +386,25 @@ function addRowElToContext(rowEl, { silent } = {}) {
   const ref = createContextRef();
   refs.selectedRowRef.set(rowEl, ref);
   refs.refToRowEl.set(ref, rowEl);
+  if (virtualPosition) {
+    refs.virtualRowPositionToRef.set(virtualPosition, ref);
+    refs.refToVirtualRowPosition.set(ref, virtualPosition);
+  }
+  if (renderedIdentity) {
+    refs.refToRenderedRowIdentity.set(ref, renderedIdentity);
+    refs.renderedRowIdentityToRef.set(renderedIdentity, ref);
+  }
+  recordTableDiagnostic("add", {
+    ref,
+    rowIndex: rowEl.getAttribute?.("data-rowindex") || "",
+    tableId,
+    renderedIdentity,
+    columns: text.split(COL_SEPARATOR).slice(0, 5)
+  });
+  if (rowKey) {
+    refs.rowKeyToRef.set(rowKey, ref);
+    refs.refToRowKey.set(ref, rowKey);
+  }
   try {
     const cb = refs.tableRowFab?.querySelector?.("#web2ai_table_row_checkbox");
     if (cb) refs.refToCheckbox.set(ref, cb);
@@ -199,8 +413,9 @@ function addRowElToContext(rowEl, { silent } = {}) {
   ensurePinnedRowOverlay(rowEl, ref);
   const isHeader = isHeaderRow(rowEl);
   const kind = isHeader ? "table-header" : "table-row";
+  const pageIndex = getCurrentPageIndex(rowEl);
+  refs.refToRowMeta.set(ref, { tableId, pageIndex, kind });
   const cellCount = getCellCount(rowEl);
-  const tableId = getTableIdForRow(rowEl);
   let matchedHeaderRow = null;
   if (isHeader) {
     DEBUG && console.log(`[web2ai] addRowElToContext HEADER row added: cellCount=${cellCount}`, dumpRowCellDetail(rowEl));
@@ -287,7 +502,8 @@ function addRowElToContext(rowEl, { silent } = {}) {
     cellCount,
     tableId,
     headerRef: matchedHeaderRow ? refs.selectedRowRef.get(matchedHeaderRow) || "" : "",
-    pageIndex: getCurrentPageIndex(rowEl),
+    pageIndex,
+    rowKey,
     silent: Boolean(silent)
   });
 
@@ -301,6 +517,8 @@ function addRowElToContext(rowEl, { silent } = {}) {
 
   if (!isHeader) {
     refs.batchAnchorRow = rowEl;
+    refs.batchTableId = tableId;
+    refs.batchPageIndex = pageIndex;
     // 通用：尝试找表格容器
     const parentTableEl = rowEl.closest("table") || rowEl.closest('[role="grid"]') || rowEl.closest('[role="table"]');
     if (parentTableEl) {
@@ -404,7 +622,7 @@ function ensureTableRowFab() {
     onClick: (e) => e.stopPropagation(),
     style: {
       position: "fixed",
-      zIndex: Z_INDEX,
+      zIndex: TABLE_UI_Z_INDEX,
       display: "none",
       alignItems: "center",
       justifyContent: "flex-start",
@@ -551,6 +769,12 @@ function ensureInlineRowFab() {
 function showInlineRowFab(rowEl) {
   ensureInlineRowFab();
   if (!refs.inlineRowFab) return;
+  if (isTableFooterOrSummaryRow(rowEl)) {
+    hideInlineRowFab();
+    return;
+  }
+  reconcileRecycledRow(rowEl);
+  if (!isAddedRef(refs.selectedRowRef.get(rowEl))) restoreSelectedRowBinding(rowEl);
   if (refs.pinnedRowOverlays.has(rowEl)) {
     hideInlineRowFab();
     return;
@@ -583,7 +807,10 @@ function hideInlineRowFab() {
 
 function ensurePinnedRowOverlay(rowEl, ref) {
   if (!rowEl || !ref) return;
-  if (refs.pinnedRowOverlays.has(rowEl)) return;
+  const existingNode = refs.pinnedRowOverlays.get(rowEl);
+  if (existingNode?.isConnected) return;
+  // 单元格局部重绘可能移除 check 节点，但保留原 row DOM 和 Map 项。
+  if (existingNode) refs.pinnedRowOverlays.delete(rowEl);
 
   // 通用判断：TR 或 tbody 内的 row 或 rowgroup 内的 row 用 inline 定位（跟随滚动）
   const isInline = rowEl.tagName === "TR" ||
@@ -592,11 +819,12 @@ function ensurePinnedRowOverlay(rowEl, ref) {
     ));
   const inlineCell = isInline ? getRowInlineAnchorCell(rowEl) : null;
   const node = el("div", {
+    "data-web2ai-ui": true,
     style: {
       position: isInline && inlineCell ? "absolute" : "fixed",
       right: isInline && inlineCell ? "6px" : null,
       top: isInline && inlineCell ? "4px" : null,
-      zIndex: Z_INDEX,
+      zIndex: TABLE_UI_Z_INDEX,
       display: "flex",
       alignItems: "center",
       gap: "6px",
@@ -705,6 +933,10 @@ function getRowAnchorRect(rowEl) {
 }
 
 function showTableRowFabAt(rect, rowEl) {
+  if (isTableFooterOrSummaryRow(rowEl)) {
+    hideTableRowFab();
+    return;
+  }
   // 内联定位的行（TR 或在 tbody/rowgroup 内的 role=row）使用内联 FAB
   const isInline = rowEl?.tagName === "TR" ||
     (rowEl?.getAttribute?.("role") === "row" && (
@@ -718,6 +950,8 @@ function showTableRowFabAt(rect, rowEl) {
 
   hideInlineRowFab();
   ensureTableRowFab();
+  reconcileRecycledRow(rowEl);
+  if (!isAddedRef(refs.selectedRowRef.get(rowEl))) restoreSelectedRowBinding(rowEl);
   refs.hoveredRow = rowEl;
   const input = refs.tableRowFab.querySelector("#web2ai_table_row_checkbox");
   if (input) input.checked = Boolean(refs.selectedRowRef.get(rowEl));
@@ -799,7 +1033,7 @@ function ensureBatchBar() {
       position: "fixed",
       left: "12px",
       bottom: "12px",
-      zIndex: Z_INDEX,
+      zIndex: TABLE_UI_Z_INDEX,
       display: "none",
       gap: "8px",
       alignItems: "center",
@@ -946,18 +1180,17 @@ function ensureBatchBar() {
 }
 
 function updateBatchBar() {
-  // 优化：anchor 无效时不需要创建 bar，直接隐藏或跳过
+  // 虚拟列表快速滚动时可能有一帧没有任何数据行 DOM；批量状态不能依赖该瞬时锚点。
   if (!refs.batchAnchorRow || !refs.batchAnchorRow.isConnected) {
-    if (refs.batchBar) {
-      refs.batchBar.style.display = "none";
-    }
-    refs.batchAnchorRow = null;
-    refs.batchTableRoot = null;
-    refs.batchContainer = null;
-    return;
+    refs.batchAnchorRow = findVisibleBatchAnchor(refs.batchTableId, refs.batchPageIndex);
   }
   ensureBatchBar();
-  const count = getAddedRowCountInGroup(refs.batchAnchorRow);
+  const count = refs.batchAnchorRow
+    ? getAddedRowCountInGroup(refs.batchAnchorRow)
+    : Array.from(refs.refToRowMeta.values()).filter((meta) =>
+      meta.kind === "table-row" && meta.tableId === refs.batchTableId &&
+      (refs.batchPageIndex == null || meta.pageIndex == null || meta.pageIndex === refs.batchPageIndex)
+    ).length;
   if (count < 1) {
     refs.batchBar.style.display = "none";
     return;
@@ -1028,6 +1261,7 @@ function getRowGroupRows(anchorRowEl) {
 
   return Array.from(rows).filter((row) => {
     if (!row.isConnected) return false;
+    if (isTableFooterOrSummaryRow(row)) return false;
     if (!isVisibleElement(row)) return false;
     // 必须有可见单元格
     const cells = getRowCells(row);
@@ -1062,10 +1296,18 @@ function detectVirtualScroll(rowEl, visibleRowCount) {
 }
 
 function selectAllRowsInSameGroup(opts = {}) {
+  if (!refs.batchAnchorRow?.isConnected) {
+    refs.batchAnchorRow = findVisibleBatchAnchor(refs.batchTableId, refs.batchPageIndex);
+  }
   DEBUG && console.log(`[web2ai.BAR] selectAllRowsInSameGroup CALLED batchAnchorRow=${!!refs.batchAnchorRow} connected=${refs.batchAnchorRow?.isConnected}`);
   if (!refs.batchAnchorRow || !refs.batchAnchorRow.isConnected) { DEBUG && console.log(`[web2ai.BAR] selectAllRowsInSameGroup anchor invalid, return 0`); return 0; }
   const t0 = performance.now();
   const rows = getRowGroupRows(refs.batchAnchorRow);
+  recordTableDiagnostic("batch-start", {
+    visibleRows: rows.length,
+    anchorIndex: refs.batchAnchorRow.getAttribute?.("data-rowindex") || "",
+    tableId: getTableIdForRow(refs.batchAnchorRow)
+  });
   const rowDetails = rows.map((r, i) => {
     const ref = refs.selectedRowRef.get(r);
     const txt = compactOneLine(extractTableRowText(r)).slice(0, 40);
@@ -1076,6 +1318,8 @@ function selectAllRowsInSameGroup(opts = {}) {
   for (const rowEl of rows) {
     added += addRowElToContext(rowEl, { silent: true });
   }
+  scheduleBatchSelectionReconcile();
+  recordTableDiagnostic("batch-end", { visibleRows: rows.length, added });
   const elapsed = performance.now() - t0;
   DEBUG && console.log(`[web2ai] selectAllRowsInSameGroup added ${added}/${rows.length} totalTime=${elapsed.toFixed(1)}ms`);
   if (added) {
@@ -1102,17 +1346,24 @@ function selectAllRowsInSameGroup(opts = {}) {
 }
 
 function clearAllRowsInSameGroup(opts = {}) {
+  if (!refs.batchAnchorRow?.isConnected) {
+    refs.batchAnchorRow = findVisibleBatchAnchor(refs.batchTableId, refs.batchPageIndex);
+  }
   DEBUG && console.log(`[web2ai.BAR] clearAllRowsInSameGroup CALLED batchAnchorRow=${!!refs.batchAnchorRow} connected=${refs.batchAnchorRow?.isConnected} batchTableRoot=${!!refs.batchTableRoot} connected=${refs.batchTableRoot?.isConnected}`);
   if (!refs.batchAnchorRow || !refs.batchAnchorRow.isConnected) { DEBUG && console.log(`[web2ai.BAR] clearAllRowsInSameGroup anchor invalid, return 0`); return 0; }
   const rows = getRowGroupRows(refs.batchAnchorRow);
   DEBUG && console.log(`[web2ai.BAR] clearAllRowsInSameGroup getRowGroupRows returned ${rows.length} rows`);
-  const refs_list = [];
-  for (const rowEl of rows) {
-    const ref = refs.selectedRowRef.get(rowEl);
-    if (isAddedRef(ref)) refs_list.push(ref);
-  }
+  const tableId = getTableIdForRow(refs.batchAnchorRow);
+  const pageIndex = getCurrentPageIndex(refs.batchAnchorRow);
+  const refs_list = Array.from(refs.refToRowMeta.entries())
+    .filter(([, meta]) => meta.kind === "table-row" && meta.tableId === tableId &&
+      (pageIndex == null || meta.pageIndex == null || meta.pageIndex === pageIndex))
+    .map(([ref]) => ref);
   if (!refs_list.length) return 0;
-  for (const ref of refs_list) removeContextByRef(ref, { silent: true });
+  for (const ref of refs_list) {
+    removeContextByRef(ref, { silent: true });
+    refs.refToRowMeta.delete(ref);
+  }
   refs.batchAnchorRow = rows.find((r) => isAddedRef(refs.selectedRowRef.get(r))) || null;
   if (refs.batchAnchorRow) {
     const tableEl = refs.batchAnchorRow.tagName === "TR" ? refs.batchAnchorRow.closest("table") : null;
@@ -1135,13 +1386,61 @@ function isAddedRef(ref) {
 
 function getAddedRowCountInGroup(anchorRowEl) {
   if (!anchorRowEl || !anchorRowEl.isConnected) return 0;
-  const rows = getRowGroupRows(anchorRowEl);
-  let n = 0;
-  for (const rowEl of rows) {
-    const ref = refs.selectedRowRef.get(rowEl);
-    if (isAddedRef(ref)) n++;
+  const tableId = getTableIdForRow(anchorRowEl);
+  const pageIndex = getCurrentPageIndex(anchorRowEl);
+  let count = 0;
+  for (const meta of refs.refToRowMeta.values()) {
+    if (meta.kind !== "table-row" || meta.tableId !== tableId) continue;
+    if (pageIndex != null && meta.pageIndex != null && meta.pageIndex !== pageIndex) continue;
+    count++;
   }
-  return n;
+  return count;
+}
+
+/** 当前 DOM 中可能代表业务数据行的有限集合；用于虚拟列表滚动后的绑定恢复。 */
+function getRenderedTableRows() {
+  return Array.from(document.querySelectorAll(
+    "tbody tr, [role='rowgroup'] [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"
+  )).filter((rowEl) =>
+    !rowEl.closest?.("[data-web2ai-ui]") && !isTableFooterOrSummaryRow(rowEl)
+  );
+}
+
+function restoreRenderedSelectionState() {
+  for (const rowEl of getRenderedTableRows()) {
+    if (!rowEl?.isConnected || isHeaderRow(rowEl)) continue;
+    reconcileRecycledRow(rowEl);
+    const ref = refs.selectedRowRef.get(rowEl);
+    if (isAddedRef(ref)) {
+      highlightRow(rowEl, true);
+      ensurePinnedRowOverlay(rowEl, ref);
+    } else {
+      restoreSelectedRowBinding(rowEl);
+    }
+  }
+}
+
+/** 批量结束后框架可能还有一轮异步单元格重绘；连续两帧校验 UI 与上下文一致。 */
+function scheduleBatchSelectionReconcile() {
+  requestAnimationFrame(() => {
+    restoreRenderedSelectionState();
+    requestAnimationFrame(() => {
+      restoreRenderedSelectionState();
+      updateBatchBar();
+    });
+  });
+}
+
+function findVisibleBatchAnchor(tableId, pageIndex) {
+  if (!tableId) return null;
+  for (const rowEl of getRenderedTableRows()) {
+    if (isHeaderRow(rowEl) || !isVisibleElement(rowEl)) continue;
+    if (getTableIdForRow(rowEl) !== tableId) continue;
+    const currentPage = getCurrentPageIndex(rowEl);
+    if (pageIndex != null && currentPage != null && currentPage !== pageIndex) continue;
+    return rowEl;
+  }
+  return null;
 }
 
 function pruneDisconnectedRowMappings() {
@@ -1155,13 +1454,22 @@ function pruneDisconnectedRowMappings() {
   // 清理 SPA 页面切换后的残留 batch 状态
   if (refs.batchAnchorRow && !refs.batchAnchorRow.isConnected) {
     DEBUG && console.log(`[web2ai.BAR] pruneDisconnected: clearing stale batchAnchorRow (was connected=${refs.batchAnchorRow.isConnected})`);
-    refs.batchAnchorRow = null;
-    refs.batchTableRoot = null;
-    refs.batchContainer = null;
-    // 同时隐藏旧 bar（SPA 切换到 iframe 页面时，top frame 的 bar 不会被 updateBatchBar 自动隐藏）
-    if (refs.batchBar && refs.batchBar.isConnected) {
-      DEBUG && console.log(`[web2ai.BAR] pruneDisconnected: hiding stale bar (anchor gone, bar still connected in top frame)`);
-      refs.batchBar.style.display = "none";
+    const previousTableRoot = refs.batchTableRoot;
+    const oldRef = refs.selectedRowRef.get(refs.batchAnchorRow);
+    const oldMeta = oldRef ? refs.refToRowMeta.get(oldRef) : null;
+    const tableId = refs.batchTableId || oldMeta?.tableId || getTableIdForRow(refs.batchAnchorRow);
+    const pageIndex = refs.batchPageIndex ?? oldMeta?.pageIndex ?? getCurrentPageIndex(refs.batchAnchorRow);
+    const replacement = findVisibleBatchAnchor(tableId, pageIndex);
+    refs.batchAnchorRow = replacement;
+    refs.batchTableRoot = replacement ? getStableTableRoot(replacement) : null;
+    refs.batchContainer = replacement?.closest?.(DRAWER_MODAL_SELECTORS) || null;
+    if (!replacement && previousTableRoot && !previousTableRoot.isConnected) {
+      // SPA 切页会同时销毁整个表格根节点；这与虚拟滚动只替换行节点不同。
+      refs.batchBar?.remove();
+      refs.batchBar = null;
+      refs.batchTableId = "";
+      refs.batchPageIndex = null;
+      refs.batchContainer = null;
     }
   }
   if (refs.batchTableRoot && !refs.batchTableRoot.isConnected) refs.batchTableRoot = null;
@@ -1665,6 +1973,27 @@ function getRowInlineAnchorCell(rowEl) {
 }
 
 function initTableListeners() {
+  let _layerRafPending = false;
+  const layerObserver = new MutationObserver((mutations) => {
+    const onlyPluginUi = mutations.every((mutation) =>
+      mutation.target?.closest?.("[data-web2ai-ui], [id^='web2ai_']")
+    );
+    if (onlyPluginUi) return;
+    if (_layerRafPending) return;
+    _layerRafPending = true;
+    requestAnimationFrame(() => {
+      _layerRafPending = false;
+      syncTableUiLayer();
+    });
+  });
+  layerObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class", "style", "aria-hidden"]
+  });
+  syncTableUiLayer();
+
   let _rafPending = false;
   document.addEventListener(
     "mousemove",
@@ -1691,12 +2020,21 @@ function initTableListeners() {
     true
   );
 
+  let _scrollRafPending = false;
   document.addEventListener(
     "scroll",
     () => {
       hideTableRowFab();
-      pruneDisconnectedRowMappings();
-      for (const rowEl of refs.pinnedRowOverlays.keys()) positionPinnedRowOverlay(rowEl);
+      if (_scrollRafPending) return;
+      _scrollRafPending = true;
+      // 等虚拟列表完成本帧的数据替换后，恢复新 DOM 行的选中绑定和批量锚点。
+      requestAnimationFrame(() => {
+        _scrollRafPending = false;
+        restoreRenderedSelectionState();
+        pruneDisconnectedRowMappings();
+        for (const rowEl of refs.pinnedRowOverlays.keys()) positionPinnedRowOverlay(rowEl);
+        updateBatchBar();
+      });
     },
     { passive: true, capture: true }
   );

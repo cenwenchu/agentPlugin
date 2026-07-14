@@ -5,10 +5,10 @@ function compact(text, limit = 240) {
 
 function buildOnboardingPrompt(groups, { pageCount = 1 } = {}) {
   const rowCount = groups.reduce((sum, group) => sum + group.rows.length, 0);
-  const summaries = groups.map((group, index) => {
+  const summaries = groups.map((group) => {
     const header = group.header?.text || "无明确表头";
     const samples = group.rows.slice(0, 2).map((row) => `  - ${compact(row.text)}`).join("\n") || "  - 无数据样例";
-    return `表格 ${index + 1}\n- 行数：${group.rows.length}\n- 列结构：${compact(header)}\n- 数据样例：\n${samples}`;
+    return `表格 ${group.tableNumber}\n- 行数：${group.rows.length}\n- 列结构：${compact(header)}\n- 数据样例：\n${samples}`;
   }).join("\n\n");
 
   return `你是网页数据分析助手，正在帮助第一次使用该功能的用户开始对话。

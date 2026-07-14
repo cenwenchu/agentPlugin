@@ -12,7 +12,7 @@
  * content script → messaging.js (Port) → background.js (fetch SSE) → messaging.js → scheduleRender
  */
 
-import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, Z_INDEX, TABLE_UI_Z_INDEX, TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
 import { el } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { openOptionsPage, streamChat, stopGeneration, sendToBackground } from './messaging.js';
@@ -153,13 +153,17 @@ function render() {
     }
   }
   // 最大化时将所有浮动 UI 的 z-index 降到聊天面板下方，防止遮挡
-  const floatingZIndex = (STATE.open && STATE.maximized) ? "1" : Z_INDEX;
+  const isMaximized = STATE.open && STATE.maximized;
+  const floatingZIndex = isMaximized ? "1" : Z_INDEX;
+  const tableUiZIndex = isMaximized
+    ? "1"
+    : (refs.siteOverlayActive ? TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX : TABLE_UI_Z_INDEX);
   if (refs.launcherFab) refs.launcherFab.style.zIndex = floatingZIndex;
-  if (refs.batchBar) refs.batchBar.style.zIndex = floatingZIndex;
-  if (refs.tableRowFab) refs.tableRowFab.style.zIndex = floatingZIndex;
-  if (refs.inlineRowFab) refs.inlineRowFab.style.zIndex = floatingZIndex;
+  if (refs.batchBar) refs.batchBar.style.zIndex = tableUiZIndex;
+  if (refs.tableRowFab) refs.tableRowFab.style.zIndex = tableUiZIndex;
+  if (refs.inlineRowFab) refs.inlineRowFab.style.zIndex = tableUiZIndex;
   for (const node of refs.pinnedRowOverlays.values()) {
-    node.style.zIndex = floatingZIndex;
+    node.style.zIndex = tableUiZIndex;
   }
 
   const wrap = el("div", {
@@ -265,11 +269,13 @@ function render() {
     for (let gi = 0; gi < groups.length; gi++) {
       const g = groups[gi];
       const rowCount = g.rows.length;
-      const label = g.header ? `表格 ${gi + 1}（${rowCount} 条）` : `未命名表格（${rowCount} 条）`;
+      const label = g.header
+        ? `表格 ${g.tableNumber}（${rowCount} 条）`
+        : `表格 ${g.tableNumber}（无表头，${rowCount} 条）`;
       els.push(el("div", { class: "tableGroupLabel", style: { display: "flex", alignItems: "center", gap: "6px" } }, [
         el("span", { style: { flex: "1" } }, [label]),
-        el("button", { class: "btn", style: { padding: "0 6px", height: "22px", fontSize: "10px" }, onClick: () => downloadTableGroup(g, "markdown", gi) }, ["MD"]),
-        el("button", { class: "btn", style: { padding: "0 6px", height: "22px", fontSize: "10px" }, onClick: () => downloadTableGroup(g, "csv", gi) }, ["CSV"])
+        el("button", { class: "btn", style: { padding: "0 6px", height: "22px", fontSize: "10px" }, onClick: () => downloadTableGroup(g, "markdown", g.tableNumber - 1) }, ["MD"]),
+        el("button", { class: "btn", style: { padding: "0 6px", height: "22px", fontSize: "10px" }, onClick: () => downloadTableGroup(g, "csv", g.tableNumber - 1) }, ["CSV"])
       ]));
       if (g.header) {
         els.push(renderContextItem(g.header));
@@ -520,7 +526,16 @@ async function sendText(rawText, opts = {}) {
     render();
   } catch (e) {
     const errMsg = String(e?.message ?? e);
-    DEBUG && console.log(`[web2ai] sendText request failed, retrying once: ${errMsg}`);
+    const partialAssistant = refs.streamingMsgRef;
+    // 已收到任何内容时绝不整请求重试，避免重复回答和重复计费。
+    if (partialAssistant?.content) {
+      partialAssistant.content = `${normalizeText(partialAssistant.content)}\n\n[连接已中断：${errMsg}]`;
+      refs.streamingMsgRef = null;
+      showToast("回答已部分生成，连接中断后未自动重试");
+      render();
+      return;
+    }
+    DEBUG && console.log(`[web2ai] sendText failed before first token, retrying once: ${errMsg}`);
     try {
       STATE.messages.pop();
       const retryAssistantMsg = {

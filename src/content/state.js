@@ -49,6 +49,10 @@ const CONTEXT_CHAR_LIMIT = 50000;
 const CONTEXT_WARN_LIMIT = 100000;
 /** 全局 z-index 基准值 */
 const Z_INDEX = "1000";
+/** 表格 check/bar 常规层级；固定表格需要保持高优先级。 */
+const TABLE_UI_Z_INDEX = "1000";
+/** 站点 Drawer/Modal 打开时临时降低，避免盖住菜单。 */
+const TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX = "900";
 
 /**
  * 生成唯一 ID。
@@ -126,12 +130,34 @@ const refs = {
   selectedRowRef: new WeakMap(),
   /** Map: ref → 行元素 */
   refToRowEl: new Map(),
+  /** WeakMap: 实际表格组件根节点 → 当前页面生命周期唯一 tableKey */
+  tableRootToKey: new WeakMap(),
+  /** tableKey 实例递增序号 */
+  nextTableInstanceId: 1,
+  /** Map: 虚拟表格 tableKey + page + data-rowindex → ref */
+  virtualRowPositionToRef: new Map(),
+  /** Map: ref → 虚拟表格位置身份 */
+  refToVirtualRowPosition: new Map(),
+  /** Map: 稳定业务 rowKey → ref，用于虚拟滚动 DOM 复用去重 */
+  rowKeyToRef: new Map(),
+  /** Map: ref → 业务 rowKey，删除上下文时反向清理 */
+  refToRowKey: new Map(),
+  /** Map: ref → 最近渲染身份，用于识别虚拟滚动复用的 DOM 行节点 */
+  refToRenderedRowIdentity: new Map(),
+  /** Map: tableKey + rowKey/内容指纹 → ref，DOM 绑定丢失时仍可阻止批量重复加入 */
+  renderedRowIdentityToRef: new Map(),
+  /** Map: ref → {tableId, pageIndex, kind}，动态行被回收后仍可统计和批量取消 */
+  refToRowMeta: new Map(),
   /** Map: ref → 行 checkbox 元素 */
   refToCheckbox: new Map(),
   /** Map: 行元素 → pinned overlay 节点 */
   pinnedRowOverlays: new Map(),
   /** 批量操作的锚点行 */
   batchAnchorRow: null,
+  /** 批量操作所属组件身份；虚拟滚动无可见锚点的瞬间仍需保留 */
+  batchTableId: "",
+  /** 批量操作所属分页 */
+  batchPageIndex: null,
   /** 页面左下角批量操作栏 */
   batchBar: null,
   /** 表格根元素 */
@@ -146,6 +172,8 @@ const refs = {
   multiPageProgress: null,
   /** 当前悬停的行元素 */
   hoveredRow: null,
+  /** 页面是否存在可见的站点 Drawer/Modal */
+  siteOverlayActive: false,
   /** 浮动启动器按钮 */
   launcherFab: null,
   /** 行级别浮动操作按钮（通用） */
@@ -167,7 +195,9 @@ const refs = {
   /** Toast 展示定时器 */
   toastTimer: null,
   /** 浮动启动器上的数据统计气泡 */
-  launcherBadge: null
+  launcherBadge: null,
+  /** 临时表格诊断轨迹；仅当前 frame 内存，刷新即清空 */
+  tableDiagnostics: []
 };
 
 export {
@@ -177,6 +207,8 @@ export {
   CONTEXT_CHAR_LIMIT,
   CONTEXT_WARN_LIMIT,
   Z_INDEX,
+  TABLE_UI_Z_INDEX,
+  TABLE_UI_BELOW_SITE_OVERLAY_Z_INDEX,
   uid,
   clamp,
   normalizeText,

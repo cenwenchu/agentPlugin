@@ -53,7 +53,13 @@
 
 `headerRef` 用于处理固定表头和表体被框架拆成两个 `<table>` 的情况；`tableId` 用于避免页面上两个列名相同的表格被合并。列数和表头文本只用于发现与校验，不作为主要身份。
 
-当前 `tableId` 仍以最近的表格语义根 selector 为主。未来应升级为组件容器级 `tableKey`，优先识别 `.ant-table-wrapper`、`.arco-table`、`.art-table`、`[role=grid]` 等共同作用域。
+表格身份由 `table-adapters.js` 解析组件级作用域：Ant Design 使用 `.ant-table-wrapper`，Arco 使用 `.arco-table`，ArtTable 严格使用组件根 `.art-table`（不能使用会命中 `.art-table-row` 和 `.art-table-cell` 的模糊类名选择器），随后回退到 ARIA 和原生 table。最终 key 由 frame URL、adapter 名称和组件容器 selector 组成。固定表头与表体因此共享 key，而相同列结构的不同 wrapper 保持隔离。
+
+虚拟滚动优先读取 `data-row-key`、`data-key`、`data-id`、`row-key` 等业务标识；没有显式 key 时，使用前三个非空业务列的规范化值生成内容指纹，并跳过常见的空 checkbox/操作列。选中时立即保存文本快照。用户手动滚动后，如果框架把同一 DOM 节点复用于新行，业务 key 或内容指纹变化会解除旧节点的高亮绑定，但旧上下文继续保留，新行仍可继续加入。表头不参与节点复用判断，避免排序和筛选状态变化导致选中渲染丢失。
+
+批量计数和“取消当前页已选”基于 `tableKey + pageIndex` 的行快照元数据，不依赖当前 DOM。虚拟滚动回收顶部节点后，已加入数量仍然准确，也可以一次取消当前页所有已加入快照。
+
+选择去重同时维护正反向索引：`refToRenderedRowIdentity` 用于检测节点复用，`renderedRowIdentityToRef` 用于在 DOM WeakMap 因虚拟重绘丢失时阻止重复加入。因此先单选若干行再全选当前页，只会补充尚未加入的指纹。
 
 ## 4. 发送流程与 token 预算
 
@@ -95,20 +101,20 @@ token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，
 - AI 返回 Markdown 在生成 HTML 前先转义原始 HTML，并限制链接为 HTTP(S)。
 - 网页上下文在 prompt 中标记为不可信数据，不能完全消除提示注入风险。
 - 流式请求断开会取消对应 `AbortController`。
+- 首个 token 之前的网络失败最多自动重试一次；收到任何内容后不再整请求重试，而是保留部分回答并标记连接中断。
 - API 错误目前会显示部分服务端响应；后续应增加脱敏和结构化错误码。
-- `<all_urls>` 与 `all_frames` 是当前任意网页采集能力的基础，也是主要权限成本。
+- 生产 Manifest 使用 `<all_urls>` 自动注入轻量加载器，确保网页右侧入口在打开或刷新页面后直接可用；自定义 AI API 请求也由该 host 权限覆盖。
 
 ## 8. 后续优化路线
 
 ### P0：可靠性
 
-- 移除无条件整请求重试；已收到部分 token 后提供“继续生成”。
-- 增加真实 Chrome 环境的端到端测试，覆盖 iframe、刷新清空、固定表头和跨页 DOM 替换。
+- 为部分回答增加显式“继续生成”操作；当前已经避免整请求重试。
+- 扩充真实 Chrome E2E，增加跨域 iframe 授权、真实 Ant/Arco 页面和网络断流模拟。
 
 ### P1：表格身份
 
-- 引入组件容器级 `tableKey`，并把 Ant Design、Arco、ArtTable 规则拆成 adapter。
-- 对虚拟滚动表格使用业务 row key 或可配置主键，避免 DOM 节点复用导致选择漂移。
+- 允许用户为无业务 row key 的表格配置主键列。
 - 为跨页任务持久化来源页、行 key 和去重摘要。
 
 ### P1：模型兼容
@@ -119,7 +125,7 @@ token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，
 
 ### P2：权限与性能
 
-- 改为站点启用列表和按需注入，逐步减少 `<all_urls>` 常驻内容脚本。
+- 如果未来重新提供按站点启用模式，需要同时设计一个始终可发现的启用入口；当前优先保证网页右侧入口零操作可见。
 - 对大型页面减少全局 selector 扫描，统一使用作用域内 MutationObserver。
 - 拆分 `table.js` 和 `overlay.js`，降低循环依赖与单文件复杂度。
 
@@ -131,4 +137,4 @@ token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，
 npm test
 ```
 
-当前测试覆盖纯分组、固定表头关联、上下文隔离、token 预算、SSE chunk 边界以及 Markdown/CSV 导出。静态回归负责语法、调试日志、demo HTML 结构和关键导出检查。浏览器 E2E 还应验证页面刷新后上下文与对话均为空。
+当前单元测试覆盖分组、固定表头关联、adapter/rowKey、上下文隔离、token 预算、SSE chunk 边界、onboarding 以及 Markdown/CSV 导出。静态回归负责语法、调试日志、demo HTML 结构和关键导出检查。真实 Chrome E2E 覆盖固定表头、同源 iframe 注入、分页式 DOM 替换和刷新后内存清空。
