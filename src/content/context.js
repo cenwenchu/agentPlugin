@@ -19,7 +19,7 @@
 import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, Z_INDEX, uid, normalizeText, truncateText, compactOneLine, refs } from './state.js';
 import { el, getCssSelector, isVisibleElement, getElementLabel } from './dom.js';
 import { showToast } from './toast.js';
-import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, getRowCells, hasHeaderCells } from './table.js';
+import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, getRowCells, hasHeaderCells, clearAllTableSelectionState } from './table.js';
 import { render, clearDraftInput } from './overlay.js';
 import { buildContextBlockFromContexts, getTableContextIdentity, groupTableContexts } from './context-model.js';
 import { createContextRef } from './context-ref.js';
@@ -232,20 +232,8 @@ function clearContext() {
   STATE.contexts = [];
   STATE.tableGroups = [];
   STATE.onboarding = null;
-  // 直接清理当前 frame 的行选中 UI
-  for (const rowEl of Array.from(refs.pinnedRowOverlays.keys())) {
-    removePinnedRowOverlay(rowEl);
-    highlightRow(rowEl, false);
-    refs.selectedRowRef.delete(rowEl);
-  }
-  refs.batchAnchorRow = null;
-  refs.batchContainer = null;
-  refs.rowKeyToRef.clear();
-  refs.refToRowKey.clear();
-  refs.virtualRowPositionToRef.clear();
-  refs.refToVirtualRowPosition.clear();
-  syncRowCheckboxState(false);
-  if (refs.batchBar) refs.batchBar.style.display = "none";
+  // 先同步清理当前 frame，再广播到 iframe；避免等待异步消息期间被滚动恢复逻辑重新绑定。
+  clearAllTableSelectionState();
   // 广播到其他 frames（iframe 等），由各 frame 自行清理 refToRowEl/refToCheckbox
   safeSend({ type: "BROADCAST_TO_TAB", payload: { message: { type: "CLEAR_ROW_UI" } } });
   render();

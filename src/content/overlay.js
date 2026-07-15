@@ -159,9 +159,14 @@ function render() {
   if (refs.launcherFab) refs.launcherFab.style.zIndex = floatingZIndex;
   if (refs.batchBar) refs.batchBar.style.zIndex = tableUiZIndex;
   if (refs.tableRowFab) refs.tableRowFab.style.zIndex = tableUiZIndex;
-  if (refs.inlineRowFab) refs.inlineRowFab.style.zIndex = tableUiZIndex;
+  // 内联 checkbox 属于单元格局部 UI；抬到全局 999 会压住站点菜单。
+  if (refs.inlineRowFab) refs.inlineRowFab.style.zIndex = isMaximized ? "1" : "3";
   for (const node of refs.pinnedRowOverlays.values()) {
-    node.style.zIndex = tableUiZIndex;
+    // 表格内联标记保持局部层级，不能在每次 render 时重新抬到全局 999，
+    // 否则会覆盖站点挂载到 body 的 Dropdown/Popover。
+    node.style.zIndex = isMaximized
+      ? "1"
+      : node.dataset.web2aiInline === "1" ? "3" : TABLE_UI_Z_INDEX;
   }
 
   const wrap = el("div", {

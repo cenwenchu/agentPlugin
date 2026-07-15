@@ -12,7 +12,7 @@
  */
 
 import { DEBUG, IS_TOP_FRAME, STATE, refs } from './state.js';
-import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableSelectionEnabled } from './table.js';
+import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableSelectionEnabled, clearAllTableSelectionState } from './table.js';
 import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen } from './overlay.js';
 import { showToast } from './toast.js';
@@ -133,26 +133,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   // 清除所有行的 UI 状态
   if (message?.type === "CLEAR_ROW_UI") {
-    for (const rowEl of Array.from(refs.pinnedRowOverlays.keys())) {
-      removePinnedRowOverlay(rowEl);
-      highlightRow(rowEl, false);
-      refs.selectedRowRef.delete(rowEl);
-    }
-    refs.refToRowEl.clear();
-    refs.refToCheckbox.clear();
-    refs.rowKeyToRef.clear();
-    refs.refToRowKey.clear();
-    refs.virtualRowPositionToRef.clear();
-    refs.refToVirtualRowPosition.clear();
-    refs.refToRenderedRowIdentity.clear();
-    refs.renderedRowIdentityToRef.clear();
-    refs.refToRowMeta.clear();
-    refs.batchAnchorRow = null;
-    refs.batchTableRoot = null;
-    refs.batchContainer = null;
-    syncRowCheckboxState(false);
-    hideTableRowFab();
-    updateBatchBar();
+    clearAllTableSelectionState();
     sendResponse({ ok: true });
     return;
   }

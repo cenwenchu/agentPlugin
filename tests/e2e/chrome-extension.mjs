@@ -122,6 +122,39 @@ try {
   assert.equal(secondaryRowSelected, "", "two identical table components must not share selection state");
   assert.equal(footerRowSelected, "", "a fixed summary row must never inherit the first data row selection");
 
+  // A selected-row marker must not sit above a site's body-level menu. The
+  // marker remains clickable itself, but its wrapper uses only local stacking.
+  await page.evaluate(() => {
+    const marker = document.querySelector("#order-1 [data-web2ai-pinned-action]");
+    const rect = marker.getBoundingClientRect();
+    const menu = document.createElement("button");
+    menu.id = "fixture-menu-over-marker";
+    menu.textContent = "menu action";
+    Object.assign(menu.style, {
+      position: "fixed",
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+      zIndex: "10"
+    });
+    menu.addEventListener("click", () => { menu.dataset.clicked = "1"; });
+    document.documentElement.appendChild(menu);
+  });
+  await page.click("#fixture-menu-over-marker");
+  const menuResult = await page.$eval("#fixture-menu-over-marker", (menu) => {
+    const rect = menu.getBoundingClientRect();
+    const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const marker = document.querySelector("#order-1 [data-web2ai-pinned-action]");
+    return {
+      clicked: menu.dataset.clicked || "",
+      top: `${top?.tagName || ""}#${top?.id || ""}`,
+      markerZ: marker?.parentElement?.style.zIndex || ""
+    };
+  });
+  assert.equal(menuResult.clicked, "1", `site menu above a selected row must remain clickable: ${JSON.stringify(menuResult)}`);
+  await page.$eval("#fixture-menu-over-marker", (menu) => menu.remove());
+
   const secondDataRow = await page.$("#order-2");
   await secondDataRow.hover();
   await clickInlineCheckbox(page);
@@ -186,6 +219,33 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 100));
   const afterCurrentPageClear = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".tableGroupLabel")?.textContent || "");
   assert.equal(afterCurrentPageClear, "", "clearing the current page must remove all snapshots with that page index");
+
+  // Pagination widgets may detach an old page and cache its DOM. A global
+  // clear must invalidate that detached row as well, so it cannot look selected
+  // when the page is mounted again.
+  await reenterRow(page, replacementRow);
+  await clickInlineCheckbox(page);
+  await page.evaluate(() => {
+    const row = document.querySelector("#order-3");
+    window.__web2aiCachedPageRow = row;
+    row.remove();
+  });
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const clear = Array.from(host.shadowRoot.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("全部清空"));
+    clear.click();
+  });
+  await page.evaluate(() => {
+    document.querySelector("#body").appendChild(window.__web2aiCachedPageRow);
+    delete window.__web2aiCachedPageRow;
+  });
+  const remountedRow = await page.$("#order-3");
+  await reenterRow(page, remountedRow);
+  const remountedState = await page.$eval("#order-3", (row) => ({
+    selected: row.dataset.web2aiSelected || "",
+    checked: row.querySelector("#web2ai_table_row_inline_checkbox")?.checked || false
+  }));
+  assert.deepEqual(remountedState, { selected: "", checked: false }, "remounted cached pages must stay cleared after one global clear");
 
   await page.reload();
   await page.waitForSelector("#web2ai_overlay_host");

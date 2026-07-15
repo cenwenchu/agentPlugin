@@ -285,7 +285,14 @@ function restoreSelectedRowBinding(rowEl, { tableId, businessRowKey, text, rende
   // 有 key 用业务 key；无 key 用包含前导列内容的渲染指纹。
   const ref = (rowKey && refs.rowKeyToRef.get(rowKey)) ||
     (renderedIdentity && refs.renderedRowIdentityToRef.get(renderedIdentity));
-  if (!isAddedRef(ref)) return null;
+  if (!isAddedRef(ref)) {
+    // 分页组件可能缓存并重新挂载旧 DOM。全量清空后索引已经不存在，
+    // 此时必须顺便移除节点自身残留的 dataset/标记，避免视觉假选中。
+    removePinnedRowOverlay(rowEl);
+    highlightRow(rowEl, false);
+    refs.selectedRowRef.delete(rowEl);
+    return null;
+  }
 
   const previousRowEl = refs.refToRowEl.get(ref);
   if (previousRowEl && previousRowEl !== rowEl) {
@@ -798,24 +805,27 @@ function ensurePinnedRowOverlay(rowEl, ref) {
   const inlineCell = isInline ? getRowInlineAnchorCell(rowEl) : null;
   const node = el("div", {
     "data-web2ai-ui": true,
+    "data-web2ai-inline": isInline && inlineCell ? "1" : "0",
     style: {
       position: isInline && inlineCell ? "absolute" : "fixed",
       right: isInline && inlineCell ? "6px" : null,
       top: isInline && inlineCell ? "4px" : null,
-      zIndex: TABLE_UI_Z_INDEX,
+      // 内联标记位于表格单元格内部，不需要全局 999；使用与悬停 checkbox
+      // 相同的局部层级，避免压住站点挂到 body 上的 Dropdown/Popover。
+      zIndex: isInline && inlineCell ? "3" : TABLE_UI_Z_INDEX,
       display: "flex",
       alignItems: "center",
       gap: "6px",
       cursor: "pointer",
       userSelect: "none",
-      pointerEvents: "auto"
+      pointerEvents: "none"
     }
   });
 
-  node.appendChild(
-    el(
+  const action = el(
       "span",
       {
+        "data-web2ai-pinned-action": true,
         style: {
           fontSize: "11px",
           lineHeight: "1",
@@ -825,14 +835,16 @@ function ensurePinnedRowOverlay(rowEl, ref) {
           color: "#fff",
           border: "1px solid rgba(0,0,0,0.12)",
           boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
-          whiteSpace: "nowrap"
+          whiteSpace: "nowrap",
+          cursor: "pointer",
+          pointerEvents: "auto"
         }
       },
       ["✓"]
-    )
   );
+  node.appendChild(action);
 
-  node.addEventListener("click", (e) => {
+  action.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     removeContextByRef(ref);
@@ -2029,6 +2041,47 @@ function setTableSelectionEnabled(enabled) {
 }
 
 /**
+ * 幂等地清空当前 frame 的全部表格选择状态。
+ * 同时处理可见/隐藏分页 DOM、虚拟行反向索引和正在运行的跨页任务；调用多次结果一致。
+ */
+function clearAllTableSelectionState() {
+  if (refs.multiPageProgress) refs.multiPageProgress.stop = true;
+
+  for (const rowEl of Array.from(refs.pinnedRowOverlays.keys())) {
+    removePinnedRowOverlay(rowEl);
+  }
+  // 一些分页库会把非当前页 DOM 隐藏而非销毁；不能只依赖 pinnedRowOverlays。
+  for (const rowEl of document.querySelectorAll('[data-web2ai-selected="1"]')) {
+    highlightRow(rowEl, false);
+  }
+
+  // WeakMap 无法遍历，整体替换才能保证已脱离 DOM 的旧页面节点不再携带有效绑定。
+  refs.selectedRowRef = new WeakMap();
+  refs.refToRowEl.clear();
+  refs.refToCheckbox.clear();
+  refs.rowKeyToRef.clear();
+  refs.refToRowKey.clear();
+  refs.virtualRowPositionToRef.clear();
+  refs.refToVirtualRowPosition.clear();
+  refs.refToRenderedRowIdentity.clear();
+  refs.renderedRowIdentityToRef.clear();
+  refs.refToRowMeta.clear();
+
+  refs.batchAnchorRow = null;
+  refs.batchTableId = "";
+  refs.batchPageIndex = null;
+  refs.batchTableRoot = null;
+  refs.batchContainer = null;
+  refs.multiPageOpen = false;
+  refs.multiPageRunning = false;
+  refs.multiPageProgress = null;
+
+  syncRowCheckboxState(false);
+  hideTableRowFab();
+  if (refs.batchBar) refs.batchBar.style.display = "none";
+}
+
+/**
  * 向上追溯查找行对应的表头行（通用版本）。
  * 
  * 策略：
@@ -2246,6 +2299,7 @@ export {
   ensureBatchBar,
   updateBatchBar,
   setTableSelectionEnabled,
+  clearAllTableSelectionState,
   getRowGroupRows,
   selectAllRowsInSameGroup,
   clearAllRowsInSameGroup,
