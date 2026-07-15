@@ -200,11 +200,6 @@ chrome.runtime.onInstalled.addListener(async () => {
 
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({
-    id: "web2ai_add_selection",
-    title: "添加选中内容到 AI 上下文",
-    contexts: ["selection"]
-  });
-  chrome.contextMenus.create({
     id: "web2ai_add_page",
     title: "添加整页内容到 AI 上下文",
     contexts: ["page"]
@@ -212,7 +207,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({
     id: "web2ai_open_panel",
     title: "打开 AI Chat 浮层",
-    contexts: ["page", "selection"]
+    contexts: ["page"]
   });
 });
 
@@ -222,20 +217,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   try {
     if (info.menuItemId === "web2ai_open_panel") {
-      await sendToFrame(tab.id, 0, { type: "OPEN_PANEL" });
-      return;
-    }
-
-    if (info.menuItemId === "web2ai_add_selection") {
-      await sendToFrame(tab.id, frameId, {
-        type: "ADD_CONTEXT_SNIPPET",
-        snippet: {
-          kind: "selection",
-          text: info.selectionText ?? "",
-          url: tab.url ?? "",
-          title: tab.title ?? ""
-        }
-      });
       await sendToFrame(tab.id, 0, { type: "OPEN_PANEL" });
       return;
     }
@@ -255,6 +236,17 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     } catch {
       void 0;
     }
+  }
+});
+
+// 点击浏览器工具栏中的扩展图标，重新显示当前页面的 Chat 启动图标。
+chrome.action.onClicked.addListener(async (tab) => {
+  if (!tab?.id) return;
+  try {
+    await sendToFrame(tab.id, 0, { type: "SHOW_LAUNCHER" });
+  } catch {
+    // chrome:// 等不允许内容脚本运行的页面无需提示。
+    void 0;
   }
 });
 

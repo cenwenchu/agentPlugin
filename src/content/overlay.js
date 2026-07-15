@@ -20,7 +20,7 @@ import { addContextSnippet, removeContext, clearAll, buildContextBlock, extractP
 import { calculateContextBudget, estimateTokens, selectContextsWithinTokenBudget } from './token-budget.js';
 import { tableGroupToCsv, tableGroupToMarkdown } from './table-export.js';
 import { buildOnboardingPrompt, createFallbackOnboarding, parseOnboardingResponse } from './onboarding.js';
-import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab } from './table.js';
+import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab, setTableSelectionEnabled } from './table.js';
 import { showToast } from './toast.js';
 
 const OVERLAY_CSS = `
@@ -125,13 +125,13 @@ function render() {
   if (!IS_TOP_FRAME) return;
   ensureOverlay();
   if (refs.launcherFab) {
-    refs.launcherFab.style.display = STATE.open ? "none" : "flex";
+    refs.launcherFab.style.display = !STATE.open && STATE.launcherVisible ? "flex" : "none";
   }
   // 更新数据统计气泡
   if (refs.launcherBadge && refs.launcherFab) {
     const tableCount = STATE.tableGroups.length;
     const rowCount = STATE.tableGroups.reduce((sum, g) => sum + g.rows.length, 0);
-    if (!STATE.open && (tableCount > 0 || STATE.contexts.length > 0)) {
+    if (!STATE.open && STATE.launcherVisible && (tableCount > 0 || STATE.contexts.length > 0)) {
       const label = tableCount > 0
         ? `${tableCount}个表格，${rowCount}条数据`
         : `${STATE.contexts.length}条数据`;
@@ -763,12 +763,25 @@ function ensureLauncherFab() {
   });
 
   refs.launcherFab.innerHTML =
+    '<button type="button" data-web2ai-close-launcher aria-label="关闭 Chat 图标" title="关闭" style="position:absolute;right:-7px;top:-7px;width:18px;height:18px;padding:0;border:1px solid rgba(255,255,255,.85);border-radius:50%;background:#374151;color:#fff;font:700 14px/16px system-ui;cursor:pointer;display:flex;align-items:center;justify-content:center;">×</button>' +
     '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 10.5V9.2C7.5 6.77 9.47 4.8 11.9 4.8H12.1C14.53 4.8 16.5 6.77 16.5 9.2V10.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><path d="M6.8 10.5H17.2C18.42 10.5 19.4 11.48 19.4 12.7V15.9C19.4 18.33 17.43 20.3 15 20.3H9C6.57 20.3 4.6 18.33 4.6 15.9V12.7C4.6 11.48 5.58 10.5 6.8 10.5Z" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/><path d="M9.4 14.1H9.41" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/><path d="M14.6 14.1H14.61" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/><path d="M9.2 17.1C10.2 17.8 11.1 18.1 12 18.1C12.9 18.1 13.8 17.8 14.8 17.1" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg>' +
     '<span style="color:#fff;font-size:10px;font-weight:700;line-height:1;white-space:nowrap;">采（问AI）</span>';
 
-  let suppressClickUntil = 0;
+  let suppressNextClick = false;
   let drag = null;
   let currentPos = { left: defaultLeft(), top: defaultTop() };
+
+  const closeButton = refs.launcherFab.querySelector("[data-web2ai-close-launcher]");
+  closeButton?.addEventListener("pointerdown", (e) => e.stopPropagation());
+  closeButton?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    STATE.launcherVisible = false;
+    setTableSelectionEnabled(false);
+    chrome.storage.sync.set({ launcherHidden: true }).catch(() => void 0);
+    render();
+    showToast("对话能力已关闭。点击浏览器工具栏中的插件扩展图标，可再次启动对话能力。", 4000);
+  });
 
   const applyPos = (pos) => {
     const left = clampLeft(pos.left);
@@ -823,25 +836,37 @@ function ensureLauncherFab() {
     const dy = e.clientY - drag.startY;
     if (!drag.moved && Math.hypot(dx, dy) > 4) {
       drag.moved = true;
-      suppressClickUntil = Date.now() + 350;
     }
     if (!drag.moved) return;
     applyPos({ left: drag.startLeft + dx, top: drag.startTop + dy });
   });
 
-  const endDrag = (e) => {
+  const endDrag = (e, suppressClick) => {
     if (!drag || drag.pointerId !== e.pointerId) return;
-    const moved = drag.moved;
+    // pointermove 可能被页面卡顿合并；在松手时再根据最终坐标判定一次。
+    const moved = drag.moved || Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 4;
+    if (moved) {
+      applyPos({
+        left: drag.startLeft + e.clientX - drag.startX,
+        top: drag.startTop + e.clientY - drag.startY
+      });
+    }
     drag = null;
     if (moved) {
+      suppressNextClick = suppressClick;
       chrome.storage.sync.set({ launcherPos: currentPos }).catch(() => void 0);
     }
   };
-  refs.launcherFab.addEventListener("pointerup", endDrag);
-  refs.launcherFab.addEventListener("pointercancel", endDrag);
+  refs.launcherFab.addEventListener("pointerup", (e) => endDrag(e, true));
+  refs.launcherFab.addEventListener("pointercancel", (e) => endDrag(e, false));
 
   refs.launcherFab.addEventListener("click", (e) => {
-    if (Date.now() < suppressClickUntil) return;
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     setOpen(!STATE.open);
   });
   document.documentElement.appendChild(refs.launcherFab);

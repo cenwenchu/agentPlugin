@@ -12,7 +12,7 @@
  */
 
 import { DEBUG, IS_TOP_FRAME, STATE, refs } from './state.js';
-import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar } from './table.js';
+import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableSelectionEnabled } from './table.js';
 import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen } from './overlay.js';
 import { showToast } from './toast.js';
@@ -29,7 +29,18 @@ try {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // 打开面板
   if (message?.type === "OPEN_PANEL") {
+    STATE.launcherVisible = true;
     setOpen(true);
+    sendResponse({ ok: true });
+    return;
+  }
+
+  // 用户点击浏览器工具栏中的扩展图标后，恢复页面 Chat 图标
+  if (message?.type === "SHOW_LAUNCHER") {
+    STATE.launcherVisible = true;
+    chrome.storage.sync.set({ launcherHidden: false }).catch(() => void 0);
+    setTableSelectionEnabled(true);
+    render();
     sendResponse({ ok: true });
     return;
   }
@@ -170,9 +181,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // ========== 监听 storage 变更 ==========
 
 chrome.storage.sync
-  .get(["panelMaximized"])
+  .get(["panelMaximized", "launcherHidden"])
   .then((data) => {
     if (typeof data?.panelMaximized === "boolean") STATE.maximized = data.panelMaximized;
+    STATE.launcherVisible = data?.launcherHidden !== true;
+    setTableSelectionEnabled(STATE.launcherVisible);
+    render();
   })
   .catch(() => void 0);
 
@@ -180,6 +194,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "sync") return;
   if (changes.panelMaximized && typeof changes.panelMaximized.newValue === "boolean") {
     STATE.maximized = changes.panelMaximized.newValue;
+  }
+  if (changes.launcherHidden) {
+    STATE.launcherVisible = changes.launcherHidden.newValue !== true;
+    setTableSelectionEnabled(STATE.launcherVisible);
   }
   render();
 });

@@ -26,6 +26,7 @@ const IS_TOP_FRAME = window.top === window;
  * @property {Object|null} lastInputCursor - 输入框光标位置 {start, end}
  * @property {boolean} suppressAutoSuggest - 是否禁用自动建议
  * @property {boolean} maximized - 面板是否最大化
+ * @property {boolean} launcherVisible - 页面上的 Chat 启动图标是否可见
  */
 const STATE = {
   open: false,
@@ -38,7 +39,8 @@ const STATE = {
   draftText: "",
   lastInputCursor: null,
   suppressAutoSuggest: false,
-  maximized: false
+  maximized: false,
+  launcherVisible: true
 };
 
 /** 表格列分隔符 */

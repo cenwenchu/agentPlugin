@@ -535,6 +535,10 @@ function ensureAddedFlashStyle() {
 }
 
 function handleRowCheckboxChange(checked) {
+  if (!STATE.launcherVisible) {
+    syncRowCheckboxState(false);
+    return;
+  }
   const rowEl = refs.hoveredRow;
   if (!rowEl) return;
   syncRowCheckboxState(checked);
@@ -737,6 +741,10 @@ function ensureInlineRowFab() {
 }
 
 function showInlineRowFab(rowEl) {
+  if (!STATE.launcherVisible) {
+    hideInlineRowFab();
+    return;
+  }
   ensureInlineRowFab();
   if (!refs.inlineRowFab) return;
   if (isTableFooterOrSummaryRow(rowEl)) {
@@ -1150,6 +1158,10 @@ function ensureBatchBar() {
 }
 
 function updateBatchBar() {
+  if (!STATE.launcherVisible) {
+    if (refs.batchBar) refs.batchBar.style.display = "none";
+    return;
+  }
   // 虚拟列表快速滚动时可能有一帧没有任何数据行 DOM；批量状态不能依赖该瞬时锚点。
   if (!refs.batchAnchorRow || !refs.batchAnchorRow.isConnected) {
     refs.batchAnchorRow = findVisibleBatchAnchor(refs.batchTableId, refs.batchPageIndex);
@@ -1377,6 +1389,7 @@ function getRenderedTableRows() {
 }
 
 function restoreRenderedSelectionState() {
+  if (!STATE.launcherVisible) return;
   for (const rowEl of getRenderedTableRows()) {
     if (!rowEl?.isConnected || isHeaderRow(rowEl)) continue;
     reconcileRecycledRow(rowEl);
@@ -1951,6 +1964,11 @@ function initTableListeners() {
       _rafPending = true;
       requestAnimationFrame(() => {
         _rafPending = false;
+        if (!STATE.launcherVisible) {
+          hideTableRowFab();
+          hideInlineRowFab();
+          return;
+        }
         const target = pickRowTargetFromPoint(e);
         const composedPath = target === e.target ? e.composedPath?.() : null;
         const rowEl = findRowElementFromEventTarget(target, composedPath);
@@ -1979,6 +1997,7 @@ function initTableListeners() {
       // 等虚拟列表完成本帧的数据替换后，恢复新 DOM 行的选中绑定和批量锚点。
       requestAnimationFrame(() => {
         _scrollRafPending = false;
+        if (!STATE.launcherVisible) return;
         restoreRenderedSelectionState();
         pruneDisconnectedRowMappings();
         for (const rowEl of refs.pinnedRowOverlays.keys()) positionPinnedRowOverlay(rowEl);
@@ -1987,6 +2006,26 @@ function initTableListeners() {
     },
     { passive: true, capture: true }
   );
+}
+
+/** 根据 Chat 启动图标状态统一启用或停用页面表格选择 UI。 */
+function setTableSelectionEnabled(enabled) {
+  if (!enabled) {
+    hideTableRowFab();
+    hideInlineRowFab();
+    if (refs.batchBar) refs.batchBar.style.display = "none";
+    for (const [rowEl, overlay] of refs.pinnedRowOverlays.entries()) {
+      if (overlay) overlay.style.display = "none";
+      highlightRow(rowEl, false);
+    }
+    return;
+  }
+
+  for (const overlay of refs.pinnedRowOverlays.values()) {
+    if (overlay) overlay.style.display = "flex";
+  }
+  restoreRenderedSelectionState();
+  updateBatchBar();
 }
 
 /**
@@ -2206,6 +2245,7 @@ export {
   pickRowTargetFromPoint,
   ensureBatchBar,
   updateBatchBar,
+  setTableSelectionEnabled,
   getRowGroupRows,
   selectAllRowsInSameGroup,
   clearAllRowsInSameGroup,
