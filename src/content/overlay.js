@@ -261,7 +261,7 @@ function render() {
   function renderTableGroups() {
     const groups = STATE.tableGroups;
     if (!groups.length) {
-      return [el("div", { style: { fontSize: "12px", color: "#6b7280" } }, ["还没有上下文，选中文本或右键添加。"])];
+      return [el("div", { style: { fontSize: "12px", color: "#6b7280" } }, ["还没有上下文，可勾选表格行或右键添加整页内容。"])];
     }
     const els = [];
     for (let gi = 0; gi < groups.length; gi++) {

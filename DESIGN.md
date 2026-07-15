@@ -2,7 +2,7 @@
 
 ## 1. 产品边界
 
-扩展负责从用户当前浏览的页面显式采集上下文，并将这些上下文连同问题发送到用户配置的 OpenAI Chat Completions 兼容接口。它不是自动爬虫：只有用户选中内容、勾选表格行或执行整页捕获后，数据才进入上下文；只有用户发起提问后，启用的上下文才会发送到 API。
+扩展负责从用户当前浏览的页面显式采集上下文，并将这些上下文连同问题发送到用户配置的 OpenAI Chat Completions 兼容接口。它不是自动爬虫：只有用户勾选表格行或执行整页捕获后，数据才进入上下文；只有用户发起提问后，启用的上下文才会发送到 API。选中文字加入对话的入口已经移除。
 
 ## 2. 运行时分层
 
@@ -12,7 +12,7 @@
 
 ### Background Service Worker
 
-`background.js` 负责右键菜单、tab/frame 消息路由、临时状态存储和 AI 请求。API Key 只在 background 和 options 页面读取，不通过 `GET_SETTINGS` 返回给内容脚本。
+`background.js` 负责右键菜单、tab/frame 消息路由、扩展工具栏点击处理和 AI 请求。API Key 只在 background 和 options 页面读取，不通过 `GET_SETTINGS` 返回给内容脚本。
 
 ### 纯逻辑模块
 
@@ -33,7 +33,7 @@
 |---|---|
 | `id` | 单次运行中的对象 ID |
 | `ref` | 跨 frame、存储和 UI 清理使用的 `CTX<n>` 引用 |
-| `kind` | `selection`、`page`、`table-header`、`table-row` 等 |
+| `kind` | `page`、`table-header`、`table-row`、`snippet` 等 |
 | `text` | 发送与展示使用的规范化文本 |
 | `enabled` | `false` 表示保留但不发送、不导出 |
 | `tableId` | 兼容字段名，实际保存当前页面生命周期内的组件实例 `tableKey` |
@@ -89,10 +89,16 @@ token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，
 | 存储区 | 数据 | 生命周期 |
 |---|---|---|
 | `storage.local` | API Key | 当前浏览器扩展安装周期 |
-| `storage.sync` | Base URL、模型、token 设置、UI 位置 | 浏览器账号同步 |
+| `storage.sync` | Base URL、模型、token 设置、UI 位置、启动器开关 | 浏览器账号同步 |
 | 页面内存 | 上下文、表格派生视图、对话 | 刷新、跳转或关闭页面时清空 |
 
 旧版本同步存储中的 API Key 会在首次读取时迁移到 local，并删除同步副本。
+
+### 启动器与表格能力开关
+
+`launcherHidden` 保存在 `storage.sync`，是 Chat 启动器与表格选择能力的统一开关。顶层 frame 渲染启动器和聊天浮层；所有 frame 都监听该状态并启用或停用各自的表格交互。关闭启动器时，行 checkbox、批量栏、高亮和 pinned 标记全部隐藏，但上下文快照保留。点击浏览器工具栏中的扩展图标会发送 `SHOW_LAUNCHER`，清除隐藏状态并恢复当前 tab 所有 frame 的表格 UI。
+
+`STATE.launcherVisible` 是页面运行时镜像，`launcherHidden` 是跨 frame 的持久化事实。所有修改持久化值的路径都必须同步更新当前 frame，避免等待异步 `storage.onChanged` 才更新 UI。
 
 上下文不再写入 `storage.session`，因此没有固定 50 条存储上限，也不存在恢复后的 DOM 对应关系失效问题。发送量仍受 token 预算控制；大量数据的 UI 性能应通过折叠或虚拟列表解决，而不是静默淘汰上下文。
 
@@ -143,4 +149,4 @@ token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，
 npm test
 ```
 
-当前单元测试覆盖分组与时间编号、固定表头关联、adapter/rowKey、上下文隔离、token 预算、SSE chunk 边界、onboarding 以及 Markdown/CSV 导出。静态回归负责语法、调试日志、demo HTML 结构和关键导出检查。真实 Chrome E2E 覆盖固定表头、同页相似表格隔离、底部汇总行排除、同源 iframe 注入、虚拟节点复用、分页式 DOM 替换和刷新后内存清空。
+当前单元测试覆盖分组与时间编号、固定表头关联、adapter/rowKey、上下文隔离、token 预算、SSE chunk 边界、onboarding 以及 Markdown/CSV 导出。静态回归负责语法、调试日志、demo HTML 结构和关键导出检查。真实 Chrome E2E 覆盖启动器关闭/恢复、表格能力开关、固定表头、同页相似表格隔离、底部汇总行排除、同源 iframe 注入、虚拟节点复用、分页式 DOM 替换和刷新后内存清空。

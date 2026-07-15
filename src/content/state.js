@@ -182,10 +182,6 @@ const refs = {
   inlineRowFabHost: null,
   /** 高亮回退方案的 overlay 节点 */
   fallbackHighlightBox: null,
-  /** 选中文本浮动按钮 */
-  selectionFab: null,
-  /** 最后一次选中的快照 */
-  lastSelectionSnapshot: null,
   /** 快捷键是否已绑定 */
   hotkeysBound: false,
   /** Toast 消息队列 */

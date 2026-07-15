@@ -2,7 +2,7 @@
  * @fileoverview Background Service Worker (Manifest V3)。
  *
  * 核心职责：
- * 1. 右键菜单管理（添加选中/整页内容到 AI 上下文、打开浮层）
+ * 1. 右键菜单管理（添加整页内容到 AI 上下文、打开浮层）与工具栏入口
  * 2. AI API 请求代理（非流式 + 流式 SSE）
  * 3. 长连接管理（流式 AI 对话的 Port 通信）
  * 4. 设置分层：普通配置存 sync，API Key 存 local
@@ -232,7 +232,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   } catch (e) {
     try {
-      await sendToTab(tab.id, { type: "TOAST", message: String(e?.message ?? e) });
+      await sendToTab(tab.id, { type: "TOAST", text: String(e?.message ?? e) });
     } catch {
       void 0;
     }

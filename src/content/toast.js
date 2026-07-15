@@ -52,6 +52,8 @@ function showToast(message, duration = 1500) {
         maxWidth: "85vw",
         boxShadow: "0 12px 40px rgba(0,0,0,0.35)",
         border: "1px solid rgba(255,255,255,0.15)",
+        // Toast 只承担提示作用，不能遮挡页面或底部批量操作栏的点击。
+        pointerEvents: "none",
         whiteSpace: "pre-wrap",
         wordBreak: "break-word"
       }

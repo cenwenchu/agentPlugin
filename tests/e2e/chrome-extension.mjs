@@ -86,6 +86,26 @@ try {
     throw new Error(`Extension entry did not initialize.${detail}`, { cause: error });
   }
 
+  // Closing the launcher is the global opt-out for page UI, including table
+  // selection. Restoring it mirrors clicking the browser toolbar action.
+  await page.$eval("#web2ai_launcher_fab [data-web2ai-close-launcher]", (button) => button.click());
+  await page.waitForFunction(() => document.querySelector("#web2ai_launcher_fab")?.style.display === "none");
+  const closeNotice = await page.$eval("#web2ai_toast", (node) => node.textContent || "");
+  assert.match(closeNotice, /点击浏览器工具栏中的插件扩展图标/, "closing launcher must explain how to restore chat");
+  const disabledRow = await page.$("#orders tbody tr");
+  await disabledRow.hover();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(await page.$("#web2ai_table_row_inline_checkbox"), null, "hidden launcher must disable table selection UI");
+
+  const worker = await extensionTarget.worker();
+  assert.ok(worker, "extension service worker must be available to restore the launcher");
+  await worker.evaluate(async (pageUrl) => {
+    const [tab] = await chrome.tabs.query({ url: pageUrl });
+    if (!tab?.id) throw new Error("fixture tab not found");
+    await chrome.tabs.sendMessage(tab.id, { type: "SHOW_LAUNCHER" }, { frameId: 0 });
+  }, url);
+  await page.waitForFunction(() => document.querySelector("#web2ai_launcher_fab")?.style.display === "flex");
+
   const firstRow = await page.$("#orders tbody tr");
   await firstRow.hover();
   await page.waitForSelector("#web2ai_table_row_inline_checkbox");
@@ -171,7 +191,7 @@ try {
   await page.waitForSelector("#web2ai_overlay_host");
   const contextCount = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".contextItem").length);
   assert.equal(contextCount, 0, "refresh must clear in-memory contexts");
-  console.log("Chrome E2E passed: fixed header, iframe injection, virtual row reuse, DOM replacement, refresh clearing");
+  console.log("Chrome E2E passed: launcher toggle, table gating, iframe injection, virtual row reuse, DOM replacement, refresh clearing");
 } finally {
   await browser.close();
   server.close();

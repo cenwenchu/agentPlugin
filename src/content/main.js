@@ -30,19 +30,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // 打开面板
   if (message?.type === "OPEN_PANEL") {
     STATE.launcherVisible = true;
+    setTableSelectionEnabled(true);
     setOpen(true);
-    sendResponse({ ok: true });
-    return;
+    chrome.storage.sync.set({ launcherHidden: false })
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
   }
 
   // 用户点击浏览器工具栏中的扩展图标后，恢复页面 Chat 图标
   if (message?.type === "SHOW_LAUNCHER") {
+    // launcherHidden 是跨 frame 的功能总开关；所有 frame 会通过 storage.onChanged
+    // 同步恢复表格交互，只有 top frame 负责渲染 Chat 图标。
     STATE.launcherVisible = true;
-    chrome.storage.sync.set({ launcherHidden: false }).catch(() => void 0);
     setTableSelectionEnabled(true);
     render();
-    sendResponse({ ok: true });
-    return;
+    // 等持久化完成后再回复 background，避免快速“关闭→恢复”时旧写入覆盖新状态。
+    chrome.storage.sync.set({ launcherHidden: false })
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
   }
 
   // 添加上下文片段

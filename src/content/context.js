@@ -41,7 +41,7 @@ function addContextSnippet(snippet) {
     showToast("没有可添加的内容");
     return;
   }
-  const kind = snippet.kind || "selection";
+  const kind = snippet.kind || "snippet";
   let anchorSelector = snippet.anchorSelector || "";
   let quote = snippet.quote || "";
   let lineInfo = snippet.lineInfo || null;

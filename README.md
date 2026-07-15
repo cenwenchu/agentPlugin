@@ -16,6 +16,7 @@
 - 上下文和对话仅保存在当前页面内存中，刷新或跳转后自动清空
 - 首次无输入提问会生成数据概览和 3～5 个可编辑的快捷问题，不污染正常对话历史
 - 可拖拽、可关闭的浮动启动器 + 数据统计气泡；点击浏览器工具栏中的扩展图标可恢复启动器
+- 关闭启动器时同步停用页面表格选择，恢复启动器后重新启用，已有上下文不会丢失
 
 ## 本地加载
 
@@ -40,6 +41,7 @@
 ## 使用
 
 - 右键菜单：`添加整页内容到 AI 上下文` / `打开 AI Chat 浮层`
+- 点击启动器右上角 `×` 可暂时关闭对话与表格选择能力；点击 Chrome 工具栏中的扩展图标可再次启用
 - 鼠标悬停表格行 → 勾选 checkbox → 行内容加入上下文
 - 点击底部"全选当前页"批量添加当前表格所有行
 - 虚拟滚动表格支持手动滚动后继续添加；已加入的行即使被页面回收也会保留为数据快照
@@ -70,7 +72,6 @@ src/
     ├── table-export.js          # Markdown / CSV 表格导出
     ├── table.js                 # 表格交互（组件隔离、虚拟行恢复、选择、跨页翻页）
     ├── table-adapters.js        # Ant / Arco / ArtTable / ARIA / native 组件作用域与 rowKey
-    ├── selection.js             # 文本选中浮动按钮
     ├── messaging.js             # 与 background 的消息通信层
     ├── markdown.js              # Markdown → HTML 渲染器
     ├── highlight.js             # 页面文本高亮定位
@@ -101,6 +102,7 @@ src/
 | 消息类型 | 方向 | 说明 |
 |---------|------|------|
 | `OPEN_PANEL` | bg → content | 打开浮层面板 |
+| `SHOW_LAUNCHER` | bg → content | 恢复 Chat 启动器和表格选择能力 |
 | `ADD_CONTEXT_SNIPPET` | bg → content | 添加上下文片段 |
 | `REMOVE_CONTEXT_BY_REF` | bg → content | 按 ref 移除上下文 |
 | `UNSELECT_ROWS_BY_REFS` | bg → content | 批量取消选中行 |
@@ -113,6 +115,13 @@ src/
 | `AI_CHAT` | content → bg | 非流式 AI 请求 |
 | `FORWARD_TO_TOP` | content → bg | 转发消息到 top frame |
 | `BROADCAST_TO_TAB` | content → bg | 广播到所有 frame |
+
+## UI 状态与数据生命周期
+
+- `launcherHidden`、启动器位置和面板最大化状态保存在 `chrome.storage.sync`，会影响同一浏览器中的所有页面 frame。
+- 关闭启动器只停用页面交互，不删除已经采集的上下文；重新启用后，仍在当前页面内存中的表格选择会恢复显示。
+- 上下文、对话和表格行快照只存在于页面内存，刷新或跳转后清空。
+- Chat 浮层打开时启动器暂时隐藏；关闭浮层后，只要用户没有关闭启动器，它会重新出现。
 
 ## 开发
 
