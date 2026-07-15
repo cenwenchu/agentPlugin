@@ -26,7 +26,7 @@ function showToast(message, duration = 1500) {
     } catch {}
     return;
   }
-  refs.toastQueue.push(String(message ?? ""));
+  refs.toastQueue.push({ message: String(message ?? ""), duration });
   if (refs.toastTimer) {
     DEBUG && console.log(`[web2ai] showToast: timer already active, queued. queue.length=${refs.toastQueue.length}`);
     return;
@@ -64,11 +64,13 @@ function showToast(message, duration = 1500) {
   /** 从队列中取下一条并展示 */
   const showNext = () => {
     if (!refs.toastQueue.length) { refs.toastTimer = null; node.style.display = "none"; DEBUG && console.log(`[web2ai] showToast: queue empty, hidden`); return; }
-    const msg = refs.toastQueue.shift();
+    const item = refs.toastQueue.shift();
+    const msg = typeof item === "string" ? item : item.message;
+    const itemDuration = typeof item === "string" ? duration : item.duration;
     DEBUG && console.log(`[web2ai] showToast: displaying "${msg.slice(0, 60)}" queue.length=${refs.toastQueue.length}`);
     node.textContent = msg;
     node.style.display = "block";
-    refs.toastTimer = setTimeout(showNext, duration);
+    refs.toastTimer = setTimeout(showNext, itemDuration);
   };
   showNext();
 }

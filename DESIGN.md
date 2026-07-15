@@ -2,7 +2,7 @@
 
 ## 1. 产品边界
 
-扩展负责从用户当前浏览的页面显式采集上下文，并将这些上下文连同问题发送到用户配置的 OpenAI Chat Completions 兼容接口。它不是自动爬虫：只有用户勾选表格行或执行整页捕获后，数据才进入上下文；只有用户发起提问后，启用的上下文才会发送到 API。选中文字加入对话的入口已经移除。
+扩展负责从用户当前浏览的页面显式采集表格或可见区域截图，并将这些上下文连同问题发送到用户配置的 OpenAI Chat Completions 兼容接口。它不是自动爬虫：只有用户勾选表格行或点击截图后，数据才进入上下文；只有用户发起提问后，启用的上下文才会发送到 API。选中文字和整页文本采集入口已经移除，右键菜单只负责打开 Chat。
 
 ## 2. 运行时分层
 
@@ -12,7 +12,7 @@
 
 ### Background Service Worker
 
-`background.js` 负责右键菜单、tab/frame 消息路由、扩展工具栏点击处理和 AI 请求。API Key 只在 background 和 options 页面读取，不通过 `GET_SETTINGS` 返回给内容脚本。
+`background.js` 负责右键菜单、tab/frame 消息路由、扩展工具栏点击处理和 AI 请求。每个模型的 API Key 只在 background 和 options 页面读取，不通过 `GET_SETTINGS` 返回给内容脚本。
 
 ### 纯逻辑模块
 
@@ -40,6 +40,7 @@
 | `headerRef` | 数据行对应表头的显式引用，优先级高于 `tableId` |
 | `pageIndex` | 跨页采集时的来源页码 |
 | `anchorSelector` / `quote` | 刷新后尝试定位原页面元素 |
+| `imageData` | 截图的 JPEG Data URL，仅 `screenshot` 类型使用 |
 
 `STATE.contexts` 是当前页面内存中的事实来源；`STATE.tableGroups` 是派生视图。两者都不持久化，页面刷新或跳转后清空。
 
@@ -84,12 +85,26 @@
 
 token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，ASCII 近似四字符一 token。因此它是保护性预算，不是准确计费值。对预算要求严格的供应商应增加专用 tokenizer adapter。
 
+### 截图与多模态发送
+
+内容脚本请求 background 调用 `chrome.tabs.captureVisibleTab`，以 JPEG 82% 质量捕获当前标签页可见区域。捕获前会临时隐藏 Chat、表格 checkbox、批量栏和选中高亮，避免扩展自身 UI 进入截图。区域截图先用顶层指针遮罩收集 CSS 像素坐标，再按捕获图片尺寸与 viewport 的比例使用 Canvas 裁剪，因此兼容 iframe、canvas 和跨域渲染内容。选区仅限当前可见区域，Esc 或过小选区会取消。图片只保存在 `STATE.contexts`，不写入浏览器存储。
+
+发送时，表格仍作为 system 文本上下文；最近最多 4 张启用截图附加到最新 user message，使用 OpenAI 兼容的 `image_url` 内容块。客户端为每张图预留保护性 token 预算，但实际视觉 token 由模型供应商决定。模型配置未开启 `supportsImages` 时，Chat 会在请求前阻止发送截图；background 还会再次校验，避免绕过 UI。
+
+### 模型配置与切换
+
+同步设置保存 `models[]` 和 `activeModelId`。每个模型包含稳定 ID、显示名称、Base URL、Model 参数、上下文窗口、输出上限和 `supportsImages`。本地存储使用 `modelApiKeys[modelId]` 保存独立密钥。Chat 只读取脱敏模型列表，并通过 `SET_ACTIVE_MODEL` 修改当前 ID；background 在每次请求开始时重新解析当前模型和对应密钥。
+
+旧版扁平的单模型设置会自动迁移为 ID 为 `default` 的首个模型，原 API Key 同步迁移到 `modelApiKeys.default`。
+
+首次对话只有截图且输入为空时，不执行面向表格的 onboarding 请求，而是聚焦输入框并提示用户描述图片分析目标。
+
 ## 5. 存储与隐私
 
 | 存储区 | 数据 | 生命周期 |
 |---|---|---|
-| `storage.local` | API Key | 当前浏览器扩展安装周期 |
-| `storage.sync` | Base URL、模型、token 设置、UI 位置、启动器开关 | 浏览器账号同步 |
+| `storage.local` | 按模型 ID 保存的 API Key Map | 当前浏览器扩展安装周期 |
+| `storage.sync` | 模型配置列表、当前模型、UI 位置、启动器开关 | 浏览器账号同步 |
 | 页面内存 | 上下文、表格派生视图、对话 | 刷新、跳转或关闭页面时清空 |
 
 旧版本同步存储中的 API Key 会在首次读取时迁移到 local，并删除同步副本。

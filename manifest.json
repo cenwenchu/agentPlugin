@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Web-to-AI Context Chat",
   "version": "0.1.0",
-  "description": "Bring webpage tables or full-page content into an AI chat overlay as context.",
+  "description": "Bring webpage tables and visible-area screenshots into an AI chat overlay as context.",
   "permissions": ["storage", "contextMenus", "activeTab"],
   "host_permissions": ["<all_urls>"],
   "background": {

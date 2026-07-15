@@ -9,9 +9,17 @@
   <body>
     <div class="container">
       <h1>Web-to-AI Context Chat</h1>
-      <p class="sub">配置 DeepSeek（OpenAI 兼容）接口参数。API Key 仅保存在当前浏览器的本地扩展存储中，不参与账号同步。</p>
+      <p class="sub">配置多个 OpenAI 兼容模型。每个模型拥有独立的 Base URL、API Key 和图片能力；API Key 仅保存在当前浏览器。</p>
 
       <div class="form">
+        <div class="profile-row">
+          <label class="profile-select">
+            <span>模型配置</span>
+            <select id="profile"></select>
+          </label>
+          <button id="addProfile" type="button" class="secondary">新增</button>
+          <button id="deleteProfile" type="button" class="danger">删除</button>
+        </div>
         <label>
           <span>供应商预设</span>
           <select id="provider">
@@ -27,8 +35,18 @@
         </label>
 
         <label>
-          <span>Model</span>
+          <span>配置名称</span>
+          <input id="name" type="text" placeholder="例如：GPT-4o Vision" />
+        </label>
+
+        <label>
+          <span>Model 参数</span>
           <input id="model" type="text" placeholder="deepseek-v4-flash" />
+        </label>
+
+        <label class="check-label">
+          <input id="supportsImages" type="checkbox" />
+          <span>支持图片输入（仅在模型真实支持视觉能力时开启）</span>
         </label>
 
         <label>
@@ -56,9 +74,9 @@
       <div class="tips">
         <div class="tip-title">使用提示</div>
         <ul>
-          <li>网页内选中文本后会出现一个小图标，点击即可打开浮层并把内容加入上下文。</li>
-          <li>右键菜单也可以把选中内容/整页内容加入上下文。</li>
-          <li>浮层支持持续对话；每次发送会带上你当前的上下文片段。</li>
+          <li>Chat 顶部可以随时切换已保存的模型配置。</li>
+          <li>截图上下文只能发送给勾选了“支持图片输入”的模型。</li>
+          <li>右键菜单仅用于打开 Chat；表格和截图由浮层内主动加入。</li>
         </ul>
       </div>
     </div>

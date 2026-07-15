@@ -13,7 +13,9 @@ const extension = path.join(temp, "extension");
 await fs.mkdir(extension);
 await fs.cp(path.join(ROOT, "src"), path.join(extension, "src"), { recursive: true });
 const manifest = JSON.parse(await fs.readFile(path.join(ROOT, "manifest.json"), "utf8"));
-manifest.host_permissions = ["http://127.0.0.1/*"];
+// Keep the production host permission because captureVisibleTab requires
+// activeTab or <all_urls>; narrowing it would test a different permission model.
+manifest.host_permissions = ["<all_urls>"];
 await fs.writeFile(path.join(extension, "manifest.json"), JSON.stringify(manifest));
 
 const fixture = await fs.readFile(path.join(ROOT, "tests/e2e/fixture.html"));
@@ -70,7 +72,7 @@ const browser = await puppeteer.launch({
 
 try {
   const extensionTarget = await browser.waitForTarget(
-    (target) => target.type() === "service_worker" && target.url().startsWith("chrome-extension://"),
+    (target) => target.type() === "service_worker" && /^chrome-extension:\/\/[^/]+\/src\/background\.js$/.test(target.url()),
     { timeout: 15000 }
   );
   assert.match(extensionTarget.url(), /^chrome-extension:\/\//, "extension service worker must start before page tests");
@@ -105,6 +107,87 @@ try {
     await chrome.tabs.sendMessage(tab.id, { type: "SHOW_LAUNCHER" }, { frameId: 0 });
   }, url);
   await page.waitForFunction(() => document.querySelector("#web2ai_launcher_fab")?.style.display === "flex");
+
+  await worker.evaluate(async () => {
+    const { settings } = await chrome.storage.sync.get(["settings"]);
+    const models = [...settings.models, {
+      id: "vision-e2e",
+      name: "Vision E2E",
+      baseUrl: "https://example.invalid",
+      model: "vision-test",
+      supportsImages: true,
+      contextWindow: 32000,
+      maxOutputTokens: 2048
+    }];
+    await chrome.storage.sync.set({ settings: { ...settings, models } });
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll("#web2ai_model_select option").length === 2);
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const select = host.shadowRoot.querySelector("#web2ai_model_select");
+    select.value = "vision-e2e";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await worker.evaluate(async () => {
+    for (let i = 0; i < 50; i++) {
+      const { settings } = await chrome.storage.sync.get(["settings"]);
+      if (settings.activeModelId === "vision-e2e") return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error("Chat model switch did not persist");
+  });
+  await page.waitForFunction(() => {
+    const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+    const select = shadow?.querySelector("#web2ai_model_select");
+    const tip = Array.from(shadow?.querySelectorAll(".header span") || []).find((node) => node.textContent === "支持图片");
+    return select?.selectedOptions?.[0]?.textContent === "Vision E2E" && Boolean(tip);
+  });
+
+  await page.click("#web2ai_launcher_fab");
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const button = Array.from(host.shadowRoot.querySelectorAll("button"))
+      .find((item) => item.textContent?.trim() === "截图");
+    button.click();
+  });
+  await page.waitForFunction(() => {
+    const image = document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".contextScreenshot");
+    return image?.src?.startsWith("data:image/jpeg;base64,");
+  });
+  const screenshotStoredInMemory = await page.$eval("#web2ai_overlay_host", (host) => {
+    const image = host.shadowRoot.querySelector(".contextScreenshot");
+    return image.src.startsWith("data:image/jpeg;base64,") && image.src.length > 1000;
+  });
+  assert.equal(screenshotStoredInMemory, true, "visible-tab capture must add a JPEG screenshot context preview");
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const item = host.shadowRoot.querySelector(".contextScreenshot")?.closest(".contextItem");
+    item.querySelector(".ctxRemove").click();
+  });
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const button = Array.from(host.shadowRoot.querySelectorAll("button"))
+      .find((item) => item.textContent?.trim() === "区域截图");
+    button.click();
+  });
+  await page.waitForSelector("#web2ai_screenshot_selector");
+  await page.mouse.move(40, 40);
+  await page.mouse.down();
+  await page.mouse.move(220, 160, { steps: 5 });
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".contextScreenshot").length === 1);
+  const croppedPreview = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".contextScreenshot")?.src || "");
+  assert.match(croppedPreview, /^data:image\/jpeg;base64,/, "region capture must add a cropped JPEG context");
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const send = Array.from(host.shadowRoot.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "问一下");
+    send.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_toast")?.textContent?.includes("填写希望大模型对图片做什么分析"), { timeout: 10000 });
+  const imagePromptNotice = await page.$eval("#web2ai_toast", (node) => node.textContent || "");
+  assert.match(imagePromptNotice, /填写希望大模型对图片做什么分析/, "an image-only empty first request must ask the user for an analysis instruction");
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    host.shadowRoot.querySelector(".contextScreenshot")?.closest(".contextItem")?.querySelector(".ctxRemove")?.click();
+    const close = Array.from(host.shadowRoot.querySelectorAll(".header button"))
+      .find((button) => button.textContent?.trim() === "×");
+    close.click();
+  });
 
   const firstRow = await page.$("#orders tbody tr");
   await firstRow.hover();
@@ -232,7 +315,7 @@ try {
   });
   await page.$eval("#web2ai_overlay_host", (host) => {
     const clear = Array.from(host.shadowRoot.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("全部清空"));
+      .find((button) => button.textContent?.trim() === "清空");
     clear.click();
   });
   await page.evaluate(() => {
@@ -251,7 +334,7 @@ try {
   await page.waitForSelector("#web2ai_overlay_host");
   const contextCount = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".contextItem").length);
   assert.equal(contextCount, 0, "refresh must clear in-memory contexts");
-  console.log("Chrome E2E passed: launcher toggle, table gating, iframe injection, virtual row reuse, DOM replacement, refresh clearing");
+  console.log("Chrome E2E passed: model switching, screenshots, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
 } finally {
   await browser.close();
   server.close();

@@ -37,7 +37,7 @@ function addContextSnippet(snippet) {
   const t0 = performance.now();
   const text = normalizeText(snippet?.text);
   DEBUG && console.log(`[web2ai] addContextSnippet kind=${snippet?.kind} text="${text?.slice(0, 60)}" IS_TOP_FRAME=${IS_TOP_FRAME} tableGroups.length=${STATE.tableGroups.length}`);
-  if (!text) {
+  if (!text && !snippet?.imageData) {
     showToast("没有可添加的内容");
     return;
   }
@@ -56,6 +56,9 @@ function addContextSnippet(snippet) {
     ref,
     kind,
     text: truncateText(text, 8000),
+    // 截图仅保存在当前页面内存中，不进入 storage；发送时转换为多模态 image_url。
+    imageData: kind === "screenshot" ? String(snippet.imageData || "") : "",
+    imageMimeType: kind === "screenshot" ? String(snippet.imageMimeType || "image/jpeg") : "",
     url: snippet.url || location.href,
     title: snippet.title || document.title,
     createdAt: Date.now(),

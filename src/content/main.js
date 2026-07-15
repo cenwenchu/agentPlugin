@@ -14,9 +14,9 @@
 import { DEBUG, IS_TOP_FRAME, STATE, refs } from './state.js';
 import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableSelectionEnabled, clearAllTableSelectionState } from './table.js';
 import { initHighlightStyle } from './highlight.js';
-import { initOverlay, render, setOpen } from './overlay.js';
+import { initOverlay, render, setOpen, refreshModelOptions } from './overlay.js';
 import { showToast } from './toast.js';
-import { addContextSnippet, removeContextByRef, extractPageText } from './context.js';
+import { addContextSnippet, removeContextByRef } from './context.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
 try {
@@ -138,19 +138,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
-  // 捕获当前页面文本
-  if (message?.type === "CAPTURE_PAGE") {
-    const text = extractPageText();
-    const snippet = {
-      kind: "page",
-      text,
-      url: location.href,
-      title: document.title
-    };
-    sendResponse({ ok: true, snippet });
-    return;
-  }
-
   // 渲染 UI
   if (message?.type === "RENDER_UI") {
     if (IS_TOP_FRAME) render();
@@ -187,6 +174,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     STATE.launcherVisible = changes.launcherHidden.newValue !== true;
     setTableSelectionEnabled(STATE.launcherVisible);
   }
+  if (changes.settings) refreshModelOptions().catch(() => void 0);
   render();
 });
 

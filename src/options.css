@@ -52,6 +52,21 @@ select:focus {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
+.profile-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.profile-select { flex: 1; margin: 0; }
+
+.check-label { display: flex; align-items: center; gap: 8px; }
+.check-label input { width: 18px; height: 18px; margin: 0; }
+.check-label > span { margin: 0; color: #374151; }
+
 .row {
   display: flex;
   align-items: center;
@@ -74,6 +89,8 @@ button.secondary {
   background: #fff;
   color: #111827;
 }
+
+button.danger { border-color: #fecaca; background: #fff; color: #b91c1c; }
 
 .status {
   font-size: 12px;

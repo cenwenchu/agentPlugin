@@ -2,35 +2,53 @@
  * @fileoverview Background Service Worker (Manifest V3)。
  *
  * 核心职责：
- * 1. 右键菜单管理（添加整页内容到 AI 上下文、打开浮层）与工具栏入口
+ * 1. 右键“打开 Chat”菜单、工具栏入口与当前标签页截图
  * 2. AI API 请求代理（非流式 + 流式 SSE）
  * 3. 长连接管理（流式 AI 对话的 Port 通信）
  * 4. 设置分层：普通配置存 sync，API Key 存 local
  */
 
-import { DEFAULT_SETTINGS } from "./shared.js";
+import { DEFAULT_MODEL_PROFILE, DEFAULT_SETTINGS } from "./shared.js";
 import { createSseDataParser } from "./sse.js";
 
 // ========== 设置 ==========
 
 /**
  * 获取用户设置（合并默认值）。
- * @returns {Promise<{baseUrl:string, model:string, contextWindow:number, maxOutputTokens:number, apiKey:string}>}
+ * @returns {Promise<Object>} 当前模型的扁平配置，同时包含全部脱敏模型元数据
  */
 async function getSettings() {
   const [syncData, localData] = await Promise.all([
     chrome.storage.sync.get(["settings"]),
-    chrome.storage.local.get(["apiKey"])
+    chrome.storage.local.get(["apiKey", "modelApiKeys"])
   ]);
   const synced = syncData.settings ?? {};
-  // 旧版本曾把密钥放入 sync；首次读取时迁移到 local 并清除同步副本。
-  if (!localData.apiKey && synced.apiKey) {
-    await chrome.storage.local.set({ apiKey: synced.apiKey });
-    const { apiKey: _removed, ...safeSettings } = synced;
-    await chrome.storage.sync.set({ settings: safeSettings });
-    return { ...DEFAULT_SETTINGS, ...safeSettings, apiKey: synced.apiKey };
+  let models = Array.isArray(synced.models) && synced.models.length ? synced.models : null;
+  let activeModelId = synced.activeModelId;
+  let modelApiKeys = { ...(localData.modelApiKeys ?? {}) };
+
+  // 将旧版单模型配置无损迁移为模型列表；密钥继续只保存在 local。
+  if (!models) {
+    const legacy = { ...DEFAULT_MODEL_PROFILE, ...synced, id: "default", name: synced.model || DEFAULT_MODEL_PROFILE.name };
+    delete legacy.apiKey;
+    models = [legacy];
+    activeModelId = legacy.id;
+    const legacyKey = localData.apiKey || synced.apiKey || "";
+    if (legacyKey) modelApiKeys[legacy.id] = legacyKey;
+    await Promise.all([
+      chrome.storage.sync.set({ settings: { models, activeModelId } }),
+      chrome.storage.local.set({ modelApiKeys })
+    ]);
   }
-  return { ...DEFAULT_SETTINGS, ...synced, apiKey: localData.apiKey ?? "" };
+  const active = models.find((profile) => profile.id === activeModelId) || models[0];
+  activeModelId = active.id;
+  return {
+    ...DEFAULT_MODEL_PROFILE,
+    ...active,
+    activeModelId,
+    models: models.map((profile) => ({ ...profile, hasApiKey: Boolean(modelApiKeys[profile.id]) })),
+    apiKey: modelApiKeys[active.id] || ""
+  };
 }
 
 /**
@@ -40,7 +58,7 @@ async function ensureDefaultSettings() {
   const data = await chrome.storage.sync.get(["settings"]);
   if (!data.settings) {
     await chrome.storage.sync.set({ settings: DEFAULT_SETTINGS });
-  } else if (data.settings.apiKey) {
+  } else if (!Array.isArray(data.settings.models) || data.settings.apiKey) {
     await getSettings();
   }
 }
@@ -68,6 +86,9 @@ async function chatCompletions({ messages }) {
   const settings = await getSettings();
   if (!settings.apiKey) {
     throw new Error("Missing API Key. Please set it in the extension Options.");
+  }
+  if (!settings.supportsImages && messages.some((message) => Array.isArray(message.content) && message.content.some((part) => part?.type === "image_url"))) {
+    throw new Error(`当前模型“${settings.name || settings.model}”未配置为支持图片`);
   }
 
   const url = buildChatCompletionsUrl(settings.baseUrl);
@@ -104,6 +125,9 @@ async function streamChatCompletions({ messages, signal, onDelta }) {
   const settings = await getSettings();
   if (!settings.apiKey) {
     throw new Error("Missing API Key. Please set it in the extension Options.");
+  }
+  if (!settings.supportsImages && messages.some((message) => Array.isArray(message.content) && message.content.some((part) => part?.type === "image_url"))) {
+    throw new Error(`当前模型“${settings.name || settings.model}”未配置为支持图片`);
   }
 
   const url = buildChatCompletionsUrl(settings.baseUrl);
@@ -200,36 +224,20 @@ chrome.runtime.onInstalled.addListener(async () => {
 
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({
-    id: "web2ai_add_page",
-    title: "添加整页内容到 AI 上下文",
-    contexts: ["page"]
-  });
-  chrome.contextMenus.create({
     id: "web2ai_open_panel",
     title: "打开 AI Chat 浮层",
-    contexts: ["page"]
+    contexts: ["all"]
   });
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab?.id) return;
-  const frameId = typeof info?.frameId === "number" ? info.frameId : 0;
-
   try {
     if (info.menuItemId === "web2ai_open_panel") {
       await sendToFrame(tab.id, 0, { type: "OPEN_PANEL" });
       return;
     }
 
-    if (info.menuItemId === "web2ai_add_page") {
-      const captured = await sendToFrame(tab.id, frameId, { type: "CAPTURE_PAGE" });
-      const snippet = captured?.snippet;
-      if (snippet?.text) {
-        await sendToFrame(tab.id, frameId, { type: "ADD_CONTEXT_SNIPPET", snippet });
-        await sendToFrame(tab.id, 0, { type: "OPEN_PANEL" });
-      }
-      return;
-    }
   } catch (e) {
     try {
       await sendToTab(tab.id, { type: "TOAST", text: String(e?.message ?? e) });
@@ -265,6 +273,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const settings = await getSettings();
       const { apiKey, ...safeSettings } = settings;
       sendResponse({ ok: true, data: { ...safeSettings, hasApiKey: Boolean(apiKey) } });
+      return;
+    }
+    if (message?.type === "SET_ACTIVE_MODEL") {
+      const modelId = String(message.modelId || "");
+      const data = await chrome.storage.sync.get(["settings"]);
+      const settings = data.settings ?? DEFAULT_SETTINGS;
+      const models = Array.isArray(settings.models) ? settings.models : [];
+      if (!models.some((profile) => profile.id === modelId)) throw new Error("模型配置不存在");
+      await chrome.storage.sync.set({ settings: { ...settings, activeModelId: modelId } });
+      sendResponse({ ok: true });
+      return;
+    }
+    // 捕获发起请求的标签页当前可见区域。图片只返回给内容脚本并保存在页面内存。
+    if (message?.type === "CAPTURE_VISIBLE_TAB") {
+      const windowId = sender?.tab?.windowId;
+      if (!Number.isInteger(windowId)) throw new Error("无法确定当前窗口");
+      const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 82 });
+      sendResponse({ ok: true, data: { dataUrl, capturedAt: Date.now() } });
       return;
     }
     // 打开设置页

@@ -21,7 +21,13 @@ function estimateTokens(text) {
 }
 
 function estimateMessagesTokens(messages) {
-  return messages.reduce((sum, message) => sum + 4 + estimateTokens(message?.content), 2);
+  return messages.reduce((sum, message) => {
+    const content = message?.content;
+    const contentTokens = Array.isArray(content)
+      ? content.reduce((partSum, part) => partSum + (part?.type === "text" ? estimateTokens(part.text) : 0), 0)
+      : estimateTokens(content);
+    return sum + 4 + contentTokens;
+  }, 2);
 }
 
 function selectContextsWithinTokenBudget(contexts, tokenBudget) {

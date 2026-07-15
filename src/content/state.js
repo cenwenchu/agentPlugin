@@ -27,6 +27,8 @@ const IS_TOP_FRAME = window.top === window;
  * @property {boolean} suppressAutoSuggest - 是否禁用自动建议
  * @property {boolean} maximized - 面板是否最大化
  * @property {boolean} launcherVisible - 页面上的 Chat 启动图标是否可见
+ * @property {Array} modelOptions - Chat 可切换的脱敏模型配置
+ * @property {string} activeModelId - 当前请求使用的模型配置 ID
  */
 const STATE = {
   open: false,
@@ -40,7 +42,9 @@ const STATE = {
   lastInputCursor: null,
   suppressAutoSuggest: false,
   maximized: false,
-  launcherVisible: true
+  launcherVisible: true,
+  modelOptions: [],
+  activeModelId: ""
 };
 
 /** 表格列分隔符 */
@@ -184,7 +188,7 @@ const refs = {
   fallbackHighlightBox: null,
   /** 快捷键是否已绑定 */
   hotkeysBound: false,
-  /** Toast 消息队列 */
+  /** Toast 消息队列：{message, duration} */
   toastQueue: [],
   /** Toast 展示定时器 */
   toastTimer: null,

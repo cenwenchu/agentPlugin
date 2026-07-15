@@ -16,7 +16,7 @@ import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, Z_INDEX, TABLE_UI_Z_INDEX, u
 import { el } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { openOptionsPage, streamChat, stopGeneration, sendToBackground } from './messaging.js';
-import { addContextSnippet, removeContext, clearAll, buildContextBlock, extractPageText } from './context.js';
+import { addContextSnippet, removeContext, clearAll, buildContextBlock } from './context.js';
 import { calculateContextBudget, estimateTokens, selectContextsWithinTokenBudget } from './token-budget.js';
 import { tableGroupToCsv, tableGroupToMarkdown } from './table-export.js';
 import { buildOnboardingPrompt, createFallbackOnboarding, parseOnboardingResponse } from './onboarding.js';
@@ -30,11 +30,13 @@ const OVERLAY_CSS = `
     .card { height: 100%; display: flex; flex-direction: column; background: rgba(255,255,255,0.98); border-left: 1px solid rgba(0,0,0,0.12); overflow: hidden; box-shadow: 0 12px 36px rgba(0,0,0,0.22); backdrop-filter: blur(10px); }
     .wrap.max .card { border-left: none; box-shadow: none; }
     .hidden { display: none; }
-    .header { display: flex; align-items: center; gap: 6px; padding: 10px 10px; border-bottom: 1px solid rgba(0,0,0,0.08); }
+    .header { display: flex; flex-direction: column; gap: 7px; padding: 10px; border-bottom: 1px solid rgba(0,0,0,0.08); }
+    .headerRow { width: 100%; display: flex; align-items: center; gap: 6px; }
+    .modelRow { padding-top: 7px; border-top: 1px solid rgba(0,0,0,.06); }
     .title { font-weight: 650; font-size: 13px; color: #111827; flex: 1; }
     .header .btn-primary { font-weight: 600; }
     .btn { height: 28px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.12); background: #fff; color: #111827; padding: 0 10px; cursor: pointer; font-size: 12px; }
-    .btn.primary { background: #111827; color: #fff; border-color: #111827; }
+    .btn.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
     .btn.danger { background: #fff; color: #b91c1c; border-color: rgba(185,28,28,0.35); }
     .body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px; overflow: hidden; }
     .body.max { flex-direction: row; }
@@ -51,6 +53,7 @@ const OVERLAY_CSS = `
     .contextMeta { font-size: 11px; color: #6b7280; margin-bottom: 4px; padding-right: 28px; }
     .contextText { font-size: 12px; color: #111827; white-space: pre-wrap; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     .contextOmitted { font-size: 11px; color: #6b7280; margin-top: 6px; }
+    .contextScreenshot { display: block; width: 100%; max-height: 180px; object-fit: contain; border-radius: 8px; background: #f3f4f6; border: 1px solid rgba(0,0,0,.08); }
     .ctxRemove { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); background: #fff; color: #111827; cursor: pointer; font-size: 14px; line-height: 20px; padding: 0; }
     .ctxRemove:hover { background: rgba(0,0,0,0.04); }
     .chatSec { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -108,6 +111,160 @@ function scheduleRender() {
     }
     render();
   });
+}
+
+function selectScreenshotRegion() {
+  return new Promise((resolve) => {
+    const selector = el("div", {
+      id: "web2ai_screenshot_selector",
+      "data-web2ai-ui": true,
+      style: { position: "fixed", inset: "0", zIndex: "2147483647", cursor: "crosshair", background: "rgba(15,23,42,.18)", userSelect: "none" }
+    });
+    const hint = el("div", {
+      style: { position: "fixed", left: "50%", top: "18px", transform: "translateX(-50%)", padding: "8px 14px", borderRadius: "999px", background: "rgba(17,24,39,.92)", color: "#fff", fontSize: "13px", pointerEvents: "none" }
+    }, ["拖拽选择截图区域 · Esc 取消"]);
+    const box = el("div", {
+      style: { position: "fixed", display: "none", border: "2px solid #3b82f6", background: "rgba(59,130,246,.12)", boxShadow: "0 0 0 9999px rgba(15,23,42,.28)", pointerEvents: "none" }
+    });
+    selector.append(hint, box);
+    let start = null;
+    const cleanup = (value) => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      selector.remove();
+      resolve(value);
+    };
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      cleanup(null);
+    };
+    selector.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      start = { x: event.clientX, y: event.clientY };
+      box.style.display = "block";
+      selector.setPointerCapture(event.pointerId);
+    });
+    selector.addEventListener("pointermove", (event) => {
+      if (!start) return;
+      const left = Math.min(start.x, event.clientX);
+      const top = Math.min(start.y, event.clientY);
+      Object.assign(box.style, {
+        left: `${left}px`, top: `${top}px`,
+        width: `${Math.abs(event.clientX - start.x)}px`, height: `${Math.abs(event.clientY - start.y)}px`
+      });
+    });
+    selector.addEventListener("pointerup", (event) => {
+      if (!start) return;
+      const rect = {
+        left: Math.min(start.x, event.clientX),
+        top: Math.min(start.y, event.clientY),
+        width: Math.abs(event.clientX - start.x),
+        height: Math.abs(event.clientY - start.y)
+      };
+      cleanup(rect.width >= 10 && rect.height >= 10 ? rect : null);
+    });
+    document.addEventListener("keydown", onKeyDown, true);
+    document.documentElement.appendChild(selector);
+  });
+}
+
+async function cropScreenshot(dataUrl, rect) {
+  if (!rect) return dataUrl;
+  const image = new Image();
+  image.src = dataUrl;
+  await image.decode();
+  const scaleX = image.naturalWidth / window.innerWidth;
+  const scaleY = image.naturalHeight / window.innerHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(rect.width * scaleX));
+  canvas.height = Math.max(1, Math.round(rect.height * scaleY));
+  canvas.getContext("2d").drawImage(
+    image,
+    Math.round(rect.left * scaleX), Math.round(rect.top * scaleY), canvas.width, canvas.height,
+    0, 0, canvas.width, canvas.height
+  );
+  return canvas.toDataURL("image/jpeg", 0.82);
+}
+
+async function captureScreenshot({ selectRegion = false } = {}) {
+  if (STATE.pending) return;
+  let screenshotAdded = false;
+  const pluginNodes = [
+    refs.overlayHost,
+    refs.launcherFab,
+    refs.launcherBadge,
+    refs.batchBar,
+    refs.tableRowFab,
+    refs.inlineRowFab,
+    ...refs.pinnedRowOverlays.values()
+  ].filter(Boolean);
+  const previousVisibility = pluginNodes.map((node) => [node, node.style.visibility]);
+  const selectedRows = Array.from(document.querySelectorAll('[data-web2ai-selected="1"]'));
+  try {
+    // captureVisibleTab 会捕获注入页面的扩展 UI；截图前隐藏插件自身，避免把 Chat、
+    // checkbox 和选中高亮一并作为视觉上下文发送给模型。
+    for (const node of pluginNodes) node.style.visibility = "hidden";
+    for (const row of selectedRows) delete row.dataset.web2aiSelected;
+    const region = selectRegion ? await selectScreenshotRegion() : null;
+    if (selectRegion && !region) {
+      showToast("已取消区域截图");
+      return;
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const response = await sendToBackground({ type: "CAPTURE_VISIBLE_TAB" });
+    const dataUrl = response?.data?.dataUrl ? await cropScreenshot(response.data.dataUrl, region) : "";
+    if (!response?.ok || !dataUrl) throw new Error(response?.error || "截图失败");
+    addContextSnippet({
+      kind: "screenshot",
+      text: `${selectRegion ? "用户选择区域截图" : "当前页面可见区域截图"} · ${new Date(response.data.capturedAt || Date.now()).toLocaleString()}`,
+      imageData: dataUrl,
+      imageMimeType: "image/jpeg",
+      url: location.href,
+      title: document.title
+    });
+    screenshotAdded = true;
+    showToast("截图已加入上下文");
+  } catch (error) {
+    showToast(`截图失败：${String(error?.message ?? error)}`, 2800);
+  } finally {
+    // 捕获失败时也必须恢复页面交互。
+    for (const [node, visibility] of previousVisibility) node.style.visibility = visibility;
+    for (const row of selectedRows) row.dataset.web2aiSelected = "1";
+  }
+  if (screenshotAdded) await offerImageCapableModelSwitch();
+}
+
+async function refreshModelOptions({ shouldRender = true } = {}) {
+  const response = await sendToBackground({ type: "GET_SETTINGS" });
+  if (!response?.ok || !response.data) return;
+  STATE.modelOptions = Array.isArray(response.data.models) ? response.data.models : [];
+  STATE.activeModelId = response.data.activeModelId || STATE.modelOptions[0]?.id || "";
+  if (shouldRender) render();
+}
+
+/**
+ * 截图加入上下文后，确保用户有机会切换到可接收图片的模型。
+ * 仅在当前模型不支持图片且存在可用图片模型时询问，避免无效提示。
+ */
+async function offerImageCapableModelSwitch() {
+  const response = await sendToBackground({ type: "GET_SETTINGS" });
+  if (!response?.ok || !response.data || response.data.supportsImages) return;
+  const imageModel = (response.data.models || []).find((profile) => profile.supportsImages);
+  if (!imageModel) return;
+  const currentName = response.data.name || response.data.model || "当前模型";
+  const imageModelName = imageModel.name || imageModel.model || "支持图片的模型";
+  const accepted = window.confirm(
+    `当前模型“${currentName}”不支持图片，是否切换到支持图片的模型“${imageModelName}”？`
+  );
+  if (!accepted) return;
+  const switchResponse = await sendToBackground({ type: "SET_ACTIVE_MODEL", modelId: imageModel.id });
+  if (!switchResponse?.ok) {
+    showToast(`切换模型失败：${switchResponse?.error || "未知错误"}`, 2800);
+    return;
+  }
+  await refreshModelOptions();
+  showToast(`已切换到“${imageModelName}”`);
 }
 
 function ensureOverlay() {
@@ -176,43 +333,76 @@ function render() {
     class: `backdrop ${STATE.open ? "" : "hidden"}`
   });
 
+  const modelSelect = el("select", {
+    id: "web2ai_model_select",
+    title: "切换当前对话模型",
+    style: { width: "140px", height: "30px", borderRadius: "9px", border: "1px solid rgba(59,130,246,.45)", background: "#eff6ff", color: "#1e3a8a", padding: "0 8px", fontSize: "12px", fontWeight: "650" },
+    onChange: async (event) => {
+      const previous = STATE.activeModelId;
+      STATE.activeModelId = event.target.value;
+      const response = await sendToBackground({ type: "SET_ACTIVE_MODEL", modelId: STATE.activeModelId });
+      if (!response?.ok) {
+        STATE.activeModelId = previous;
+        showToast(`切换模型失败：${response?.error || "未知错误"}`);
+      }
+      await refreshModelOptions();
+    }
+  }, STATE.modelOptions.map((profile) => el("option", {
+    value: profile.id,
+    selected: profile.id === STATE.activeModelId ? true : null
+  }, [profile.name || profile.model])));
+  const activeModel = STATE.modelOptions.find((profile) => profile.id === STATE.activeModelId);
+  const imageCapabilityTip = el("span", {
+    title: activeModel?.supportsImages
+      ? "当前模型配置允许发送截图"
+      : "当前模型配置不允许发送截图",
+    style: {
+      padding: "3px 7px",
+      borderRadius: "999px",
+      whiteSpace: "nowrap",
+      fontSize: "10px",
+      fontWeight: "650",
+      color: activeModel?.supportsImages ? "#166534" : "#6b7280",
+      background: activeModel?.supportsImages ? "#dcfce7" : "#f3f4f6",
+      border: activeModel?.supportsImages ? "1px solid #bbf7d0" : "1px solid #e5e7eb"
+    }
+  }, [activeModel?.supportsImages ? "支持图片" : "不支持图片"]);
+
   const header = el("div", { class: "header" }, [
-    el("div", { class: "title" }, ["采"]),
-    el(
-      "button",
-      {
-        class: "btn primary",
-        style: { fontSize: "11px", padding: "4px 10px" },
-        onClick: () => toggleMaximized()
-      },
-      [STATE.maximized ? "还原" : "最大化"]
-    ),
-    el(
-      "button",
-      {
+    el("div", { class: "headerRow" }, [
+      el("div", { class: "title" }, ["采"]),
+      el("button", {
         class: "btn",
+        title: STATE.maximized ? "还原窗口" : "最大化",
+        "aria-label": STATE.maximized ? "还原窗口" : "最大化",
+        style: { width: "30px", padding: "0", fontSize: "16px" },
+        onClick: () => toggleMaximized()
+      }, [STATE.maximized ? "▣" : "⛶"]),
+      el("button", {
+        class: "btn",
+        title: "设置",
+        "aria-label": "设置",
+        style: { width: "30px", padding: "0", fontSize: "16px" },
         onClick: () => openOptionsPage()
-      },
-      ["设置"]
-    ),
-    el(
-      "button",
-      {
+      }, ["⚙"]),
+      el("button", {
         class: "btn danger",
         disabled: STATE.pending ? true : null,
         onClick: () => clearAll()
-      },
-      ["全部清空"]
-    ),
-    el(
-      "button",
-      {
+      }, ["清空"]),
+      el("button", {
         class: "btn",
+        title: "关闭",
+        "aria-label": "关闭",
         style: { width: "28px", padding: "0", fontSize: "16px", lineHeight: "26px" },
         onClick: () => setOpen(false)
-      },
-      ["\u00d7"]
-    )
+      }, ["\u00d7"])
+    ]),
+    el("div", { class: "headerRow modelRow" }, [
+      el("span", { style: { fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap" } }, ["当前模型"]),
+      modelSelect,
+      imageCapabilityTip
+    ])
   ]);
 
   function renderContextItem(c) {
@@ -230,6 +420,7 @@ function render() {
       fullText.length > tipLimit
         ? `${fullText.slice(0, tipLimit)}…（已省略 ${fullText.length - tipLimit} 字符）`
         : fullText;
+    const isScreenshot = c.kind === "screenshot" && c.imageData;
     return el("div", { class: "contextItem" }, [
       el("input", {
         type: "checkbox",
@@ -250,24 +441,23 @@ function render() {
         el("span", {}, [
           c.kind === "table-header"
             ? el("span", { style: { color: "#dc2626", fontWeight: "600" } }, ["表结构说明"])
-            : c.kind === "table-row" ? "表格内容" : c.kind
+            : c.kind === "table-row" ? "表格内容" : c.kind === "screenshot" ? "截图" : c.kind
         ]),
         `${c.lineInfo?.startLine && c.lineInfo?.endLine
             ? ` · L${c.lineInfo.startLine}-${c.lineInfo.endLine}`
             : ""
         } · ${new Date(c.createdAt).toLocaleString()}`
       ]),
-      el("div", { class: "contextText", title: tipText }, [shownText]),
-      omittedHint ? el("div", { class: "contextOmitted" }, [omittedHint]) : null,
+      isScreenshot
+        ? el("img", { class: "contextScreenshot", src: c.imageData, alt: c.text || "网页截图" })
+        : el("div", { class: "contextText", title: tipText }, [shownText]),
+      !isScreenshot && omittedHint ? el("div", { class: "contextOmitted" }, [omittedHint]) : null,
       null
     ]);
   }
 
-  function renderTableGroups() {
+  function renderContexts() {
     const groups = STATE.tableGroups;
-    if (!groups.length) {
-      return [el("div", { style: { fontSize: "12px", color: "#6b7280" } }, ["还没有上下文，可勾选表格行或右键添加整页内容。"])];
-    }
     const els = [];
     for (let gi = 0; gi < groups.length; gi++) {
       const g = groups[gi];
@@ -287,16 +477,35 @@ function render() {
         els.push(renderContextItem(row));
       }
     }
+    for (const screenshot of STATE.contexts.filter((context) => context.kind === "screenshot")) {
+      els.push(renderContextItem(screenshot));
+    }
+    if (!els.length) {
+      return [el("div", { style: { fontSize: "12px", color: "#6b7280" } }, ["还没有上下文，可勾选表格行或点击“截图”。"])];
+    }
     return els;
   }
 
   const tableCount = STATE.tableGroups.length;
   const rowCount = STATE.tableGroups.reduce((sum, g) => sum + g.rows.length, 0);
+  const screenshotCount = STATE.contexts.filter((context) => context.kind === "screenshot").length;
   const contextSection = el("div", { class: "section contextSec" }, [
     el("div", { class: "sectionHead" }, [
-      el("div", { class: "sectionTitle" }, [`上下文（${tableCount} 个表格，共 ${rowCount} 条）`])
+      el("div", { class: "sectionTitle" }, [`上下文（${tableCount} 个表格，共 ${rowCount} 条；${screenshotCount} 张截图）`]),
+      el("button", {
+        class: "btn",
+        disabled: STATE.pending ? true : null,
+        title: "截取当前标签页可见区域",
+        onClick: () => captureScreenshot()
+      }, ["截图"]),
+      el("button", {
+        class: "btn",
+        disabled: STATE.pending ? true : null,
+        title: "拖拽选择当前可见区域",
+        onClick: () => captureScreenshot({ selectRegion: true })
+      }, ["区域截图"])
     ]),
-    el("div", { class: "sectionBody" }, renderTableGroups())
+    el("div", { class: "sectionBody" }, renderContexts())
   ]);
 
   const chatSection = el("div", { class: "section chatSec" }, [
@@ -450,6 +659,15 @@ async function sendText(rawText, opts = {}) {
   const text = normalizeText(rawText);
   if (!text) return;
   if (STATE.pending) return;
+  let resolvedSettings = null;
+  if (STATE.contexts.some((context) => context.kind === "screenshot" && context.enabled !== false && context.imageData)) {
+    const response = await sendToBackground({ type: "GET_SETTINGS" });
+    resolvedSettings = response?.data || null;
+    if (!resolvedSettings?.supportsImages) {
+      showToast(`当前模型“${resolvedSettings?.name || resolvedSettings?.model || "未配置"}”不支持图片，请切换模型`, 3000);
+      return;
+    }
+  }
   STATE.onboarding = null;
 
   const pendingUserMessage = { role: "user", content: text, ts: Date.now() };
@@ -470,28 +688,48 @@ async function sendText(rawText, opts = {}) {
       const isFirstTurn = STATE.messages.length <= 1;
       const recentMessages = sliceRecentRounds(STATE.messages);
       const latestUserTs = STATE.messages.filter((m) => m.role === "user").pop()?.ts;
+      const enabledContexts = STATE.contexts.filter((context) => context.enabled !== false);
+      const enabledScreenshots = enabledContexts.filter((context) => context.kind === "screenshot" && context.imageData);
+      // 控制单次请求体积；contexts 为 newest-first，优先发送最近截图。
+      const screenshotsToUse = enabledScreenshots.slice(0, 4);
+      if (screenshotsToUse.length < enabledScreenshots.length) {
+        showToast(`单次最多发送 4 张截图，已使用最近 ${screenshotsToUse.length} 张`);
+      }
       const historyMessages = recentMessages.map((m) => {
           if (m.role === "user") {
             const isLatest = m.ts === latestUserTs;
-            return isLatest
-              ? { role: "user", content: `USER_INPUT:\n${m.content}` }
-              : { role: "user", content: m.content };
+            if (!isLatest) return { role: "user", content: m.content };
+            const userText = `USER_INPUT:\n${m.content}`;
+            return screenshotsToUse.length
+              ? {
+                  role: "user",
+                  content: [
+                    { type: "text", text: userText },
+                    ...screenshotsToUse.map((context) => ({
+                      type: "image_url",
+                      image_url: { url: context.imageData, detail: "auto" }
+                    }))
+                  ]
+                }
+              : { role: "user", content: userText };
           }
           return { role: m.role, content: m.content };
         });
-      const settingsResp = await sendToBackground({ type: "GET_SETTINGS" });
+      const settingsResp = resolvedSettings ? { data: resolvedSettings } : await sendToBackground({ type: "GET_SETTINGS" });
       const settings = settingsResp?.data || {};
       const budget = calculateContextBudget({
         contextWindow: Math.max(8192, Number(settings.contextWindow) || 64000),
         maxOutputTokens: Math.max(256, Number(settings.maxOutputTokens) || 4096),
         messages: historyMessages
       });
-      const enabledContexts = STATE.contexts.filter((context) => context.enabled !== false);
-      const contextTokens = enabledContexts.reduce((sum, context) => sum + estimateTokens(context.text) + 24, 0);
-      const selection = selectContextsWithinTokenBudget(enabledContexts, budget.availableTokens);
+      const textContexts = enabledContexts.filter((context) => context.kind !== "screenshot");
+      const contextTokens = textContexts.reduce((sum, context) => sum + estimateTokens(context.text) + 24, 0);
+      // 图片 token 由供应商按视觉编码计算，这里为每张图预留保护性预算。
+      const textBudget = Math.max(0, budget.availableTokens - screenshotsToUse.length * 1200);
+      const selection = selectContextsWithinTokenBudget(textContexts, textBudget);
       const contextsToUse = selection.contexts;
-      if (contextsToUse.length < enabledContexts.length) {
-        showToast(`上下文超出模型预算，已保留表头和最近数据（${contextsToUse.length}/${enabledContexts.length} 条）`);
+      if (contextsToUse.length < textContexts.length) {
+        showToast(`上下文超出模型预算，已保留表头和最近数据（${contextsToUse.length}/${textContexts.length} 条）`);
       }
       DEBUG && console.log(`[web2ai] token budget context=${contextTokens} available=${budget.availableTokens} selected=${contextsToUse.length}`);
       const contextBlock = buildContextBlock(contextsToUse, !isFirstTurn);
@@ -582,10 +820,18 @@ async function onSend() {
   const hasInput = !!normalizeText(raw);
   const enabledContexts = STATE.contexts.filter((context) => context.enabled !== false);
   const hasContext = enabledContexts.length > 0;
+  const hasScreenshot = enabledContexts.some((context) => context.kind === "screenshot" && context.imageData);
+  const hasTableContext = enabledContexts.some((context) => context.kind === "table-header" || context.kind === "table-row");
   const isFirstTurn = STATE.messages.length === 0;
 
   if (!isFirstTurn && !hasInput) {
     showToast("请填写需要问的问题");
+    return;
+  }
+
+  if (isFirstTurn && !hasInput && hasScreenshot && !hasTableContext) {
+    showToast("请在输入框填写希望大模型对图片做什么分析，例如：识别异常、总结内容或提取关键信息", 4000);
+    refs.overlayShadow?.getElementById("web2ai_input")?.focus();
     return;
   }
 
@@ -909,6 +1155,7 @@ function initOverlay() {
     ensureHotkeys();
     ensureOverlay();
     ensureLauncherFab();
+    refreshModelOptions().catch(() => void 0);
   }
 }
 
@@ -946,5 +1193,6 @@ export {
   sliceRecentRounds,
   sendText,
   onSend,
-  initOverlay
+  initOverlay,
+  refreshModelOptions
 };

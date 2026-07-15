@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildContextBlockFromContexts, getTableContextIdentity, groupTableContexts } from "../../src/content/context-model.js";
 import { createSseDataParser } from "../../src/sse.js";
-import { calculateContextBudget, estimateTokens, selectContextsWithinTokenBudget } from "../../src/content/token-budget.js";
+import { calculateContextBudget, estimateMessagesTokens, estimateTokens, selectContextsWithinTokenBudget } from "../../src/content/token-budget.js";
 import { tableGroupToCsv, tableGroupToMarkdown } from "../../src/content/table-export.js";
 import { createContextRef, isContextRef } from "../../src/content/context-ref.js";
 import { buildOnboardingPrompt, parseOnboardingResponse } from "../../src/content/onboarding.js";
@@ -83,6 +83,18 @@ test("token budget accounts for history and output reserve", () => {
   assert.equal(budget.historyTokens, 1006);
   assert.equal(budget.availableTokens, 6494);
   assert.equal(estimateTokens("你好abcd"), 3);
+});
+
+test("token budget reads text from multimodal user messages", () => {
+  const text = "请分析这张截图中的异常订单";
+  const tokens = estimateMessagesTokens([{
+    role: "user",
+    content: [
+      { type: "text", text },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64,abc" } }
+    ]
+  }]);
+  assert.equal(tokens, 2 + 4 + estimateTokens(text));
 });
 
 test("structured token trimming keeps headers before recent rows", () => {
