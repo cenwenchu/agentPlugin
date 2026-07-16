@@ -20,9 +20,14 @@ await fs.writeFile(path.join(extension, "manifest.json"), JSON.stringify(manifes
 
 const fixture = await fs.readFile(path.join(ROOT, "tests/e2e/fixture.html"));
 const frameFixture = "<table><tbody><tr data-row-key='frame-1'><td>iframe row</td></tr></tbody></table>";
+const innerScrollFixture = `<!doctype html><meta charset="utf-8"><title>Inner scroll</title>
+  <style>html,body{margin:0;height:100%;overflow:hidden}#scrollbox{height:420px;width:100%;overflow-y:auto;background:#fff}#long-content{height:2200px;background:linear-gradient(#dbeafe,#fef3c7,#dcfce7)}</style>
+  <div id="scrollbox"><div id="long-content">内部滚动容器</div></div>`;
+const innerFrameHostFixture = `<!doctype html><meta charset="utf-8"><title>Inner frame host</title>
+  <style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;width:100%;height:100%;border:0}</style><iframe src="/inner-scroll"></iframe>`;
 const server = http.createServer((req, res) => {
   res.setHeader("content-type", "text/html; charset=utf-8");
-  res.end(req.url === "/frame" ? frameFixture : fixture);
+  res.end(req.url === "/frame" ? frameFixture : req.url === "/inner-scroll" ? innerScrollFixture : req.url === "/inner-frame-host" ? innerFrameHostFixture : fixture);
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}/`;
@@ -160,12 +165,13 @@ try {
     return select?.selectedOptions?.[0]?.textContent === "Vision E2E" && Boolean(tip);
   });
 
-  await page.click("#web2ai_launcher_fab");
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    const button = Array.from(host.shadowRoot.querySelectorAll("button"))
-      .find((item) => item.textContent?.trim() === "截图");
-    button.click();
-  });
+  // Mirrors the right-click “截图（框选区域）” menu action: background asks the
+  // top frame to open Chat and enter the existing region-selection flow.
+  await worker.evaluate(async (pageUrl) => {
+    const [tab] = await chrome.tabs.query({ url: pageUrl });
+    if (!tab?.id) throw new Error("fixture tab not found for region screenshot");
+    chrome.tabs.sendMessage(tab.id, { type: "START_REGION_SCREENSHOT" }, { frameId: 0 }).catch(() => void 0);
+  }, url);
   await page.waitForSelector("#web2ai_screenshot_selector");
   await page.mouse.move(40, 40);
   await page.mouse.down();
@@ -182,6 +188,35 @@ try {
   await page.waitForFunction(() => document.querySelector("#web2ai_toast")?.textContent?.includes("填写希望大模型对图片做什么分析"), { timeout: 10000 });
   const imagePromptNotice = await page.$eval("#web2ai_toast", (node) => node.textContent || "");
   assert.match(imagePromptNotice, /填写希望大模型对图片做什么分析/, "an image-only empty first request must ask the user for an analysis instruction");
+
+  const scrollBeforeMultiCapture = await page.evaluate(() => scrollY);
+  await page.evaluate(() => {
+    window.__web2aiMultiCaptureProgress = [];
+    const observer = new MutationObserver(() => {
+      const text = document.querySelector("#web2ai_multi_capture_progress")?.textContent?.trim();
+      if (text && !window.__web2aiMultiCaptureProgress.includes(text)) window.__web2aiMultiCaptureProgress.push(text);
+    });
+    observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+    window.__web2aiMultiCaptureProgressObserver = observer;
+  });
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const button = Array.from(host.shadowRoot.querySelectorAll("button"))
+      .find((item) => item.textContent?.trim() === "多屏截图");
+    button.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_toast")?.textContent?.includes("多屏截图加入上下文"), { timeout: 15000 });
+  const multiCaptureResult = await page.$eval("#web2ai_overlay_host", (host) => ({
+    count: host.shadowRoot.querySelectorAll(".contextScreenshot").length,
+    labels: Array.from(host.shadowRoot.querySelectorAll(".contextItem .contextText")).map((node) => node.textContent || "")
+  }));
+  assert.ok(multiCaptureResult.count >= 3, `multi-screen capture must add several image contexts: ${JSON.stringify(multiCaptureResult)}`);
+  assert.equal(await page.evaluate(() => scrollY), scrollBeforeMultiCapture, "multi-screen capture must restore the original scroll position");
+  const progressMessages = await page.evaluate(() => {
+    window.__web2aiMultiCaptureProgressObserver?.disconnect();
+    return window.__web2aiMultiCaptureProgress || [];
+  });
+  assert.ok(progressMessages.some((text) => text.startsWith("已完成 ")), `multi-screen capture must show per-screen progress: ${JSON.stringify(progressMessages)}`);
+  assert.ok(progressMessages.some((text) => text.startsWith("多屏截图完成")), `multi-screen capture must show completion progress: ${JSON.stringify(progressMessages)}`);
 
   // The left-side Monitor tab can create a local text-change sentinel. It
   // remains active while this tab is open, even when the panel is not focused.
@@ -237,7 +272,9 @@ try {
     chatTab.click();
   });
   await page.$eval("#web2ai_overlay_host", (host) => {
-    host.shadowRoot.querySelector(".contextScreenshot")?.closest(".contextItem")?.querySelector(".ctxRemove")?.click();
+    const clearContext = Array.from(host.shadowRoot.querySelectorAll(".contextSec .sectionHead button"))
+      .find((button) => button.textContent?.trim() === "清空上下文");
+    clearContext?.click();
     const close = Array.from(host.shadowRoot.querySelectorAll(".header button"))
       .find((button) => button.textContent?.trim() === "×");
     close.click();
@@ -410,7 +447,27 @@ try {
   await page.waitForSelector("#web2ai_overlay_host");
   const contextCount = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".contextItem").length);
   assert.equal(contextCount, 0, "refresh must clear in-memory contexts");
-  console.log("Chrome E2E passed: model switching, screenshots, page monitoring, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
+
+  const innerPage = await browser.newPage();
+  await innerPage.goto(`${url}inner-frame-host`);
+  await innerPage.bringToFront();
+  await innerPage.waitForSelector("#web2ai_overlay_host");
+  const scrollingFrame = await innerPage.waitForFrame((frame) => frame.url().endsWith("/inner-scroll"));
+  await scrollingFrame.$eval("#scrollbox", (node) => { node.scrollTop = 120; });
+  await worker.evaluate(async (pageUrl) => {
+    const [tab] = await chrome.tabs.query({ url: pageUrl });
+    if (!tab?.id) throw new Error("inner-frame tab not found for multi-screen screenshot");
+    chrome.tabs.sendMessage(tab.id, { type: "START_MULTI_SCREEN_SCREENSHOT" }, { frameId: 0 }).catch(() => void 0);
+  }, `${url}inner-frame-host`);
+  await innerPage.waitForFunction(() => document.querySelector("#web2ai_toast")?.textContent?.includes("多屏截图加入上下文"), { timeout: 15000 });
+  assert.ok(
+    await innerPage.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".contextScreenshot").length) >= 4,
+    "multi-screen capture must scroll an internal overflow container"
+  );
+  assert.equal(await scrollingFrame.$eval("#scrollbox", (node) => node.scrollTop), 120, "child-frame scroll position must be restored");
+  await innerPage.close();
+
+  console.log("Chrome E2E passed: model switching, screenshots, internal scrolling, page monitoring, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
 } finally {
   await browser.close();
   server.close();

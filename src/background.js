@@ -2,7 +2,7 @@
  * @fileoverview Background Service Worker (Manifest V3)。
  *
  * 核心职责：
- * 1. 右键“打开 Chat”菜单、工具栏入口与当前标签页截图
+ * 1. 右键“打开 Chat/截图”菜单、工具栏入口与当前标签页截图
  * 2. AI API 请求代理（非流式 + 流式 SSE）
  * 3. 长连接管理（流式 AI 对话的 Port 通信）
  * 4. 设置分层：普通配置存 sync，API Key 存 local
@@ -230,6 +230,16 @@ chrome.runtime.onInstalled.addListener(async () => {
     title: "打开 AI Chat 浮层",
     contexts: ["all"]
   });
+  chrome.contextMenus.create({
+    id: "web2ai_capture_region",
+    title: "截图（框选区域）",
+    contexts: ["all"]
+  });
+  chrome.contextMenus.create({
+    id: "web2ai_capture_multiple",
+    title: "多屏截图（最多 5 屏）",
+    contexts: ["all"]
+  });
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -237,6 +247,15 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
     if (info.menuItemId === "web2ai_open_panel") {
       await sendToFrame(tab.id, 0, { type: "OPEN_PANEL" });
+      return;
+    }
+    if (info.menuItemId === "web2ai_capture_region") {
+      // 无论右键发生在哪个 iframe，都由顶层 frame 展示 Chat 和区域选择器。
+      await sendToFrame(tab.id, 0, { type: "START_REGION_SCREENSHOT" });
+      return;
+    }
+    if (info.menuItemId === "web2ai_capture_multiple") {
+      await sendToFrame(tab.id, 0, { type: "START_MULTI_SCREEN_SCREENSHOT" });
       return;
     }
 
@@ -351,6 +370,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     const tabId = sender?.tab?.id;
+    if (message?.type === "FIND_MULTI_SCREEN_SCROLL_TARGET") {
+      if (!tabId) throw new Error("Missing tabId");
+      const frames = await chrome.webNavigation.getAllFrames({ tabId });
+      const results = await Promise.all(frames.map(async (frame) => {
+        try {
+          const response = await sendToFrame(tabId, frame.frameId, { type: "GET_MULTI_SCREEN_SCROLL_INFO" });
+          return response?.ok ? { frameId: frame.frameId, ...response.data } : null;
+        } catch { return null; }
+      }));
+      const available = results.filter(Boolean);
+      const selected = available.sort((a, b) => (b.score || 0) - (a.score || 0))[0];
+      sendResponse({ ok: true, data: selected || { frameId: 0, kind: "window", label: "window", x: 0, y: 0, maxY: 0, viewportHeight: sender.tab?.height || 0 } });
+      return;
+    }
+    if (message?.type === "SET_MULTI_SCREEN_SCROLL_POSITION" || message?.type === "RESTORE_MULTI_SCREEN_SCROLL_POSITION") {
+      if (!tabId || !Number.isInteger(message.frameId)) throw new Error("Missing target frame");
+      const forwardedType = message.type === "SET_MULTI_SCREEN_SCROLL_POSITION"
+        ? "SET_MULTI_SCREEN_SCROLL_POSITION"
+        : "RESTORE_MULTI_SCREEN_SCROLL_POSITION";
+      const response = await sendToFrame(tabId, message.frameId, { ...message, type: forwardedType });
+      sendResponse(response || { ok: true });
+      return;
+    }
     // 转发消息到 top frame
     if (message?.type === "FORWARD_TO_TOP") {
       if (!tabId) throw new Error("Missing tabId");

@@ -214,18 +214,179 @@ async function cropScreenshot(dataUrl, rect) {
   return canvas.toDataURL("image/jpeg", 0.82);
 }
 
-async function captureScreenshot({ selectRegion = false } = {}) {
-  if (STATE.pending) return;
-  let screenshotAdded = false;
-  const pluginNodes = [
+const nextAnimationFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+
+function isInViewport(element) {
+  const rect = element?.getBoundingClientRect?.();
+  return Boolean(rect && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth);
+}
+
+/**
+ * 滚动后等待页面达到“软稳定”：至少完成两帧绘制、DOM 连续 150ms 无变化，
+ * 且视口图片和常见加载态已经完成。实时页面最多等待 1.5 秒，避免永久阻塞。
+ */
+async function waitForViewportStable({ minWait = 100, quietMs = 150, timeoutMs = 1500 } = {}) {
+  const startedAt = performance.now();
+  let lastMutationAt = startedAt;
+  const observer = new MutationObserver(() => { lastMutationAt = performance.now(); });
+  observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+  try {
+    await nextAnimationFrame();
+    await nextAnimationFrame();
+    while (performance.now() - startedAt < timeoutMs) {
+      const now = performance.now();
+      const imagesReady = Array.from(document.images).every((image) =>
+        !isInViewport(image) || (image.complete && image.naturalWidth > 0)
+      );
+      const loadingVisible = Array.from(document.querySelectorAll(
+        '[aria-busy="true"], .skeleton, [class*="skeleton" i], [class*="loading" i], [class*="spinner" i]'
+      )).some(isInViewport);
+      if (now - startedAt >= minWait && now - lastMutationAt >= quietMs && imagesReady && !loadingVisible) return true;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return false;
+  } finally {
+    observer.disconnect();
+  }
+}
+
+function getCapturePluginNodes() {
+  return [
     refs.overlayHost,
     refs.launcherFab,
     refs.launcherBadge,
     refs.batchBar,
     refs.tableRowFab,
     refs.inlineRowFab,
+    document.getElementById("web2ai_toast"),
     ...refs.pinnedRowOverlays.values()
   ].filter(Boolean);
+}
+
+function createMultiScreenProgress() {
+  const node = el("div", {
+    id: "web2ai_multi_capture_progress",
+    "data-web2ai-ui": true,
+    style: {
+      position: "fixed",
+      left: "50%",
+      top: "24px",
+      transform: "translateX(-50%)",
+      zIndex: "2147483647",
+      display: "none",
+      padding: "10px 16px",
+      borderRadius: "999px",
+      background: "rgba(17,24,39,.94)",
+      color: "#fff",
+      fontSize: "13px",
+      fontWeight: "600",
+      boxShadow: "0 10px 30px rgba(0,0,0,.25)",
+      pointerEvents: "none",
+      whiteSpace: "nowrap"
+    }
+  });
+  document.documentElement.appendChild(node);
+  return node;
+}
+
+/**
+ * 找到承载主要页面内容的纵向滚动目标。后台系统常把 body 固定，并在 main/div
+ * 中滚动；仅检查 window 会误判已经到达页面底部。
+ */
+function getPrimaryScrollTarget() {
+  const root = document.scrollingElement || document.documentElement;
+  const rootRange = Math.max(0, root.scrollHeight - innerHeight);
+  let best = null;
+  let bestLabel = "";
+  let bestScore = 0;
+  for (const element of document.querySelectorAll("body *")) {
+    if (element.closest?.("[data-web2ai-ui], #web2ai_overlay_host")) continue;
+    const range = element.scrollHeight - element.clientHeight;
+    if (range <= 20 || element.clientHeight < 120 || element.clientWidth < innerWidth * 0.25) continue;
+    const style = getComputedStyle(element);
+    if (!/(auto|scroll|overlay)/.test(style.overflowY)) continue;
+    const rect = element.getBoundingClientRect();
+    const visibleWidth = Math.max(0, Math.min(innerWidth, rect.right) - Math.max(0, rect.left));
+    const visibleHeight = Math.max(0, Math.min(innerHeight, rect.bottom) - Math.max(0, rect.top));
+    if (visibleHeight < 120) continue;
+    const score = visibleWidth * visibleHeight * Math.log2(range + 2);
+    if (score > bestScore) {
+      best = element;
+      bestLabel = `${element.tagName.toLowerCase()}#${element.id || ""}.${String(element.className || "").split(/\s+/).slice(0, 2).join(".")}`;
+      bestScore = score;
+    }
+  }
+
+  const rootScore = rootRange > 20 ? innerWidth * innerHeight * Math.log2(rootRange + 2) : 0;
+  if (rootScore >= bestScore) best = null;
+
+  if (best) {
+    return {
+      element: best,
+      kind: "element",
+      label: bestLabel || "element",
+      get x() { return best.scrollLeft; },
+      get y() { return best.scrollTop; },
+      get maxY() { return Math.max(0, best.scrollHeight - best.clientHeight); },
+      get viewportHeight() { return best.clientHeight; },
+      scrollTo(x, y) { best.scrollTo(x, y); }
+    };
+  }
+
+  return {
+    element: root,
+    kind: "window",
+    label: "window",
+    get x() { return scrollX; },
+    get y() { return scrollY; },
+    get maxY() { return Math.max(0, root.scrollHeight - innerHeight); },
+    get viewportHeight() { return innerHeight; },
+    scrollTo(x, y) { window.scrollTo(x, y); }
+  };
+}
+
+let frameMultiScreenScrollTarget = null;
+
+function inspectMultiScreenScrollTarget() {
+  frameMultiScreenScrollTarget = getPrimaryScrollTarget();
+  return {
+    kind: frameMultiScreenScrollTarget.kind,
+    label: frameMultiScreenScrollTarget.label,
+    x: frameMultiScreenScrollTarget.x,
+    y: frameMultiScreenScrollTarget.y,
+    maxY: frameMultiScreenScrollTarget.maxY,
+    viewportHeight: frameMultiScreenScrollTarget.viewportHeight,
+    score: frameMultiScreenScrollTarget.maxY * frameMultiScreenScrollTarget.viewportHeight
+  };
+}
+
+async function setMultiScreenScrollPosition({ x, y } = {}) {
+  if (!frameMultiScreenScrollTarget) frameMultiScreenScrollTarget = getPrimaryScrollTarget();
+  frameMultiScreenScrollTarget.element.style.scrollBehavior = "auto";
+  frameMultiScreenScrollTarget.scrollTo(Number(x) || 0, Number(y) || 0);
+  await nextAnimationFrame();
+  await nextAnimationFrame();
+  return {
+    x: frameMultiScreenScrollTarget.x,
+    y: frameMultiScreenScrollTarget.y,
+    maxY: frameMultiScreenScrollTarget.maxY,
+    viewportHeight: frameMultiScreenScrollTarget.viewportHeight
+  };
+}
+
+async function restoreMultiScreenScrollPosition({ x, y, scrollBehavior = "" } = {}) {
+  if (!frameMultiScreenScrollTarget) return { ok: true };
+  frameMultiScreenScrollTarget.scrollTo(Number(x) || 0, Number(y) || 0);
+  frameMultiScreenScrollTarget.element.style.scrollBehavior = scrollBehavior;
+  await nextAnimationFrame();
+  frameMultiScreenScrollTarget = null;
+  return { ok: true };
+}
+
+async function captureScreenshot({ selectRegion = false } = {}) {
+  if (STATE.pending) return;
+  let screenshotAdded = false;
+  const pluginNodes = getCapturePluginNodes();
   const previousVisibility = pluginNodes.map((node) => [node, node.style.visibility]);
   const selectedRows = Array.from(document.querySelectorAll('[data-web2ai-selected="1"]'));
   try {
@@ -260,6 +421,125 @@ async function captureScreenshot({ selectRegion = false } = {}) {
     for (const row of selectedRows) row.dataset.web2aiSelected = "1";
   }
   if (screenshotAdded) await offerImageCapableModelSwitch();
+}
+
+let multiScreenCaptureActive = false;
+
+/** 从当前位置开始逐屏向下截图；每一屏作为独立图片上下文，不做拼接。 */
+async function captureMultipleScreens({ maxScreens = 5 } = {}) {
+  if (STATE.pending || multiScreenCaptureActive) return;
+  multiScreenCaptureActive = true;
+  const targetResponse = await sendToBackground({ type: "FIND_MULTI_SCREEN_SCROLL_TARGET" }).catch(() => null);
+  const remoteTarget = targetResponse?.ok ? targetResponse.data : null;
+  const localScrollTarget = !remoteTarget || remoteTarget.frameId === 0 ? getPrimaryScrollTarget() : null;
+  const scrollTarget = localScrollTarget || {
+    kind: remoteTarget.kind,
+    label: `frame:${remoteTarget.frameId}/${remoteTarget.label}`,
+    frameId: remoteTarget.frameId,
+    x: remoteTarget.x,
+    y: remoteTarget.y,
+    maxY: remoteTarget.maxY,
+    viewportHeight: remoteTarget.viewportHeight,
+    element: null
+  };
+  const originalScroll = { x: scrollTarget.x, y: scrollTarget.y };
+  const originalScrollBehavior = scrollTarget.element?.style.scrollBehavior || "";
+  const pluginNodes = getCapturePluginNodes();
+  const previousVisibility = pluginNodes.map((node) => [node, node.style.visibility]);
+  const selectedRows = Array.from(document.querySelectorAll('[data-web2ai-selected="1"]'));
+  const progress = createMultiScreenProgress();
+  const captures = [];
+  let lastCapturedAt = 0;
+  try {
+    for (const node of pluginNodes) node.style.visibility = "hidden";
+    for (const row of selectedRows) delete row.dataset.web2aiSelected;
+    if (scrollTarget.element) scrollTarget.element.style.scrollBehavior = "auto";
+
+    for (let index = 0; index < maxScreens; index++) {
+      await waitForViewportStable();
+      // captureVisibleTab 有调用频率限制；稳定较快时补足截图间隔。
+      const pacingWait = Math.max(0, 550 - (performance.now() - lastCapturedAt));
+      if (lastCapturedAt && pacingWait) await new Promise((resolve) => setTimeout(resolve, pacingWait));
+      // 提示只在两次截图之间显示，实际截图前隐藏，避免进入图片内容。
+      progress.style.display = "none";
+      await nextAnimationFrame();
+      await nextAnimationFrame();
+      const response = await sendToBackground({ type: "CAPTURE_VISIBLE_TAB" });
+      const dataUrl = response?.data?.dataUrl || "";
+      if (!response?.ok || !dataUrl) throw new Error(response?.error || "截图失败");
+      lastCapturedAt = performance.now();
+      captures.push({ dataUrl, capturedAt: response.data.capturedAt || Date.now(), scrollY: scrollTarget.y });
+      progress.textContent = `已完成 ${index + 1}/${maxScreens}，正在继续截图…`;
+      progress.style.display = "block";
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      progress.style.display = "none";
+
+      const currentY = scrollTarget.y;
+      const maxScrollY = scrollTarget.maxY;
+      if (currentY >= maxScrollY - 2) {
+        break;
+      }
+      const nextY = Math.min(maxScrollY, currentY + Math.max(1, Math.floor(scrollTarget.viewportHeight * 0.9)));
+      if (nextY <= currentY) {
+        break;
+      }
+      if (scrollTarget.frameId != null) {
+        const result = await sendToBackground({
+          type: "SET_MULTI_SCREEN_SCROLL_POSITION",
+          frameId: scrollTarget.frameId,
+          x: scrollTarget.x,
+          y: nextY
+        });
+        if (!result?.ok) throw new Error(result?.error || "无法滚动目标页面");
+        Object.assign(scrollTarget, result.data || {});
+      } else {
+        scrollTarget.scrollTo(scrollTarget.x, nextY);
+        await nextAnimationFrame();
+        await nextAnimationFrame();
+      }
+    }
+
+    // contexts 为 newest-first；逆序加入后，卡片仍按页面从上到下排列。
+    for (let index = captures.length - 1; index >= 0; index--) {
+      const capture = captures[index];
+      addContextSnippet({
+        kind: "screenshot",
+        text: `多屏截图 ${index + 1}/${captures.length} · 页面位置 ${Math.round(capture.scrollY)}px · ${new Date(capture.capturedAt).toLocaleString()}`,
+        imageData: capture.dataUrl,
+        imageMimeType: "image/jpeg",
+        url: location.href,
+        title: document.title,
+        silent: true
+      });
+    }
+    if (captures.length) {
+      render();
+      progress.textContent = `多屏截图完成，共 ${captures.length} 张`;
+      progress.style.display = "block";
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      showToast(`已将 ${captures.length} 张多屏截图加入上下文`);
+    }
+  } catch (error) {
+    showToast(`多屏截图失败：${String(error?.message ?? error)}`, 3000);
+  } finally {
+    if (scrollTarget.frameId != null) {
+      await sendToBackground({
+        type: "RESTORE_MULTI_SCREEN_SCROLL_POSITION",
+        frameId: scrollTarget.frameId,
+        x: originalScroll.x,
+        y: originalScroll.y,
+        scrollBehavior: originalScrollBehavior
+      }).catch(() => void 0);
+    } else {
+      scrollTarget.scrollTo(originalScroll.x, originalScroll.y);
+      scrollTarget.element.style.scrollBehavior = originalScrollBehavior;
+    }
+    for (const [node, visibility] of previousVisibility) node.style.visibility = visibility;
+    for (const row of selectedRows) row.dataset.web2aiSelected = "1";
+    progress.remove();
+    multiScreenCaptureActive = false;
+  }
+  if (captures.length) await offerImageCapableModelSwitch();
 }
 
 async function refreshModelOptions({ shouldRender = true } = {}) {
@@ -522,7 +802,13 @@ function render() {
         disabled: STATE.pending ? true : null,
         title: "拖拽选择当前可见区域",
         onClick: () => captureScreenshot({ selectRegion: true })
-      }, ["截图"])
+      }, ["截图"]),
+      el("button", {
+        class: "btn",
+        disabled: STATE.pending || multiScreenCaptureActive ? true : null,
+        title: "从当前位置向下截取最多 5 个页面视口",
+        onClick: () => captureMultipleScreens({ maxScreens: 5 })
+      }, ["多屏截图"])
     ]),
     el("div", { class: "sectionBody" }, renderContexts())
   ]);
@@ -799,9 +1085,9 @@ async function sendText(rawText, opts = {}) {
       const enabledContexts = STATE.contexts.filter((context) => context.enabled !== false);
       const enabledScreenshots = enabledContexts.filter((context) => context.kind === "screenshot" && context.imageData);
       // 控制单次请求体积；contexts 为 newest-first，优先发送最近截图。
-      const screenshotsToUse = enabledScreenshots.slice(0, 4);
+      const screenshotsToUse = enabledScreenshots.slice(0, 5);
       if (screenshotsToUse.length < enabledScreenshots.length) {
-        showToast(`单次最多发送 4 张截图，已使用最近 ${screenshotsToUse.length} 张`);
+        showToast(`单次最多发送 5 张截图，已使用最近 ${screenshotsToUse.length} 张`);
       }
       const historyMessages = recentMessages.map((m) => {
           if (m.role === "user") {
@@ -1302,5 +1588,10 @@ export {
   sendText,
   onSend,
   initOverlay,
-  refreshModelOptions
+  refreshModelOptions,
+  captureScreenshot,
+  captureMultipleScreens,
+  inspectMultiScreenScrollTarget,
+  setMultiScreenScrollPosition,
+  restoreMultiScreenScrollPosition
 };

@@ -14,7 +14,7 @@
 import { DEBUG, IS_TOP_FRAME, STATE, refs } from './state.js';
 import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableSelectionEnabled, clearAllTableSelectionState } from './table.js';
 import { initHighlightStyle } from './highlight.js';
-import { initOverlay, render, setOpen, refreshModelOptions } from './overlay.js';
+import { initOverlay, render, setOpen, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, removeContextByRef } from './context.js';
 import { initMonitor, locateMonitorRule, startMonitorPickInFrame, cancelMonitorPickInFrame, acceptMonitorPickResult, reloadMonitorRules } from './monitor.js';
@@ -35,6 +35,57 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     setOpen(true);
     chrome.storage.sync.set({ launcherHidden: false })
       .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
+  }
+
+  // 右键菜单“截图（框选区域）”：顶层打开 Chat 后复用现有区域截图流程。
+  if (message?.type === "START_REGION_SCREENSHOT") {
+    if (!IS_TOP_FRAME) {
+      sendResponse({ ok: false, error: "Region screenshot must run in the top frame" });
+      return;
+    }
+    STATE.launcherVisible = true;
+    setTableSelectionEnabled(true);
+    setOpen(true);
+    Promise.all([
+      chrome.storage.sync.set({ launcherHidden: false }),
+      captureScreenshot({ selectRegion: true })
+    ])
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
+  }
+  // 右键菜单“多屏截图”：顶层负责截图，并协调实际可滚动的子 frame。
+  if (message?.type === "START_MULTI_SCREEN_SCREENSHOT") {
+    if (!IS_TOP_FRAME) {
+      sendResponse({ ok: false, error: "Multi-screen capture must run in the top frame" });
+      return;
+    }
+    STATE.launcherVisible = true;
+    setTableSelectionEnabled(true);
+    setOpen(true);
+    Promise.all([
+      chrome.storage.sync.set({ launcherHidden: false }),
+      captureMultipleScreens({ maxScreens: 5 })
+    ])
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
+  }
+  if (message?.type === "GET_MULTI_SCREEN_SCROLL_INFO") {
+    sendResponse({ ok: true, data: inspectMultiScreenScrollTarget() });
+    return;
+  }
+  if (message?.type === "SET_MULTI_SCREEN_SCROLL_POSITION") {
+    setMultiScreenScrollPosition(message)
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
+  }
+  if (message?.type === "RESTORE_MULTI_SCREEN_SCROLL_POSITION") {
+    restoreMultiScreenScrollPosition(message)
+      .then((data) => sendResponse({ ok: true, data }))
       .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
     return true;
   }
