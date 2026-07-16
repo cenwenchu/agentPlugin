@@ -1053,7 +1053,7 @@ function clearDraftInput() {
 }
 
 function setOpen(open) {
-  STATE.open = open;
+  STATE.open = Boolean(open);
   if (IS_TOP_FRAME) {
     ensureOverlay();
     render();

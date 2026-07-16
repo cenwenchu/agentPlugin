@@ -27,14 +27,17 @@ const server = http.createServer((req, res) => {
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}/`;
 const clickInlineCheckbox = (page) => page.$eval(
-  "#web2ai_table_row_inline_checkbox",
-  (checkbox) => checkbox.click()
+  "#web2ai_table_row_ask_ai",
+  (button) => button.click()
 );
 const reenterRow = async (page, row) => {
   // A virtual list can rewrite a row while the pointer remains stationary.
   // Let the extension reconcile the recycled DOM node on the virtual-list
   // scroll frame, then re-enter through a cell not covered by the pinned check.
-  await page.evaluate(() => window.dispatchEvent(new Event("scroll")));
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("scroll"));
+    document.dispatchEvent(new Event("scroll"));
+  });
   await new Promise((resolve) => setTimeout(resolve, 50));
   const cell = await row.$("td:nth-child(3), [role='cell']:nth-child(3)");
   assert.ok(cell, "dynamic row must expose a business cell for pointer interaction");
@@ -46,9 +49,9 @@ const reenterRow = async (page, row) => {
       clientY: rect.top + rect.height / 2
     }));
   });
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  const hasCheckbox = await page.$("#web2ai_table_row_inline_checkbox");
-  if (!hasCheckbox) {
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  const hasAskAction = await page.$eval("#web2ai_table_row_ask_ai", (button) => button.parentElement?.style.display !== "none");
+  if (!hasAskAction) {
     const detail = await cell.evaluate((node) => {
       const rect = node.getBoundingClientRect();
       const stack = document.elementsFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -57,7 +60,7 @@ const reenterRow = async (page, row) => {
         stack: stack.map((item) => `${item.tagName}#${item.id}.${item.className}`).slice(0, 8)
       };
     });
-    throw new Error(`Dynamic row hover did not expose its checkbox: ${JSON.stringify(detail)}`);
+    throw new Error(`Dynamic row hover did not expose its Ask AI action: ${JSON.stringify(detail)}`);
   }
 };
 const browser = await puppeteer.launch({
@@ -97,7 +100,8 @@ try {
   const disabledRow = await page.$("#orders tbody tr");
   await disabledRow.hover();
   await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal(await page.$("#web2ai_table_row_inline_checkbox"), null, "hidden launcher must disable table selection UI");
+  const askHidden = await page.$eval("#web2ai_table_row_ask_ai", (button) => button.parentElement?.style.display === "none");
+  assert.equal(askHidden, true, "hidden launcher must disable table selection UI");
 
   const worker = await extensionTarget.worker();
   assert.ok(worker, "extension service worker must be available to restore the launcher");
@@ -107,6 +111,20 @@ try {
     await chrome.tabs.sendMessage(tab.id, { type: "SHOW_LAUNCHER" }, { frameId: 0 });
   }, url);
   await page.waitForFunction(() => document.querySelector("#web2ai_launcher_fab")?.style.display === "flex");
+
+  // Moving away from Chat keeps it open; an explicit page click closes it.
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    if (host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden")) {
+      document.querySelector("#web2ai_launcher_fab")?.click();
+    }
+  });
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".wrap")?.classList.contains("hidden"));
+  await page.hover("#page-click-target");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const stayedOpenAfterHover = await page.$eval("#web2ai_overlay_host", (host) => !host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden"));
+  assert.equal(stayedOpenAfterHover, true, "moving the pointer outside Chat must keep it open");
+  await page.click("#page-click-target");
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".wrap")?.classList.contains("hidden"));
 
   await worker.evaluate(async () => {
     const { settings } = await chrome.storage.sync.get(["settings"]);
@@ -227,9 +245,19 @@ try {
 
   const firstRow = await page.$("#orders tbody tr");
   await firstRow.hover();
-  await page.waitForSelector("#web2ai_table_row_inline_checkbox");
+  await page.waitForSelector("#web2ai_table_row_ask_ai", { visible: true });
   await clickInlineCheckbox(page);
   await page.waitForSelector("#web2ai_batch_bar", { visible: true });
+  assert.equal(await page.$eval("#order-1 td:first-child", (cell) => Boolean(cell.querySelector("[data-web2ai-pinned-action]"))), true, "selected check marker must appear in the first column");
+  // Live dashboards may refresh cell values while the pointer remains on a selected row.
+  // Hover must not mistake that refresh for virtual-row recycling.
+  await page.$eval("#order-1 td:last-child", (cell) => { cell.textContent = "101"; });
+  await firstRow.hover();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(await page.$eval("#order-1", (row) => row.dataset.web2aiSelected), "1", "live value refresh during hover must preserve row selection");
+  assert.equal(await page.$eval("#order-1 td:first-child", (cell) => Boolean(cell.querySelector("[data-web2ai-pinned-action]"))), true, "live value refresh during hover must preserve the check marker");
+  assert.equal(await page.$eval("#web2ai_table_row_ask_ai", (button) => button.parentElement?.style.display === "none"), true, "Ask AI must stay hidden for an already selected row");
+  await page.$eval("#order-1 td:last-child", (cell) => { cell.textContent = "100"; });
   await page.evaluate(() => window.dispatchEvent(new Event("scroll")));
   await new Promise((resolve) => setTimeout(resolve, 50));
   const headerStillSelected = await page.$eval("#orders thead tr", (row) => row.dataset.web2aiSelected);
@@ -276,13 +304,25 @@ try {
 
   const secondDataRow = await page.$("#order-2");
   await secondDataRow.hover();
+  await page.waitForSelector("#web2ai_table_row_ask_ai", { visible: true });
   await clickInlineCheckbox(page);
   const afterTwoSingles = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".tableGroupLabel")?.textContent || "");
   assert.match(afterTwoSingles, /2 条/, "two consecutive single selections must both remain selected");
   const secondRowStillSelected = await page.$eval("#order-2", (row) => row.dataset.web2aiSelected);
   assert.equal(secondRowStillSelected, "1", "the second single selection must retain its UI state");
 
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    if (host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden")) {
+      document.querySelector("#web2ai_launcher_fab")?.click();
+    }
+  });
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".wrap")?.classList.contains("hidden"));
   await page.click("#web2ai_batch_select_all");
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => !host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden")),
+    true,
+    "select all on the current page must not close Chat"
+  );
   const afterBatchLabel = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".tableGroupLabel")?.textContent || "");
   assert.match(afterBatchLabel, /3 条/, "select-all after selecting rows 1 and 2 must only add row 3");
   const noKeyRow = await page.$("#no-key-row");
@@ -295,8 +335,8 @@ try {
 
   await page.click("#reuse-no-key");
   await reenterRow(page, noKeyRow);
-  const noKeyRecycledChecked = await page.$eval("#web2ai_table_row_inline_checkbox", (input) => input.checked);
-  assert.equal(noKeyRecycledChecked, false, "leading-column fingerprint must detect a recycled row without rowKey");
+  const noKeyRecycledAskVisible = await page.$eval("#web2ai_table_row_ask_ai", (button) => button.parentElement?.style.display !== "none");
+  assert.equal(noKeyRecycledAskVisible, true, "leading-column fingerprint must detect a recycled row without rowKey");
   await clickInlineCheckbox(page);
   const noKeyReusedLabel = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".tableGroupLabel")?.textContent || "");
   assert.match(noKeyReusedLabel, /4 条/, "the recycled keyless row must be added as a new snapshot");
@@ -304,8 +344,8 @@ try {
   await page.click("#reuse");
   const reusedRow = await page.$("#order-reused");
   await reenterRow(page, reusedRow);
-  const recycledChecked = await page.$eval("#web2ai_table_row_inline_checkbox", (input) => input.checked);
-  assert.equal(recycledChecked, false, "a recycled DOM row must not inherit the old selection UI");
+  const recycledAskVisible = await page.$eval("#web2ai_table_row_ask_ai", (button) => button.parentElement?.style.display !== "none");
+  assert.equal(recycledAskVisible, true, "a recycled DOM row must not inherit the old selection UI");
   await clickInlineCheckbox(page);
   const reusedLabel = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".tableGroupLabel")?.textContent || "");
   assert.match(reusedLabel, /5 条/, "the old snapshots and reused rows must all remain selected");
@@ -321,7 +361,7 @@ try {
       clientY: rect.top + rect.height / 2
     }));
   });
-  await frame.waitForSelector("#web2ai_table_row_inline_checkbox");
+  await frame.waitForSelector("#web2ai_table_row_ask_ai", { visible: true });
   const frameOverlayCount = await frame.$$("#web2ai_overlay_host");
   assert.equal(frameOverlayCount.length, 0, "child frames collect rows without creating a second main overlay");
 
@@ -362,9 +402,9 @@ try {
   await reenterRow(page, remountedRow);
   const remountedState = await page.$eval("#order-3", (row) => ({
     selected: row.dataset.web2aiSelected || "",
-    checked: row.querySelector("#web2ai_table_row_inline_checkbox")?.checked || false
+    hasPinnedCheck: Boolean(row.querySelector("[data-web2ai-pinned-action]"))
   }));
-  assert.deepEqual(remountedState, { selected: "", checked: false }, "remounted cached pages must stay cleared after one global clear");
+  assert.deepEqual(remountedState, { selected: "", hasPinnedCheck: false }, "remounted cached pages must stay cleared after one global clear");
 
   await page.reload();
   await page.waitForSelector("#web2ai_overlay_host");

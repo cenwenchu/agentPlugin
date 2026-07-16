@@ -162,6 +162,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (IS_TOP_FRAME) { STATE.open = true; STATE.activePanelTab = "monitor"; render(); }
     sendResponse({ ok: true }); return;
   }
+  if (message?.type === "CLOSE_PANEL_FROM_PAGE_CLICK") {
+    if (IS_TOP_FRAME && STATE.open && !STATE.monitorPicking) setOpen(false);
+    sendResponse({ ok: true }); return;
+  }
+  if (message?.type === "KEEP_PANEL_OPEN_AFTER_EXTENSION_ACTION") {
+    if (IS_TOP_FRAME) {
+      refs.suppressPanelCloseUntil = Date.now() + 800;
+      if (refs.panelCloseTimer) clearTimeout(refs.panelCloseTimer);
+      refs.panelCloseTimer = null;
+      setOpen(true);
+    }
+    sendResponse({ ok: true }); return;
+  }
   if (message?.type === "START_MONITOR_PICK") {
     startMonitorPickInFrame(message.sessionId);
     sendResponse({ ok: true }); return;
@@ -203,6 +216,74 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 // ========== 初始化 ==========
+
+const EXTENSION_UI_SELECTOR = [
+  "[data-web2ai-ui]",
+  "#web2ai_overlay_host",
+  "#web2ai_launcher_fab",
+  "#web2ai_launcher_badge",
+  "#web2ai_table_row_fab",
+  "#web2ai_table_row_inline_fab",
+  "#web2ai_batch_bar",
+  "#web2ai_screenshot_selector"
+].join(", ");
+
+/**
+ * 判断点击是否发生在扩展自身 UI 内。Shadow DOM 中的点击在 document 层会
+ * 重定向到 overlay host，因此同时检查 target 和 composedPath。
+ */
+function isExtensionUiPointerEvent(event) {
+  const path = typeof event.composedPath === "function" ? event.composedPath() : [event.target];
+  const ownedRoots = [
+    refs.overlayHost,
+    refs.launcherFab,
+    refs.launcherBadge,
+    refs.batchBar,
+    refs.tableRowFab,
+    refs.inlineRowFab,
+    ...refs.pinnedRowOverlays.values()
+  ].filter(Boolean);
+  if (path.some((node) => ownedRoots.some((root) =>
+    node === root || (node instanceof Node && root.contains?.(node))
+  ))) return true;
+  return path.some((node) => {
+    if (!(node instanceof Element)) return false;
+    if (node.matches?.(EXTENSION_UI_SELECTOR)) return true;
+    return Boolean(node.closest?.(EXTENSION_UI_SELECTOR));
+  });
+}
+
+// 只有完成一次明确的页面点击才收起 Chat；pointerleave/mousemove 不改变展开状态。
+document.addEventListener("click", (event) => {
+  const extensionUi = isExtensionUiPointerEvent(event);
+  if (STATE.monitorPicking) return;
+  if (extensionUi) return;
+  if (IS_TOP_FRAME) {
+    const target = event.target instanceof Element ? event.target : null;
+    const iframeOwnsClick = (target === document.body || target === document.documentElement) &&
+      document.activeElement?.tagName === "IFRAME";
+    // iframe 内的真实页面点击由子 frame 发送 CLOSE_PANEL_FROM_PAGE_CLICK；
+    // 顶层只看到 body 的伴随点击，不能据此区分网页与 iframe 内的插件控件。
+    if (iframeOwnsClick) return;
+    // 捕获阶段只记录这次页面点击；等站点自身 click 处理完成后再渲染，避免
+    // 在按钮更新 DOM 之前触发表格状态校验，干扰虚拟列表的节点复用判断。
+    if (refs.panelCloseTimer) clearTimeout(refs.panelCloseTimer);
+    refs.panelCloseTimer = setTimeout(() => {
+      refs.panelCloseTimer = null;
+      const suppressed = Date.now() <= Number(refs.suppressPanelCloseUntil || 0);
+      if (STATE.open && !STATE.monitorPicking && !suppressed) {
+        setOpen(false);
+      }
+    }, 300);
+    return;
+  }
+  try {
+    chrome.runtime.sendMessage({
+      type: "FORWARD_TO_TOP",
+      payload: { message: { type: "CLOSE_PANEL_FROM_PAGE_CLICK" } }
+    }).catch(() => void 0);
+  } catch {}
+}, true);
 
 initTableListeners();
 initHighlightStyle();

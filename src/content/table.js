@@ -3,7 +3,7 @@
  *
  * 职责：
  * - 检测鼠标悬停的表格行（tr / role="row" / div 表格）
- * - 显示行级浮动操作按钮（checkbox + "问AI"）
+ * - 鼠标停稳后显示行级“问AI”操作，选中后在第一列显示 ✓
  * - 行数据提取（通用 getRowCells，支持多种表格结构）
  * - 表头自动识别与匹配（thead / th / columnheader / scope）
  * - 批量选择（全选当前页、跨页选择）
@@ -616,13 +616,13 @@ function ensureTableRowFab() {
 
   const box = el("span", {
     style: {
+      display: "none",
       width: "26px",
       height: "26px",
       borderRadius: "8px",
       background: "rgba(255,255,255,0.98)",
       border: "1px solid rgba(0,0,0,0.22)",
       boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
-      display: "flex",
       alignItems: "center",
       justifyContent: "center"
     }
@@ -640,10 +640,10 @@ function ensureTableRowFab() {
   box.appendChild(input);
   refs.tableRowFab.appendChild(box);
 
-  refs.tableRowFab.appendChild(
-    el(
+  const askAction = el(
       "span",
       {
+        id: "web2ai_table_row_ask_ai",
         style: {
           fontSize: "11px",
           lineHeight: "1",
@@ -657,8 +657,14 @@ function ensureTableRowFab() {
         }
       },
       ["问AI"]
-    )
-  );
+    );
+  refs.tableRowFab.appendChild(askAction);
+  askAction.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handleRowCheckboxChange(true);
+    hideTableRowFab();
+  });
 
   input.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -758,7 +764,14 @@ function showInlineRowFab(rowEl) {
     hideInlineRowFab();
     return;
   }
-  reconcileRecycledRow(rowEl);
+  // Hover 期间页面可能正在刷新实时指标。内容变化本身不足以证明虚拟行已被
+  // 复用；已选中的 DOM 行必须优先保留绑定，避免 ✓ 消失并重新出现“问AI”。
+  const selectedRef = refs.selectedRowRef.get(rowEl);
+  if (isAddedRef(selectedRef)) {
+    ensurePinnedRowOverlay(rowEl, selectedRef);
+    hideInlineRowFab();
+    return;
+  }
   if (!isAddedRef(refs.selectedRowRef.get(rowEl))) restoreSelectedRowBinding(rowEl);
   if (refs.pinnedRowOverlays.has(rowEl)) {
     hideInlineRowFab();
@@ -802,7 +815,7 @@ function ensurePinnedRowOverlay(rowEl, ref) {
     (rowEl.getAttribute?.("role") === "row" && (
       rowEl.closest("tbody") || rowEl.closest('[role="rowgroup"]')
     ));
-  const inlineCell = isInline ? getRowInlineAnchorCell(rowEl) : null;
+  const inlineCell = isInline ? getRowSelectedAnchorCell(rowEl) : null;
   const node = el("div", {
     "data-web2ai-ui": true,
     "data-web2ai-inline": isInline && inlineCell ? "1" : "0",
@@ -922,26 +935,30 @@ function getRowAnchorRect(rowEl) {
   return rect || null;
 }
 
-function showTableRowFabAt(rect, rowEl) {
+function showTableRowFabAt(rect, rowEl, pointer) {
   if (isTableFooterOrSummaryRow(rowEl)) {
     hideTableRowFab();
     return;
   }
-  // 内联定位的行（TR 或在 tbody/rowgroup 内的 role=row）使用内联 FAB
-  const isInline = rowEl?.tagName === "TR" ||
-    (rowEl?.getAttribute?.("role") === "row" && (
-      rowEl?.closest("tbody") || rowEl?.closest('[role="rowgroup"]')
-    ));
-  if (isInline) {
-    if (refs.tableRowFab) refs.tableRowFab.style.display = "none";
-    showInlineRowFab(rowEl);
-    return;
-  }
-
   hideInlineRowFab();
   ensureTableRowFab();
-  reconcileRecycledRow(rowEl);
+  // 实时数据页面会在鼠标移动期间更新单元格文本。Hover 不负责判定虚拟节点
+  // 复用：已有选中绑定时始终保留 ✓，并且不再显示“问AI”。真正的节点复用
+  // 由滚动/重绘后的 restoreRenderedSelectionState 统一校验。
+  const selectedRef = refs.selectedRowRef.get(rowEl);
+  if (isAddedRef(selectedRef)) {
+    ensurePinnedRowOverlay(rowEl, selectedRef);
+    refs.tableRowFab.style.display = "none";
+    refs.hoveredRow = rowEl;
+    return;
+  }
+  // 同一行内只在首次进入时定位：靠近首次进入点，但不会继续追随鼠标。
+  if (refs.hoveredRow === rowEl && refs.tableRowFab.style.display === "flex") return;
   if (!isAddedRef(refs.selectedRowRef.get(rowEl))) restoreSelectedRowBinding(rowEl);
+  if (isAddedRef(refs.selectedRowRef.get(rowEl))) {
+    refs.tableRowFab.style.display = "none";
+    return;
+  }
   refs.hoveredRow = rowEl;
   const input = refs.tableRowFab.querySelector("#web2ai_table_row_checkbox");
   if (input) input.checked = Boolean(refs.selectedRowRef.get(rowEl));
@@ -949,13 +966,15 @@ function showTableRowFabAt(rect, rowEl) {
   const bounds = getOverlayBoundsForElement(rowEl);
   const height = 26;
   const width = 92;
+  const rowTop = Math.max(pad, bounds.top, rect.top);
+  const rowBottom = Math.min(window.innerHeight - pad, bounds.bottom, rect.bottom);
   const top = clamp(
-    rect.top + rect.height / 2 - 13,
-    Math.max(pad, bounds.top),
-    Math.min(window.innerHeight - height - pad, bounds.bottom - height - pad)
+    (pointer?.y ?? rect.top + rect.height / 2) - height / 2,
+    rowTop,
+    Math.max(rowTop, rowBottom - height)
   );
   const left = clamp(
-    rect.left - width,
+    (pointer?.x ?? rect.left) + 14,
     Math.max(pad, bounds.left),
     Math.min(window.innerWidth - width - pad, bounds.right - width - pad)
   );
@@ -1019,6 +1038,7 @@ function ensureBatchBar() {
   }
   refs.batchBar = el("div", {
     id: "web2ai_batch_bar",
+    "data-web2ai-ui": true,
     style: {
       position: "fixed",
       left: "12px",
@@ -1290,6 +1310,7 @@ function detectVirtualScroll(rowEl, visibleRowCount) {
 }
 
 function selectAllRowsInSameGroup(opts = {}) {
+  const keepPanelOpen = STATE.open;
   if (!refs.batchAnchorRow?.isConnected) {
     refs.batchAnchorRow = findVisibleBatchAnchor(refs.batchTableId, refs.batchPageIndex);
   }
@@ -1302,12 +1323,14 @@ function selectAllRowsInSameGroup(opts = {}) {
     anchorIndex: refs.batchAnchorRow.getAttribute?.("data-rowindex") || "",
     tableId: getTableIdForRow(refs.batchAnchorRow)
   });
-  const rowDetails = rows.map((r, i) => {
-    const ref = refs.selectedRowRef.get(r);
-    const txt = compactOneLine(extractTableRowText(r)).slice(0, 40);
-    return `[${i}] ref=${ref || "none"} text="${txt}"`;
-  }).join("\n");
-  DEBUG && console.log(`[web2ai] selectAllRowsInSameGroup found ${rows.length} rows:\n${rowDetails}`);
+  if (DEBUG) {
+    const rowDetails = rows.map((r, i) => {
+      const ref = refs.selectedRowRef.get(r);
+      const txt = compactOneLine(extractTableRowText(r)).slice(0, 40);
+      return `[${i}] ref=${ref || "none"} text="${txt}"`;
+    }).join("\n");
+    DEBUG && console.log(`[web2ai] selectAllRowsInSameGroup found ${rows.length} rows:\n${rowDetails}`);
+  }
   let added = 0;
   for (const rowEl of rows) {
     added += addRowElToContext(rowEl, { silent: true });
@@ -1336,6 +1359,21 @@ function selectAllRowsInSameGroup(opts = {}) {
     }
   }
   updateBatchBar();
+  // 批量栏可能位于子 frame，而 Chat 只渲染在顶层。全选引发站点重绘时，
+  // 顶层有时会额外收到 body click；仅在操作前已展开时通知顶层保持原状态。
+  if (keepPanelOpen) {
+    if (IS_TOP_FRAME) {
+      STATE.open = true;
+      render();
+    } else {
+      try {
+        chrome.runtime.sendMessage({
+          type: "FORWARD_TO_TOP",
+          payload: { message: { type: "KEEP_PANEL_OPEN_AFTER_EXTENSION_ACTION" } }
+        }).catch(() => void 0);
+      } catch {}
+    }
+  }
   return added;
 }
 
@@ -1967,34 +2005,72 @@ function getRowInlineAnchorCell(rowEl) {
   return visible[1] || visible[0] || null;
 }
 
+function getRowSelectedAnchorCell(rowEl) {
+  if (!rowEl) return null;
+  const cells = rowEl.tagName === "TR"
+    ? rowEl.querySelectorAll("td,th")
+    : rowEl.querySelectorAll?.("[role='rowheader'],[role='columnheader'],[role='cell'],[role='gridcell']");
+  if (!cells) return null;
+  for (const cell of cells) {
+    if (cell.offsetParent !== null) return cell;
+  }
+  return null;
+}
+
 function initTableListeners() {
-  let _rafPending = false;
+  let _showRowFabTimer = null;
+  let _hideRowFabTimer = null;
+  const cancelRowFabShow = () => {
+    if (_showRowFabTimer) clearTimeout(_showRowFabTimer);
+    _showRowFabTimer = null;
+  };
+  const cancelRowFabHide = () => {
+    if (_hideRowFabTimer) clearTimeout(_hideRowFabTimer);
+    _hideRowFabTimer = null;
+  };
+  const scheduleRowFabHide = () => {
+    if (_hideRowFabTimer) return;
+    _hideRowFabTimer = setTimeout(() => {
+      _hideRowFabTimer = null;
+      hideTableRowFab();
+    }, 300);
+  };
   document.addEventListener(
     "mousemove",
     (e) => {
-      if (_rafPending) return;
-      _rafPending = true;
-      requestAnimationFrame(() => {
-        _rafPending = false;
+      // 指针已经进入“问AI”时保持按钮原位，不再用其下方的表格行重新定位。
+      if (refs.tableRowFab?.contains(e.target)) {
+        cancelRowFabShow();
+        cancelRowFabHide();
+        return;
+      }
+      // 持续移动时不断延后定位；只有指针停稳后才在最后位置显示“问AI”。
+      cancelRowFabShow();
+      const pointer = { target: e.target, x: e.clientX, y: e.clientY, path: e.composedPath?.() };
+      _showRowFabTimer = setTimeout(() => {
+        _showRowFabTimer = null;
         if (!STATE.launcherVisible) {
+          cancelRowFabHide();
           hideTableRowFab();
           hideInlineRowFab();
           return;
         }
-        const target = pickRowTargetFromPoint(e);
-        const composedPath = target === e.target ? e.composedPath?.() : null;
+        const probe = { target: pointer.target, clientX: pointer.x, clientY: pointer.y };
+        const target = pickRowTargetFromPoint(probe);
+        const composedPath = target === pointer.target ? pointer.path : null;
         const rowEl = findRowElementFromEventTarget(target, composedPath);
         if (!rowEl) {
-          hideTableRowFab();
+          scheduleRowFabHide();
           return;
         }
         const rect = getRowAnchorRect(rowEl);
         if (!rect || rect.width === 0 || rect.height === 0) {
-          hideTableRowFab();
+          scheduleRowFabHide();
           return;
         }
-        showTableRowFabAt(rect, rowEl);
-      });
+        cancelRowFabHide();
+        showTableRowFabAt(rect, rowEl, { x: pointer.x, y: pointer.y });
+      }, 100);
     },
     true
   );
@@ -2003,6 +2079,7 @@ function initTableListeners() {
   document.addEventListener(
     "scroll",
     () => {
+      cancelRowFabShow();
       hideTableRowFab();
       if (_scrollRafPending) return;
       _scrollRafPending = true;
