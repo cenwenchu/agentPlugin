@@ -214,8 +214,10 @@ function sendToFrame(tabId, frameId, message) {
   });
 }
 
-/** @deprecated sendToTab 的别名，兼容旧调用 */
-const broadcastToTab = sendToTab;
+async function broadcastToTab(tabId, message) {
+  const frames = await chrome.webNavigation.getAllFrames({ tabId });
+  return Promise.allSettled(frames.map((frame) => sendToFrame(tabId, frame.frameId, message)));
+}
 
 // ========== 安装 & 右键菜单 ==========
 
@@ -258,6 +260,24 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
+chrome.notifications.onClicked.addListener(async (notificationId) => {
+  if (!notificationId.startsWith("web2ai-monitor:")) return;
+  const data = await chrome.storage.local.get(["monitorNotificationTargets"]);
+  const target = data.monitorNotificationTargets?.[notificationId];
+  if (!target) return;
+  try {
+    const tab = await chrome.tabs.get(target.tabId);
+    await chrome.windows.update(tab.windowId, { focused: true });
+    await chrome.tabs.update(target.tabId, { active: true });
+    await sendToFrame(target.tabId, 0, { type: "OPEN_MONITOR_PANEL", ruleId: target.ruleId });
+    if (target.frameId !== 0) await sendToFrame(target.tabId, target.frameId, { type: "LOCATE_MONITOR", ruleId: target.ruleId });
+    else await sendToFrame(target.tabId, 0, { type: "LOCATE_MONITOR", ruleId: target.ruleId });
+  } catch {
+    void 0;
+  }
+  chrome.notifications.clear(notificationId).catch(() => void 0);
+});
+
 // ========== 消息路由 ==========
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -282,6 +302,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const models = Array.isArray(settings.models) ? settings.models : [];
       if (!models.some((profile) => profile.id === modelId)) throw new Error("模型配置不存在");
       await chrome.storage.sync.set({ settings: { ...settings, activeModelId: modelId } });
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message?.type === "MONITOR_TRIGGER") {
+      if (!sender?.tab?.id) throw new Error("无法确定监控标签页");
+      const notificationId = `web2ai-monitor:${message.rule?.id || Date.now()}:${Date.now()}`;
+      const data = await chrome.storage.local.get(["monitorNotificationTargets"]);
+      const targets = { ...(data.monitorNotificationTargets || {}) };
+      targets[notificationId] = { tabId: sender.tab.id, frameId: sender.frameId || 0, ruleId: message.rule?.id, createdAt: Date.now() };
+      for (const [id, target] of Object.entries(targets)) {
+        if (Date.now() - target.createdAt > 7 * 86400000) delete targets[id];
+      }
+      await chrome.storage.local.set({ monitorNotificationTargets: targets });
+      await chrome.notifications.create(notificationId, {
+        type: "basic",
+        iconUrl: chrome.runtime.getURL("src/monitor-icon.svg"),
+        title: `页面监控：${message.rule?.name || "条件已满足"}`,
+        message: String(message.message || "监控条件已满足").slice(0, 220),
+        priority: 1
+      });
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message?.type === "MONITOR_PICK_RESULT") {
+      if (!sender?.tab?.id) throw new Error("无法确定选择元素的标签页");
+      await sendToFrame(sender.tab.id, 0, {
+        type: "MONITOR_PICK_RESULT",
+        payload: { ...message.payload, frameId: sender.frameId || 0, frameUrl: sender.url || "" }
+      });
+      await broadcastToTab(sender.tab.id, { type: "CANCEL_MONITOR_PICK", sessionId: message.payload?.sessionId });
       sendResponse({ ok: true });
       return;
     }

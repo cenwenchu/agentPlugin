@@ -16,23 +16,28 @@ import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, Z_INDEX, TABLE_UI_Z_INDEX, u
 import { el } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { openOptionsPage, streamChat, stopGeneration, sendToBackground } from './messaging.js';
-import { addContextSnippet, removeContext, clearAll, buildContextBlock } from './context.js';
+import { addContextSnippet, removeContext, clearContext, clearAll, buildContextBlock } from './context.js';
 import { calculateContextBudget, estimateTokens, selectContextsWithinTokenBudget } from './token-budget.js';
 import { tableGroupToCsv, tableGroupToMarkdown } from './table-export.js';
 import { buildOnboardingPrompt, createFallbackOnboarding, parseOnboardingResponse } from './onboarding.js';
 import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab, setTableSelectionEnabled } from './table.js';
 import { showToast } from './toast.js';
+import { createMonitorRule, selectMonitorTarget, saveMonitorRule, cancelMonitorRule, toggleMonitorRule, deleteMonitorRule, checkMonitorNow, conditionLabel } from './monitor.js';
 
 const OVERLAY_CSS = `
     :host { all: initial; }
-    .wrap { position: fixed; right: 0; top: 0; bottom: 0; width: 420px; height: 100vh; pointer-events: auto; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .wrap { position: fixed; right: 0; top: 0; bottom: 0; width: 500px; height: 100vh; pointer-events: auto; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     .wrap.max { left: 0; right: 0; width: 100vw; }
     .card { height: 100%; display: flex; flex-direction: column; background: rgba(255,255,255,0.98); border-left: 1px solid rgba(0,0,0,0.12); overflow: hidden; box-shadow: 0 12px 36px rgba(0,0,0,0.22); backdrop-filter: blur(10px); }
+    .workspace { flex: 1; min-height: 0; display: flex; }
+    .sideTabs { width: 48px; flex: 0 0 48px; padding: 10px 6px; display: flex; flex-direction: column; gap: 7px; background: #f8fafc; border-right: 1px solid rgba(0,0,0,.08); }
+    .sideTab { min-height: 44px; padding: 5px 2px; border: 0; border-radius: 9px; background: transparent; color: #64748b; font-size: 11px; cursor: pointer; }
+    .sideTab.active { background: #dbeafe; color: #1d4ed8; font-weight: 650; }
+    .mainPane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .wrap.max .card { border-left: none; box-shadow: none; }
     .hidden { display: none; }
     .header { display: flex; flex-direction: column; gap: 7px; padding: 10px; border-bottom: 1px solid rgba(0,0,0,0.08); }
     .headerRow { width: 100%; display: flex; align-items: center; gap: 6px; }
-    .modelRow { padding-top: 7px; border-top: 1px solid rgba(0,0,0,.06); }
     .title { font-weight: 650; font-size: 13px; color: #111827; flex: 1; }
     .header .btn-primary { font-weight: 600; }
     .btn { height: 28px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.12); background: #fff; color: #111827; padding: 0 10px; cursor: pointer; font-size: 12px; }
@@ -76,6 +81,12 @@ const OVERLAY_CSS = `
     .bubble.assistant h3 { font-size: 13px; }
     .bubble.assistant h4 { font-size: 12px; }
     .bubble.assistant a { color: #2563eb; text-decoration: underline; }
+    .bubble.waiting { display: flex; align-items: center; gap: 7px; color: #64748b; }
+    .waitingDots { display: inline-flex; gap: 3px; }
+    .waitingDots i { width: 5px; height: 5px; border-radius: 50%; background: #64748b; animation: web2aiWaiting 1.1s infinite ease-in-out; }
+    .waitingDots i:nth-child(2) { animation-delay: .16s; }
+    .waitingDots i:nth-child(3) { animation-delay: .32s; }
+    @keyframes web2aiWaiting { 0%, 70%, 100% { opacity: .3; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-2px); } }
     .onboarding { border: 1px solid rgba(59,130,246,.2); background: #f8fbff; border-radius: 12px; padding: 12px; color: #111827; }
     .onboardingWelcome { font-size: 14px; font-weight: 650; margin-bottom: 6px; }
     .onboardingSummary { font-size: 12px; line-height: 1.55; color: #374151; }
@@ -86,11 +97,26 @@ const OVERLAY_CSS = `
     .suggestionReason { display: block; margin-top: 2px; color: #6b7280; font-size: 10px; }
     .onboardingHint { margin-top: 9px; color: #6b7280; font-size: 11px; }
     .composer { display: flex; gap: 10px; padding: 10px; border-top: 1px solid rgba(0,0,0,0.08); background: rgba(248,250,252,0.9); }
+    .composerMain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    .composerMain textarea { width: 100%; box-sizing: border-box; flex: none; }
     textarea { flex: 1; resize: none; height: 92px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.14); padding: 8px 10px; font-size: 12px; outline: none; background: #fff; color: #111827; }
     textarea:focus { border-color: rgba(59,130,246,0.7); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
     .composerActions { width: 92px; display: flex; flex-direction: column; gap: 8px; }
     .composerActions .btn { width: 100%; }
     .backdrop { position: fixed; inset: 0; background: transparent; pointer-events: none; }
+    .monitorBody { flex: 1; min-height: 0; padding: 10px; overflow: auto; background: #f8fafc; }
+    .monitorIntro { padding: 10px; margin-bottom: 10px; border: 1px solid #bfdbfe; border-radius: 10px; background: #eff6ff; color: #1e3a8a; font-size: 11px; line-height: 1.5; }
+    .monitorCard { padding: 10px; margin-bottom: 8px; border: 1px solid rgba(0,0,0,.09); border-radius: 11px; background: #fff; }
+    .monitorName { font-size: 12px; font-weight: 650; color: #111827; }
+    .monitorMeta { margin-top: 4px; font-size: 10px; color: #64748b; line-height: 1.45; overflow-wrap: anywhere; }
+    .monitorActions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .monitorHistory { margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(0,0,0,.06); font-size: 10px; color: #475569; }
+    .monitorForm { padding: 12px; margin-bottom: 10px; border: 1px solid #93c5fd; border-radius: 11px; background: #fff; }
+    .monitorFormTitle { margin-bottom: 10px; font-size: 13px; font-weight: 650; color: #1e3a8a; }
+    .monitorField { display: block; margin-bottom: 9px; }
+    .monitorFieldLabel { display: block; margin-bottom: 4px; font-size: 11px; color: #475569; }
+    .monitorInput, .monitorSelect { width: 100%; height: 32px; box-sizing: border-box; border: 1px solid rgba(0,0,0,.14); border-radius: 8px; padding: 0 9px; background: #fff; color: #111827; font-size: 12px; }
+    .monitorTarget { padding: 8px; border: 1px dashed #94a3b8; border-radius: 8px; background: #f8fafc; color: #475569; font-size: 11px; overflow-wrap: anywhere; }
   `;
 
 function scheduleRender() {
@@ -103,6 +129,7 @@ function scheduleRender() {
       if (chatList) {
         const lastBubble = chatList.lastElementChild;
         if (lastBubble && lastBubble.classList.contains("assistant")) {
+          lastBubble.classList.remove("waiting");
           lastBubble.innerHTML = renderMarkdown(refs.streamingMsgRef.content);
           chatList.scrollTop = chatList.scrollHeight;
           return;
@@ -282,7 +309,7 @@ function render() {
   if (!IS_TOP_FRAME) return;
   ensureOverlay();
   if (refs.launcherFab) {
-    refs.launcherFab.style.display = !STATE.open && STATE.launcherVisible ? "flex" : "none";
+    refs.launcherFab.style.display = !STATE.open && STATE.launcherVisible && !STATE.monitorPicking ? "flex" : "none";
   }
   // 更新数据统计气泡
   if (refs.launcherBadge && refs.launcherFab) {
@@ -336,7 +363,7 @@ function render() {
   const modelSelect = el("select", {
     id: "web2ai_model_select",
     title: "切换当前对话模型",
-    style: { width: "140px", height: "30px", borderRadius: "9px", border: "1px solid rgba(59,130,246,.45)", background: "#eff6ff", color: "#1e3a8a", padding: "0 8px", fontSize: "12px", fontWeight: "650" },
+    style: { width: "150px", height: "28px", borderRadius: "10px", border: "1px solid rgba(59,130,246,.45)", background: "#eff6ff", color: "#1e3a8a", padding: "0 8px", fontSize: "12px", fontWeight: "650" },
     onChange: async (event) => {
       const previous = STATE.activeModelId;
       STATE.activeModelId = event.target.value;
@@ -370,7 +397,9 @@ function render() {
 
   const header = el("div", { class: "header" }, [
     el("div", { class: "headerRow" }, [
-      el("div", { class: "title" }, ["采"]),
+      el("div", { style: { flex: "1" } }),
+      STATE.activePanelTab === "chat" ? modelSelect : null,
+      STATE.activePanelTab === "chat" ? imageCapabilityTip : null,
       el("button", {
         class: "btn",
         title: STATE.maximized ? "还原窗口" : "最大化",
@@ -386,22 +415,12 @@ function render() {
         onClick: () => openOptionsPage()
       }, ["⚙"]),
       el("button", {
-        class: "btn danger",
-        disabled: STATE.pending ? true : null,
-        onClick: () => clearAll()
-      }, ["清空"]),
-      el("button", {
         class: "btn",
         title: "关闭",
         "aria-label": "关闭",
         style: { width: "28px", padding: "0", fontSize: "16px", lineHeight: "26px" },
         onClick: () => setOpen(false)
       }, ["\u00d7"])
-    ]),
-    el("div", { class: "headerRow modelRow" }, [
-      el("span", { style: { fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap" } }, ["当前模型"]),
-      modelSelect,
-      imageCapabilityTip
     ])
   ]);
 
@@ -493,17 +512,17 @@ function render() {
     el("div", { class: "sectionHead" }, [
       el("div", { class: "sectionTitle" }, [`上下文（${tableCount} 个表格，共 ${rowCount} 条；${screenshotCount} 张截图）`]),
       el("button", {
-        class: "btn",
-        disabled: STATE.pending ? true : null,
-        title: "截取当前标签页可见区域",
-        onClick: () => captureScreenshot()
-      }, ["截图"]),
+        class: "btn danger",
+        disabled: STATE.pending || STATE.contexts.length === 0 ? true : null,
+        title: "清空所有表格和截图上下文",
+        onClick: () => clearContext()
+      }, ["清空上下文"]),
       el("button", {
         class: "btn",
         disabled: STATE.pending ? true : null,
         title: "拖拽选择当前可见区域",
         onClick: () => captureScreenshot({ selectRegion: true })
-      }, ["区域截图"])
+      }, ["截图"])
     ]),
     el("div", { class: "sectionBody" }, renderContexts())
   ]);
@@ -516,10 +535,16 @@ function render() {
       "div",
       { class: "chat", id: "web2ai_chat_list" },
       STATE.messages.length
-        ? STATE.messages.map((m) => {
-            const bubble = el("div", { class: `bubble ${m.role}` });
+          ? STATE.messages.map((m) => {
+            const isWaiting = m.role === "assistant" && STATE.pending && !normalizeText(m.content);
+            const bubble = el("div", { class: `bubble ${m.role}${isWaiting ? " waiting" : ""}` });
             if (m.role === "assistant") {
-              bubble.innerHTML = renderMarkdown(m.content);
+              if (isWaiting) {
+                bubble.append(
+                  el("span", {}, ["正在等待模型回复"]),
+                  el("span", { class: "waitingDots", "aria-label": "加载中" }, [el("i"), el("i"), el("i")])
+                );
+              } else bubble.innerHTML = renderMarkdown(m.content);
             } else {
               bubble.textContent = m.content;
             }
@@ -530,10 +555,12 @@ function render() {
           : [el("div", { style: { fontSize: "12px", color: "#6b7280" } }, ["输入问题开始对话；也可以直接点击“问一下”获取分析建议。"])]
     ),
     el("div", { class: "composer" }, [
-      el("textarea", {
-        id: "web2ai_input",
-        placeholder: "问点什么…（Enter 发送，Shift+Enter 换行）"
-      }),
+      el("div", { class: "composerMain" }, [
+        el("textarea", {
+          id: "web2ai_input",
+          placeholder: "问点什么…（Enter 发送，Shift+Enter 换行）"
+        })
+      ]),
       el("div", { class: "composerActions" }, [
         el(
           "button",
@@ -562,16 +589,97 @@ function render() {
             onClick: () => clearDraftInput()
           },
           ["清空输入"]
+        ),
+        el(
+          "button",
+          {
+            class: "btn danger",
+            disabled: STATE.pending ? true : null,
+            onClick: () => clearAll()
+          },
+          ["清空全部"]
         )
       ])
     ])
   ]);
 
+  function renderMonitorPanel() {
+    const draft = STATE.monitorDraft;
+    const needsOperand = draft && (draft.condition === "contains" || draft.condition.startsWith("number_"));
+    const form = draft ? el("div", { class: "monitorForm" }, [
+      el("div", { class: "monitorFormTitle" }, ["创建页面监控"]),
+      el("label", { class: "monitorField" }, [
+        el("span", { class: "monitorFieldLabel" }, ["监控名称"]),
+        el("input", { class: "monitorInput", value: draft.name, placeholder: "例如：待处理订单出现", onInput: (event) => { draft.name = event.target.value; } })
+      ]),
+      el("div", { class: "monitorField" }, [
+        el("span", { class: "monitorFieldLabel" }, ["目标元素"]),
+        el("div", { style: { display: "flex", gap: "7px", alignItems: "stretch" } }, [
+          el("div", { class: "monitorTarget", style: { flex: "1" } }, [draft.selector ? draft.targetText || draft.selector : "尚未选择页面元素"]),
+          el("button", { class: "btn", onClick: () => selectMonitorTarget() }, [draft.selector ? "重新选择" : "选择元素"])
+        ])
+      ]),
+      el("label", { class: "monitorField" }, [
+        el("span", { class: "monitorFieldLabel" }, ["监控类型"]),
+        el("select", { class: "monitorSelect", value: draft.condition, onChange: (event) => { draft.condition = event.target.value; draft.operand = ""; render(); } }, [
+          el("option", { value: "present", selected: draft.condition === "present" }, ["元素出现"]),
+          el("option", { value: "absent", selected: draft.condition === "absent" }, ["元素消失"]),
+          el("option", { value: "text_change", selected: draft.condition === "text_change" }, ["文本变化"]),
+          el("option", { value: "contains", selected: draft.condition === "contains" }, ["文本包含关键词"]),
+          el("option", { value: "number_gt", selected: draft.condition === "number_gt" }, ["数字大于阈值"]),
+          el("option", { value: "number_lt", selected: draft.condition === "number_lt" }, ["数字小于阈值"]),
+          el("option", { value: "number_eq", selected: draft.condition === "number_eq" }, ["数字等于阈值"])
+        ])
+      ]),
+      needsOperand ? el("label", { class: "monitorField" }, [
+        el("span", { class: "monitorFieldLabel" }, [draft.condition === "contains" ? "关键词" : "数字阈值"]),
+        el("input", { class: "monitorInput", type: draft.condition === "contains" ? "text" : "number", value: draft.operand, placeholder: draft.condition === "contains" ? "输入需要匹配的关键词" : "输入触发阈值", onInput: (event) => { draft.operand = event.target.value; } })
+      ]) : null,
+      el("div", { style: { display: "flex", gap: "7px" } }, [
+        el("button", { class: "btn primary", onClick: () => saveMonitorRule() }, ["创建监控"]),
+        el("button", { class: "btn", onClick: () => cancelMonitorRule() }, ["取消"])
+      ])
+    ]) : null;
+    const cards = STATE.monitorRules.map((rule) => el("div", { class: "monitorCard" }, [
+      el("div", { style: { display: "flex", alignItems: "center", gap: "8px" } }, [
+        el("div", { class: "monitorName", style: { flex: "1" } }, [rule.name]),
+        el("span", { style: { fontSize: "10px", color: rule.enabled ? "#166534" : "#64748b" } }, [rule.enabled ? "监控中" : "已暂停"])
+      ]),
+      el("div", { class: "monitorMeta" }, [
+        `${conditionLabel(rule)} · 最近值：${rule.lastValue || "（空/不存在）"}`,
+        el("br"),
+        `触发 ${rule.triggerCount || 0} 次${rule.lastTriggeredAt ? ` · 最近 ${new Date(rule.lastTriggeredAt).toLocaleString()}` : ""}`
+      ]),
+      el("div", { class: "monitorActions" }, [
+        el("button", { class: "btn", onClick: () => toggleMonitorRule(rule.id) }, [rule.enabled ? "暂停" : "继续"]),
+        el("button", { class: "btn", onClick: () => checkMonitorNow(rule.id) }, ["立即检查"]),
+        el("button", { class: "btn danger", onClick: () => deleteMonitorRule(rule.id) }, ["删除"])
+      ]),
+      rule.history?.length ? el("div", { class: "monitorHistory" }, [
+        `最近记录：${new Date(rule.history[0].at).toLocaleString()} · ${String(rule.history[0].value).slice(0, 80)}`
+      ]) : null
+    ]));
+    return el("div", { class: "monitorBody" }, [
+      el("div", { class: "monitorIntro" }, ["页面监控仅在浏览器运行且当前目标标签页保持打开时生效；无需停留在该标签页。"]),
+      !draft ? el("div", { style: { display: "flex", gap: "8px", marginBottom: "10px" } }, [
+        el("button", { class: "btn primary", onClick: () => createMonitorRule() }, ["＋ 创建监控"]),
+        el("button", { class: "btn", onClick: () => checkMonitorNow() }, ["全部检查"])
+      ]) : null,
+      form,
+      ...(cards.length ? cards : [el("div", { style: { padding: "24px 10px", textAlign: "center", color: "#64748b", fontSize: "12px" } }, ["当前页面还没有监控规则"])] )
+    ]);
+  }
+
   const body = el("div", { class: `body${STATE.maximized ? " max" : ""}` }, [
     contextSection,
     chatSection
   ]);
-  const card = el("div", { class: "card" }, [header, body]);
+  const sideTabs = el("div", { class: "sideTabs", role: "tablist", "aria-label": "功能切换" }, [
+    el("button", { class: `sideTab${STATE.activePanelTab === "chat" ? " active" : ""}`, role: "tab", onClick: () => { STATE.activePanelTab = "chat"; render(); } }, ["Chat"]),
+    el("button", { class: `sideTab${STATE.activePanelTab === "monitor" ? " active" : ""}`, role: "tab", onClick: () => { STATE.activePanelTab = "monitor"; render(); } }, ["监控"])
+  ]);
+  const mainPane = el("div", { class: "mainPane" }, [header, STATE.activePanelTab === "chat" ? body : renderMonitorPanel()]);
+  const card = el("div", { class: "card" }, [el("div", { class: "workspace" }, [sideTabs, mainPane])]);
   wrap.appendChild(card);
 
   refs.overlayShadow.innerHTML = "";

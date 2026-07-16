@@ -29,6 +29,9 @@ const IS_TOP_FRAME = window.top === window;
  * @property {boolean} launcherVisible - 页面上的 Chat 启动图标是否可见
  * @property {Array} modelOptions - Chat 可切换的脱敏模型配置
  * @property {string} activeModelId - 当前请求使用的模型配置 ID
+ * @property {"chat"|"monitor"} activePanelTab - 浮层当前功能页
+ * @property {Array} monitorRules - 当前页面的监控规则
+ * @property {Object|null} monitorDraft - 正在编辑的新监控规则表单
  */
 const STATE = {
   open: false,
@@ -44,7 +47,11 @@ const STATE = {
   maximized: false,
   launcherVisible: true,
   modelOptions: [],
-  activeModelId: ""
+  activeModelId: "",
+  activePanelTab: "chat",
+  monitorRules: [],
+  monitorDraft: null,
+  monitorPicking: false
 };
 
 /** 表格列分隔符 */

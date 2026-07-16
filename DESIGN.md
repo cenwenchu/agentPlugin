@@ -164,4 +164,14 @@ token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，
 npm test
 ```
 
-当前单元测试覆盖分组与时间编号、固定表头关联、adapter/rowKey、上下文隔离、token 预算、SSE chunk 边界、onboarding 以及 Markdown/CSV 导出。静态回归负责语法、调试日志、demo HTML 结构和关键导出检查。真实 Chrome E2E 覆盖启动器关闭/恢复、表格能力开关、固定表头、同页相似表格隔离、底部汇总行排除、同源 iframe 注入、虚拟节点复用、分页式 DOM 替换和刷新后内存清空。
+当前单元测试覆盖分组与时间编号、固定表头关联、adapter/rowKey、上下文隔离、token 预算、SSE chunk 边界、onboarding 以及 Markdown/CSV 导出。静态回归负责语法、调试日志、demo HTML 结构和关键导出检查。真实 Chrome E2E 覆盖启动器关闭/恢复、表格能力开关、固定表头、同页相似表格隔离、底部汇总行排除、同源 iframe 注入、虚拟节点复用、分页式 DOM 替换、页面监控创建与触发，以及刷新后内存清空。
+
+## 10. 页面监控 MVP
+
+`monitor.js` 在所有 frame 中运行：顶层 frame 负责监控表单和规则列表，各子 frame 负责本 frame 的元素选择、条件检查和通知触发。选择命令经 background 广播到所有 frame，结果回传顶层；规则以顶层页面和目标 frame URL 共同定位，并保存在 `chrome.storage.local`。各 frame 使用 `MutationObserver` 加 15 秒兜底轮询检查元素出现、消失、文本变化、关键词和数字阈值。
+
+监控采用边沿触发：普通条件只在“不满足 → 满足”时通知，避免持续满足造成通知轰炸；文本变化以最近观察值为新基线。每条规则保留最多 20 条触发记录。条件判断完全本地执行，不进入 AI 请求链路。
+
+触发后 content script 发送 `MONITOR_TRIGGER`，background 创建 Chrome 系统通知并记录通知到 tab/rule 的短期映射。用户点击通知时，background 激活对应窗口和标签，再发送 `LOCATE_MONITOR`，由页面打开监控 Tab、滚动并临时高亮目标元素。
+
+第一版的可靠性边界是浏览器运行且目标标签页保持打开。被冻结标签的触发可能延迟；标签关闭、页面未登录或站点只在前台刷新时不保证检测。后续后台抓取或自动刷新必须按站点单独评估登录态、风控和权限，不能由当前 DOM 监控直接推导。

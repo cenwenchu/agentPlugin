@@ -148,24 +148,6 @@ try {
       .find((item) => item.textContent?.trim() === "截图");
     button.click();
   });
-  await page.waitForFunction(() => {
-    const image = document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".contextScreenshot");
-    return image?.src?.startsWith("data:image/jpeg;base64,");
-  });
-  const screenshotStoredInMemory = await page.$eval("#web2ai_overlay_host", (host) => {
-    const image = host.shadowRoot.querySelector(".contextScreenshot");
-    return image.src.startsWith("data:image/jpeg;base64,") && image.src.length > 1000;
-  });
-  assert.equal(screenshotStoredInMemory, true, "visible-tab capture must add a JPEG screenshot context preview");
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    const item = host.shadowRoot.querySelector(".contextScreenshot")?.closest(".contextItem");
-    item.querySelector(".ctxRemove").click();
-  });
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    const button = Array.from(host.shadowRoot.querySelectorAll("button"))
-      .find((item) => item.textContent?.trim() === "区域截图");
-    button.click();
-  });
   await page.waitForSelector("#web2ai_screenshot_selector");
   await page.mouse.move(40, 40);
   await page.mouse.down();
@@ -173,7 +155,7 @@ try {
   await page.mouse.up();
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".contextScreenshot").length === 1);
   const croppedPreview = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".contextScreenshot")?.src || "");
-  assert.match(croppedPreview, /^data:image\/jpeg;base64,/, "region capture must add a cropped JPEG context");
+  assert.match(croppedPreview, /^data:image\/jpeg;base64,/, "the screenshot action must add a cropped JPEG context");
   await page.$eval("#web2ai_overlay_host", (host) => {
     const send = Array.from(host.shadowRoot.querySelectorAll("button"))
       .find((button) => button.textContent?.trim() === "问一下");
@@ -182,6 +164,60 @@ try {
   await page.waitForFunction(() => document.querySelector("#web2ai_toast")?.textContent?.includes("填写希望大模型对图片做什么分析"), { timeout: 10000 });
   const imagePromptNotice = await page.$eval("#web2ai_toast", (node) => node.textContent || "");
   assert.match(imagePromptNotice, /填写希望大模型对图片做什么分析/, "an image-only empty first request must ask the user for an analysis instruction");
+
+  // The left-side Monitor tab can create a local text-change sentinel. It
+  // remains active while this tab is open, even when the panel is not focused.
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const monitorTab = Array.from(host.shadowRoot.querySelectorAll(".sideTab"))
+      .find((button) => button.textContent?.trim() === "监控");
+    monitorTab.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".sideTab.active")?.textContent?.trim() === "监控");
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const create = Array.from(host.shadowRoot.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("创建监控"));
+    create.click();
+  });
+  await page.waitForFunction(() => Boolean(document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".monitorForm")));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const selectTarget = Array.from(host.shadowRoot.querySelectorAll(".monitorForm button"))
+      .find((button) => button.textContent?.includes("选择元素"));
+    selectTarget.click();
+  });
+  await page.hover("#replace");
+  await page.waitForSelector("[data-web2ai-monitor-confirm='1']");
+  await page.click("#replace");
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".monitorTarget")?.textContent?.includes("替换分页数据"));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const shadow = host.shadowRoot;
+    const name = shadow.querySelector(".monitorForm .monitorInput");
+    name.value = "E2E 页面状态";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    const save = Array.from(shadow.querySelectorAll(".monitorForm button"))
+      .find((button) => button.textContent?.trim() === "创建监控");
+    save.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".monitorCard")?.textContent?.includes("E2E 页面状态"));
+  await page.$eval("#replace", (button) => { button.textContent = "发现待处理订单"; });
+  await worker.evaluate(async () => {
+    for (let i = 0; i < 60; i++) {
+      const data = await chrome.storage.local.get(["web2aiMonitors"]);
+      const rule = (data.web2aiMonitors || []).find((item) => item.name === "E2E 页面状态");
+      if (rule?.triggerCount === 1) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("text-change monitor did not trigger");
+  });
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const remove = host.shadowRoot.querySelector(".monitorCard .btn.danger");
+    remove.click();
+  });
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".monitorCard"));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const chatTab = Array.from(host.shadowRoot.querySelectorAll(".sideTab"))
+      .find((button) => button.textContent?.trim() === "Chat");
+    chatTab.click();
+  });
   await page.$eval("#web2ai_overlay_host", (host) => {
     host.shadowRoot.querySelector(".contextScreenshot")?.closest(".contextItem")?.querySelector(".ctxRemove")?.click();
     const close = Array.from(host.shadowRoot.querySelectorAll(".header button"))
@@ -315,7 +351,7 @@ try {
   });
   await page.$eval("#web2ai_overlay_host", (host) => {
     const clear = Array.from(host.shadowRoot.querySelectorAll("button"))
-      .find((button) => button.textContent?.trim() === "清空");
+      .find((button) => button.textContent?.trim() === "清空全部");
     clear.click();
   });
   await page.evaluate(() => {
@@ -334,7 +370,7 @@ try {
   await page.waitForSelector("#web2ai_overlay_host");
   const contextCount = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".contextItem").length);
   assert.equal(contextCount, 0, "refresh must clear in-memory contexts");
-  console.log("Chrome E2E passed: model switching, screenshots, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
+  console.log("Chrome E2E passed: model switching, screenshots, page monitoring, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
 } finally {
   await browser.close();
   server.close();

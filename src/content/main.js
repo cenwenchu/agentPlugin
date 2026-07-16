@@ -17,6 +17,7 @@ import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen, refreshModelOptions } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, removeContextByRef } from './context.js';
+import { initMonitor, locateMonitorRule, startMonitorPickInFrame, cancelMonitorPickInFrame, acceptMonitorPickResult, reloadMonitorRules } from './monitor.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
 try {
@@ -151,6 +152,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true });
     return;
   }
+
+  if (message?.type === "LOCATE_MONITOR") {
+    locateMonitorRule(message.ruleId);
+    sendResponse({ ok: true });
+    return;
+  }
+  if (message?.type === "OPEN_MONITOR_PANEL") {
+    if (IS_TOP_FRAME) { STATE.open = true; STATE.activePanelTab = "monitor"; render(); }
+    sendResponse({ ok: true }); return;
+  }
+  if (message?.type === "START_MONITOR_PICK") {
+    startMonitorPickInFrame(message.sessionId);
+    sendResponse({ ok: true }); return;
+  }
+  if (message?.type === "CANCEL_MONITOR_PICK") {
+    cancelMonitorPickInFrame(message.sessionId);
+    sendResponse({ ok: true }); return;
+  }
+  if (message?.type === "MONITOR_PICK_RESULT") {
+    if (IS_TOP_FRAME) acceptMonitorPickResult(message.payload);
+    sendResponse({ ok: true }); return;
+  }
 });
 
 // ========== 监听 storage 变更 ==========
@@ -166,6 +189,7 @@ chrome.storage.sync
   .catch(() => void 0);
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.web2aiMonitors) reloadMonitorRules().catch(() => void 0);
   if (areaName !== "sync") return;
   if (changes.panelMaximized && typeof changes.panelMaximized.newValue === "boolean") {
     STATE.maximized = changes.panelMaximized.newValue;
@@ -183,6 +207,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 initTableListeners();
 initHighlightStyle();
 initOverlay();
+initMonitor(render);
 
 } catch (e) {
   const message = e?.message || String(e);
