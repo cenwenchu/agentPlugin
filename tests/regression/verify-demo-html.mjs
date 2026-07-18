@@ -5,7 +5,7 @@
  *   node tests/regression/verify-demo-html.mjs
  *
  * 检查项:
- *   1. 源文件语法检查 (table.js, context.js, state.js)
+ *   1. 全部 src JavaScript 源文件语法检查
  *   2. 调试日志审计 — 确保无残留裸 console.log (未包裹 DEBUG &&)
  *   3. demo HTML 选择器覆盖率 — 验证核心函数能否匹配到目标元素
  *   4. UI 常量替换审计 — 确保 Hardcoded 类名已被常量替换
@@ -48,6 +48,14 @@ function analyzeHtml(html) {
     artTable: countMatches(html, /art-table/gi),
     checkbox: countMatches(html, /<input[^>]*type\s*=\s*["']checkbox["']/gi),
   };
+}
+
+function listFilesRecursively(dir, predicate) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return listFilesRecursively(full, predicate);
+    return predicate(full) ? [path.relative(ROOT, full)] : [];
+  });
 }
 
 /** 从文件中提取所有 export { ... } 中的导出名 */
@@ -245,6 +253,24 @@ function checkExports(files) {
   }
 }
 
+function checkManifestEntries() {
+  console.log("\n▶ Manifest 入口审计");
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf-8"));
+  const entries = [
+    manifest.background?.service_worker,
+    manifest.options_page,
+    ...(manifest.content_scripts || []).flatMap((script) => script.js || []),
+    ...(manifest.web_accessible_resources || []).flatMap((resource) => resource.resources || []).filter((item) => !item.includes("*"))
+  ].filter(Boolean);
+  const missing = entries.filter((entry) => !fs.existsSync(path.join(ROOT, entry)));
+  if (missing.length) {
+    console.log(`  ${FAIL} 缺失入口文件: ${missing.join(", ")}`);
+    errors++;
+  } else {
+    console.log(`  ${PASS} ${entries.length} 个显式入口文件均存在`);
+  }
+}
+
 // ========== Main ==========
 
 function main() {
@@ -252,17 +278,7 @@ function main() {
   console.log("Web-to-AI Context Chat — 回归测试");
   console.log("=".repeat(60));
 
-  const srcFiles = [
-    "src/content/context-model.js",
-    "src/content/context-ref.js",
-    "src/content/onboarding.js",
-    "src/content/table-adapters.js",
-    "src/content/token-budget.js",
-    "src/content/table-export.js",
-    "src/content/table.js",
-    "src/content/context.js",
-    "src/content/state.js",
-  ];
+  const srcFiles = listFilesRecursively(path.join(ROOT, "src"), (file) => file.endsWith(".js")).sort();
 
   const demoFiles = [
     "src/demo-html/table.html",
@@ -275,6 +291,7 @@ function main() {
   verifyDemoHtml(demoFiles);
   auditUIConstants(["src/content/table.js"]);
   checkExports(srcFiles);
+  checkManifestEntries();
 
   console.log("\n" + "=".repeat(60));
   if (errors === 0 && warnings === 0) {

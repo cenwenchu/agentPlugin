@@ -1,5 +1,5 @@
 /** 模型配置页：同步模型元数据，本地保存每个模型独立的 API Key。 */
-import { DEFAULT_MODEL_PROFILE } from "./shared.js";
+import { createNewModelProfile, DEFAULT_MODEL_PROFILE, validateModelProfile } from "./shared.js";
 
 let profiles = [];
 let activeId = "";
@@ -36,17 +36,6 @@ function normalizeProfile(profile = {}) {
 }
 
 function currentProfile() { return creating ? createDraft : profiles.find((profile) => profile.id === activeId); }
-
-function createBlankProfile() {
-  return {
-    ...DEFAULT_MODEL_PROFILE,
-    id: makeId(),
-    name: "未命名模型",
-    baseUrl: "",
-    model: "",
-    supportsImages: false
-  };
-}
 
 function readForm() {
   const profile = currentProfile();
@@ -117,7 +106,7 @@ async function load() {
 async function save() {
   readForm();
   const editing = currentProfile();
-  if (!editing || !String(editing.baseUrl || "").trim() || !String(editing.model || "").trim()) {
+  if (!editing || !validateModelProfile(editing).ok) {
     throw new Error("请填写接口 URL 和模型参数");
   }
   if (creating) {
@@ -163,7 +152,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("addProfile").addEventListener("click", () => {
     readForm();
     creating = true;
-    createDraft = profiles.length ? createBlankProfile() : normalizeProfile({ id: makeId() });
+    createDraft = createNewModelProfile({ hasProfiles: profiles.length > 0, id: makeId() });
     createApiKey = "";
     renderProfileSelect();
     writeForm();

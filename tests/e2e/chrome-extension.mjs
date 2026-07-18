@@ -25,9 +25,36 @@ const innerScrollFixture = `<!doctype html><meta charset="utf-8"><title>Inner sc
   <div id="scrollbox"><div id="long-content">内部滚动容器</div></div>`;
 const innerFrameHostFixture = `<!doctype html><meta charset="utf-8"><title>Inner frame host</title>
   <style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;width:100%;height:100%;border:0}</style><iframe src="/inner-scroll"></iframe>`;
+const virtualCollectionFixture = `<!doctype html><meta charset="utf-8"><title>Virtual collection</title>
+  <style>#virtual-scroll{height:120px;overflow-y:auto;border:1px solid #ddd}.virtual-canvas{height:480px;position:relative}.art-table{position:absolute;left:0;right:0}.art-table-row,[role=columnheader]{height:40px;box-sizing:border-box}.pagination{margin-top:12px}</style>
+  <div id="virtual-scroll"><div class="virtual-canvas"><div id="virtual-table" class="art-table">
+    <div class="art-table-header-row" role="row"><div role="columnheader">序号</div><div role="columnheader">订单号</div></div>
+    <div id="virtual-rows"></div>
+  </div></div></div>
+  <div class="ant-pagination pagination"><button class="ant-pagination-item ant-pagination-item-active">1</button><button class="ant-pagination-item">2</button><span class="ant-pagination-next"><button class="ant-pagination-item-link" aria-label="下一页">下一页</button></span></div>
+  <script>
+    let page = 1;
+    const scroll = document.querySelector('#virtual-scroll');
+    const table = document.querySelector('#virtual-table');
+    const rows = document.querySelector('#virtual-rows');
+    const pageButtons = [...document.querySelectorAll('.ant-pagination-item')];
+    function render() {
+      const start = Math.min(9, Math.floor(scroll.scrollTop / 40));
+      table.style.transform = 'translateY(' + (start * 40) + 'px)';
+      rows.innerHTML = Array.from({length:3}, (_, offset) => {
+        const index = start + offset + 1;
+        return '<div class="art-table-row" role="row" data-row-key="p' + page + '-' + index + '"><div role="cell">' + index + '</div><div role="cell">P' + page + '-ORDER-' + index + '</div></div>';
+      }).join('');
+      pageButtons.forEach((button, index) => button.classList.toggle('ant-pagination-item-active', index + 1 === page));
+    }
+    scroll.addEventListener('scroll', render);
+    pageButtons.forEach((button, index) => button.addEventListener('click', () => { page = index + 1; scroll.scrollTop = 0; render(); }));
+    document.querySelector('.ant-pagination-next button').addEventListener('click', () => { if (page < 2) { page++; scroll.scrollTop = 0; render(); } });
+    render();
+  <\/script>`;
 const server = http.createServer((req, res) => {
   res.setHeader("content-type", "text/html; charset=utf-8");
-  res.end(req.url === "/frame" ? frameFixture : req.url === "/inner-scroll" ? innerScrollFixture : req.url === "/inner-frame-host" ? innerFrameHostFixture : fixture);
+  res.end(req.url === "/frame" ? frameFixture : req.url === "/inner-scroll" ? innerScrollFixture : req.url === "/inner-frame-host" ? innerFrameHostFixture : req.url === "/virtual-collection" ? virtualCollectionFixture : fixture);
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}/`;
@@ -474,7 +501,44 @@ try {
   assert.equal(await scrollingFrame.$eval("#scrollbox", (node) => node.scrollTop), 120, "child-frame scroll position must be restored");
   await innerPage.close();
 
-  console.log("Chrome E2E passed: model switching, screenshots, skill persistence, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
+  // A hybrid data source must collect recycled rows within each page before
+  // turning pagination, then restore both page 1 and the internal scroll top.
+  const virtualPage = await browser.newPage();
+  await virtualPage.goto(`${url}virtual-collection`);
+  await virtualPage.waitForSelector("#web2ai_overlay_host");
+  const virtualCollection = await worker.evaluate(async (pageUrl) => {
+    const [tab] = await chrome.tabs.query({ url: pageUrl });
+    if (!tab?.id) throw new Error("virtual collection tab not found");
+    return chrome.tabs.sendMessage(tab.id, {
+      type: "COLLECT_SKILL_SOURCE_DATA",
+      source: { selector: "#virtual-table", tableIndex: 0, headers: ["序号", "订单号"] },
+      options: { collectionId: "e2e-virtual-collection", maxPages: 2, maxRows: 100 }
+    }, { frameId: 0 });
+  }, `${url}virtual-collection`);
+  assert.equal(virtualCollection?.ok, true, `virtual collection failed: ${JSON.stringify(virtualCollection)}`);
+  assert.equal(virtualCollection.data.collectedPages, 2);
+  assert.equal(virtualCollection.data.rowCount, 24, "collector must read all recycled rows before each page turn");
+  assert.equal(await virtualPage.$eval("#virtual-scroll", (node) => node.scrollTop), 0, "virtual table must return to the top");
+  assert.equal(await virtualPage.$eval(".ant-pagination-item-active", (node) => node.textContent.trim()), "1", "hybrid collection must restore page one");
+  await virtualPage.close();
+
+  // Adding a model is a separate draft flow: it must not appear in the
+  // existing-model selector until saved, and cancel must restore edit mode.
+  const extensionId = new URL(extensionTarget.url()).host;
+  const optionsPage = await browser.newPage();
+  await optionsPage.goto(`chrome-extension://${extensionId}/src/options.html`);
+  await optionsPage.waitForSelector("#profile option");
+  const profileCountBeforeAdd = await optionsPage.$$eval("#profile option", (options) => options.length);
+  await optionsPage.click("#addProfile");
+  assert.equal(await optionsPage.$eval("#createTitle", (node) => node.hidden), false, "add model must enter a separate create mode");
+  assert.deepEqual(await optionsPage.$$eval("#baseUrl,#model", (inputs) => inputs.map((input) => input.value)), ["", ""], "additional model draft must start blank");
+  assert.equal(await optionsPage.$$eval("#profile option", (options) => options.length), profileCountBeforeAdd, "unsaved model must not enter the existing-model list");
+  await optionsPage.click("#cancelAdd");
+  assert.equal(await optionsPage.$eval("#createTitle", (node) => node.hidden), true, "cancel must return to existing-model edit mode");
+  assert.equal(await optionsPage.$$eval("#profile option", (options) => options.length), profileCountBeforeAdd);
+  await optionsPage.close();
+
+  console.log("Chrome E2E passed: model switching/configuration, screenshots, skill persistence, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
 } finally {
   await browser.close();
   server.close();

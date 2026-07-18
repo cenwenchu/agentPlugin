@@ -22,3 +22,24 @@ export const DEFAULT_SETTINGS = {
   activeModelId: DEFAULT_MODEL_PROFILE.id,
   defaultModelId: DEFAULT_MODEL_PROFILE.id
 };
+
+/**
+ * 创建设置页的新增模型草稿。已有模型时返回空白草稿；首次配置时预填
+ * DeepSeek，避免把“新增第二个模型”和“首次引导”混为一体。
+ */
+export function createNewModelProfile({ hasProfiles, id }) {
+  return {
+    ...DEFAULT_MODEL_PROFILE,
+    id,
+    name: hasProfiles ? "未命名模型" : DEFAULT_MODEL_PROFILE.model,
+    baseUrl: hasProfiles ? "" : DEFAULT_MODEL_PROFILE.baseUrl,
+    model: hasProfiles ? "" : DEFAULT_MODEL_PROFILE.model,
+    supportsImages: false
+  };
+}
+
+export function validateModelProfile(profile) {
+  if (!String(profile?.baseUrl || "").trim()) return { ok: false, field: "baseUrl" };
+  if (!String(profile?.model || "").trim()) return { ok: false, field: "model" };
+  return { ok: true };
+}

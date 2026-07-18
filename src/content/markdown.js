@@ -12,6 +12,8 @@
  * - 段落和换行
  */
 
+import { convertSafeHtmlToMarkdown } from "./html-to-markdown.js";
+
 /**
  * 将 Markdown 文本转为 HTML 字符串。
  * 做了基础的 XSS 防护（HTML 转义 + URL 协议白名单）。
@@ -20,7 +22,7 @@
  */
 function renderMarkdown(text) {
   if (!text) return "";
-  let html = text;
+  let html = convertSafeHtmlToMarkdown(text);
 
   // 1. 转义 HTML 特殊字符（防止 XSS，但保留后续 markdown 标记）
   html = html
@@ -70,6 +72,8 @@ function renderMarkdown(text) {
   html = html.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
   // 7. 粗体 **
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // 删除线（HTML <del>/<s> 会先转换成该语法）
+  html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
   // 8. 斜体 *
   html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
 
@@ -93,6 +97,10 @@ function renderMarkdown(text) {
     if (match.includes("<ul>")) return match;
     return `<ol>${match}</ol>`;
   });
+
+  // 引用与分隔线
+  html = html.replace(/^&gt;\s?(.+)$/gm, "<blockquote>$1</blockquote>");
+  html = html.replace(/^---$/gm, "<hr>");
 
   // 12. 换行 — 双换行为段落
   html = html.replace(/\n\n/g, "</p><p>");

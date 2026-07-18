@@ -1,12 +1,15 @@
 /**
- * @fileoverview 技能第一轮：单个数据源的选择、持久化与刷新后校验。
- * 同时提供自然语言分析方法、当前已渲染数据读取与测试结果保存能力。
+ * @fileoverview 技能的数据源绑定、持久化、页面挂接与数据采集。
+ *
+ * 本模块运行在所有 frame：目标 frame 负责定位表格、分页及虚拟滚动采集；
+ * top frame 负责技能目录、页面归属和状态汇总。模型调用与全屏交互位于 overlay.js。
  */
 
 import { IS_TOP_FRAME, STATE, compactOneLine, refs, uid } from "./state.js";
 import { getCssSelector, isVisibleElement } from "./dom.js";
 import { showToast } from "./toast.js";
 import { showConfirmDialog, showPromptDialog } from "./dialog.js";
+import { classifyScrollCollection, nextVirtualScrollTop, shouldStopAfterNoProgress } from "./skill-collection-model.js";
 import {
   clickElement, findHeaderRowAbove, findLiveTableAfterPageTurn, findPaginationNextButton,
   getRowCells, getStableTableRoot, getTableContentDigest, getTableRowTexts, isHeaderRow,
@@ -30,6 +33,9 @@ let skillBarBroadcastTimer = null;
 let lastSkillBarDiagnostic = "";
 let lastSkillBarDiagnosticAt = 0;
 const activeCollections = new Map();
+// 默认关闭，避免在业务页面控制台持续输出采集轨迹。真实站点排障时可临时
+// 改为 true；所有采集日志都通过 logSkillCollection 这一处控制。
+const SKILL_COLLECTION_DIAGNOSTICS = false;
 
 function emptyAnalysisMethod() {
   return { description: "" };
@@ -293,6 +299,7 @@ function emitCollectionProgress(collectionId, progress) {
 }
 
 function logSkillCollection(event, details = {}) {
+  if (!SKILL_COLLECTION_DIAGNOSTICS) return;
   console.info("[web2ai.skill-collection]", event, JSON.stringify({
     frame: IS_TOP_FRAME ? "top" : "child",
     ...details
@@ -344,13 +351,24 @@ function setVerticalScrollTop(scroller, top) {
   return scroller.scrollTop;
 }
 
-function isLikelyVirtualScroller(scroller, table) {
+function classifyVerticalCollection(scroller, table) {
   const className = `${String(scroller?.className || "")} ${String(table?.className || "")}`;
-  if (/(virtual-list|virtual-scroll)/i.test(className)) return true;
   const renderedRows = Array.from(table?.querySelectorAll?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr") || [])
     .filter((row) => !isHeaderRow(row));
-  const renderedHeight = renderedRows.reduce((sum, row) => sum + Math.max(0, row.getBoundingClientRect?.().height || 0), 0);
-  return renderedRows.length > 0 && scroller.scrollHeight > renderedHeight + Math.max(80, scroller.clientHeight * 0.5);
+  const layoutNodes = [table, table?.parentElement, ...renderedRows.slice(0, 3)].filter(Boolean);
+  const hasVirtualLayoutEvidence = layoutNodes.some((node) => {
+    const style = getComputedStyle(node);
+    const inlineTransform = String(node.style?.transform || "");
+    return style.position === "absolute" || /translate(?:3d|Y)?\s*\(/i.test(inlineTransform);
+  }) || Number(table?.getAttribute?.("aria-rowcount") || 0) > renderedRows.length;
+  return classifyScrollCollection({
+    className,
+    scrollHeight: scroller.scrollHeight,
+    clientHeight: scroller.clientHeight,
+    renderedRowHeights: renderedRows.map((row) => row.getBoundingClientRect?.().height || 0),
+    isDocumentScroller: scroller === document.scrollingElement,
+    hasVirtualLayoutEvidence
+  });
 }
 
 async function waitForVirtualRows(source, beforeTable, beforeDigest, beforeRows) {
@@ -383,14 +401,14 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
   if (!current.found) return { found: false, headers, added, scrollSteps };
   let table = findStoredSourceTable(source);
   let scroller = findStoredSourceVerticalScroller(table);
-  const virtual = Boolean(scroller && isLikelyVirtualScroller(scroller, table));
+  const scrollMode = scroller ? classifyVerticalCollection(scroller, table) : "none";
   logSkillCollection("page scan", {
     collectionId, page, table: describeCollectionElement(table), scroller: describeCollectionElement(scroller),
-    virtual, renderedRows: current.rowCount || 0, added, totalRows: rows.length,
+    scrollMode, renderedRows: current.rowCount || 0, added, totalRows: rows.length,
     scrollTop: Math.round(scroller?.scrollTop || 0), clientHeight: scroller?.clientHeight || 0,
     scrollHeight: scroller?.scrollHeight || 0
   });
-  if (!virtual) return { found: true, headers, added, scrollSteps };
+  if (scrollMode === "none") return { found: true, headers, added, scrollSteps };
 
   try {
     if (scroller.scrollTop > 1) {
@@ -403,6 +421,7 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
     }
 
     let stableBottomPasses = 0;
+    let consecutiveEmptySteps = 0;
     for (let step = 0; step < 160 && rows.length < maxRows && !control.stopped; step++) {
       table = findStoredSourceTable(source);
       scroller = findStoredSourceVerticalScroller(table) || scroller;
@@ -418,8 +437,11 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
         }
       }
       stableBottomPasses = 0;
-      const distance = Math.max(80, Math.floor(scroller.clientHeight * 0.75));
-      const nextTop = Math.min(Math.max(0, scroller.scrollHeight - scroller.clientHeight), currentTop + distance);
+      const nextTop = nextVirtualScrollTop({
+        scrollTop: currentTop,
+        scrollHeight: scroller.scrollHeight,
+        clientHeight: scroller.clientHeight
+      });
       if (nextTop <= currentTop + 1) break;
       const beforeDigest = getTableContentDigest(table);
       const beforeRows = getTableRowTexts(table);
@@ -434,11 +456,20 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
       const addedBeforeScrollRead = added;
       current = addRenderedRows();
       if (!current.found) return { found: false, headers, added, scrollSteps };
+      const newlyAdded = added - addedBeforeScrollRead;
+      consecutiveEmptySteps = newlyAdded > 0 ? 0 : consecutiveEmptySteps + 1;
       logSkillCollection("scroll step", {
         collectionId, page, step: scrollSteps, targetTop: Math.round(nextTop), actualTop: Math.round(scroller.scrollTop),
         clientHeight: scroller.clientHeight, scrollHeight: scroller.scrollHeight,
-        renderedRows: current.rowCount || 0, added: added - addedBeforeScrollRead, totalRows: rows.length
+        renderedRows: current.rowCount || 0, added: newlyAdded, consecutiveEmptySteps, totalRows: rows.length
       });
+      const emptyStepLimit = scrollMode === "probe" ? 1 : 2;
+      if (shouldStopAfterNoProgress(consecutiveEmptySteps, emptyStepLimit)) {
+        logSkillCollection("page scroll stopped", {
+          collectionId, page, reason: "no-new-rows", scrollSteps, consecutiveEmptySteps, totalRows: rows.length
+        });
+        break;
+      }
     }
     logSkillCollection("page scroll complete", { collectionId, page, scrollSteps, added, totalRows: rows.length, stopped: control.stopped });
     return { found: true, headers, added, scrollSteps, stopped: control.stopped };
