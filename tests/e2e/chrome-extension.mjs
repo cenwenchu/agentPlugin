@@ -222,8 +222,6 @@ try {
     const inputs = host.shadowRoot.querySelectorAll(".skillInput");
     inputs[0].value = "订单分析";
     inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
-    inputs[1].value = "订单列表";
-    inputs[1].dispatchEvent(new Event("input", { bubbles: true }));
     const objective = host.shadowRoot.querySelector(".skillTextarea");
     objective.value = "识别异常订单并说明原因";
     objective.dispatchEvent(new Event("input", { bubbles: true }));
@@ -449,7 +447,7 @@ try {
   const loadedSkillData = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionPanel")?.textContent || "");
   assert.match(loadedSkillData, /已读取 \d+ 行，本次使用 \d+ 行/);
   const previewedSkillRows = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillDataPreview tbody tr").length);
-  assert.ok(previewedSkillRows > 0 && previewedSkillRows <= 5, "skill test must preview up to five loaded rows");
+  assert.ok(previewedSkillRows > 0 && previewedSkillRows <= 10, "skill execution must preview up to ten loaded rows per page");
   const firstPreviewCells = await page.$eval("#web2ai_overlay_host", (host) =>
     Array.from(host.shadowRoot.querySelectorAll(".skillDataPreview tbody tr:first-child td")).map((cell) => cell.textContent || "")
   );

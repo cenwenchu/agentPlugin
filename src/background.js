@@ -182,9 +182,7 @@ async function chatCompletions({ messages, modelId = "", debugLabel = "chat" }) 
     },
     body: JSON.stringify({
       model: settings.model,
-      messages,
-      temperature: 0.2,
-      max_tokens: settings.maxOutputTokens
+      messages
     })
   });
 
@@ -229,8 +227,6 @@ async function streamChatCompletions({ messages, modelId = "", signal, onDelta, 
     body: JSON.stringify({
       model: settings.model,
       messages,
-      temperature: 0.2,
-      max_tokens: settings.maxOutputTokens,
       stream: true
     }),
     signal
@@ -414,6 +410,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true });
       return;
     }
+    if (message?.type === "SKILL_COLLECTION_PROGRESS") {
+      if (!sender?.tab?.id) throw new Error("无法确定采集数据所在标签页");
+      await sendToFrame(sender.tab.id, 0, message);
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message?.type === "STOP_SKILL_SOURCE_COLLECTION") {
+      if (!sender?.tab?.id) throw new Error("无法确定采集数据所在标签页");
+      await broadcastToTab(sender.tab.id, message);
+      sendResponse({ ok: true });
+      return;
+    }
     if (message?.type === "EXECUTE_SKILL_FROM_PAGE") {
       if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
       const response = await sendToFrame(sender.tab.id, 0, { type: "EXECUTE_SKILL", skillId: message.skillId });
@@ -480,12 +488,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       for (const frame of ordered) {
         try {
           const response = await sendToFrame(sender.tab.id, frame.frameId, {
-            type: "EXTRACT_SKILL_SOURCE_DATA",
+            type: "COLLECT_SKILL_SOURCE_DATA",
             source: message.source,
-            limit: 200
+            options: {
+              collectionId: message.collectionId,
+              maxPages: message.maxPages || 10,
+              maxRows: message.maxRows || 1000
+            }
           });
           if (response?.ok && response.data?.found) {
             results.push({ ...response.data, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url) });
+            break;
           }
         } catch { /* frame 尚未注入时继续尝试其他 frame */ }
       }
@@ -496,6 +509,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse(best
         ? { ok: true, data: best }
         : { ok: false, error: "未能读取数据源，请确认数据源所在页面已打开且内容已加载" });
+      return;
+    }
+    if (message?.type === "INSPECT_SKILL_SOURCE_PAGINATION") {
+      if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
+      const preferredFrameUrl = normalizedPageKey(message.source?.frameUrl || "");
+      const frames = await chrome.webNavigation.getAllFrames({ tabId: sender.tab.id });
+      const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
+      for (const frame of ordered) {
+        try {
+          const response = await sendToFrame(sender.tab.id, frame.frameId, { type: "INSPECT_SKILL_SOURCE_PAGINATION", source: message.source });
+          if (response?.ok && response.data?.found) {
+            sendResponse({ ok: true, data: response.data });
+            return;
+          }
+        } catch { void 0; }
+      }
+      sendResponse({ ok: true, data: { found: false, multiPage: false, totalPages: 0 } });
       return;
     }
     if (message?.type === "SWITCH_TO_SKILL_PAGE") {

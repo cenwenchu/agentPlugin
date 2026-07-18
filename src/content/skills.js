@@ -4,10 +4,14 @@
  */
 
 import { IS_TOP_FRAME, STATE, compactOneLine, refs, uid } from "./state.js";
-import { getCssSelector } from "./dom.js";
+import { getCssSelector, isVisibleElement } from "./dom.js";
 import { showToast } from "./toast.js";
 import { showConfirmDialog, showPromptDialog } from "./dialog.js";
-import { findHeaderRowAbove, getRowCells, getStableTableRoot, isHeaderRow } from "./table.js";
+import {
+  clickElement, findHeaderRowAbove, findLiveTableAfterPageTurn, findPaginationNextButton,
+  getRowCells, getStableTableRoot, getTableContentDigest, getTableRowTexts, isHeaderRow,
+  waitForTableChange, waitForTableDataReady
+} from "./table.js";
 
 const STORAGE_KEY = "web2aiSkills";
 const PAGE_NAMES_STORAGE_KEY = "web2aiSkillPageNames";
@@ -25,6 +29,7 @@ let skillBarTimer = null;
 let skillBarBroadcastTimer = null;
 let lastSkillBarDiagnostic = "";
 let lastSkillBarDiagnosticAt = 0;
+const activeCollections = new Map();
 
 function emptyAnalysisMethod() {
   return { description: "" };
@@ -47,24 +52,6 @@ function normalizeAnalysisMethod(value) {
 
 function buildAnalysisPrompt(method) {
   return normalizeAnalysisMethod(method).description.trim();
-}
-
-function getAnalysisGuidance(method, headers = []) {
-  const text = buildAnalysisPrompt(method);
-  if (!text) return ["先用自己的话描述希望 AI 分析什么，例如：找出可能延迟发货的订单，并说明原因和处理建议。"];
-  const guidance = [];
-  if (text.length < 24) guidance.push("可以再具体一些：什么情况值得关注？");
-  if (!/(超过|低于|高于|等于|异常|风险|条件|规则|标准|如果|当|未|没有|天|小时|%|比例)/i.test(text)) {
-    guidance.push("可以补充判断依据，例如时间、金额、状态或业务规则。");
-  }
-  if (!/(输出|列出|返回|展示|按照|分组|排序|表格|清单|总结|建议|原因|结论)/i.test(text)) {
-    guidance.push("可以补充期望的结果形式，例如列出对象、原因、风险等级和建议。");
-  }
-  const normalizedHeaders = (headers || []).map((header) => String(header).trim()).filter((header) => header.length > 1);
-  if (normalizedHeaders.length && !normalizedHeaders.some((header) => text.includes(header))) {
-    guidance.push(`可以引用需要重点分析的数据源字段，例如：${normalizedHeaders.slice(0, 4).join("、")}。`);
-  }
-  return guidance.length ? guidance.slice(0, 3) : ["描述已经比较完整，可以保存并进入后续测试。"];
 }
 
 function pageKey(url = location.href) {
@@ -288,6 +275,359 @@ function extractStoredSourceData(source, limit = 200) {
   };
 }
 
+function inspectStoredSourcePagination(source) {
+  const table = findStoredSourceTable(source);
+  if (!table) return { found: false, multiPage: false };
+  const anchorRow = table.querySelector?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
+  const next = findPaginationNextButton(anchorRow);
+  const pagination = next?.closest?.(".ant-pagination,.arco-pagination,[class*='pagination'],[role='navigation']");
+  const pageNumbers = Array.from(pagination?.querySelectorAll?.("button,a,[role='button']") || [])
+    .map((node) => Number.parseInt(compactOneLine(node.innerText || node.textContent || ""), 10))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  const totalPages = pageNumbers.length ? Math.max(...pageNumbers) : 0;
+  return { found: true, multiPage: Boolean(next || totalPages > 1), totalPages };
+}
+
+function emitCollectionProgress(collectionId, progress) {
+  chrome.runtime.sendMessage({ type: "SKILL_COLLECTION_PROGRESS", collectionId, progress }).catch(() => void 0);
+}
+
+function logSkillCollection(event, details = {}) {
+  console.info("[web2ai.skill-collection]", event, JSON.stringify({
+    frame: IS_TOP_FRAME ? "top" : "child",
+    ...details
+  }));
+}
+
+function describeCollectionElement(node) {
+  if (!node) return "none";
+  const id = node.id ? `#${node.id}` : "";
+  const classes = String(node.className || "").trim().split(/\s+/).filter(Boolean).slice(0, 4).join(".");
+  return `${node.tagName?.toLowerCase?.() || "element"}${id}${classes ? `.${classes}` : ""}`;
+}
+
+function findStoredSourceVerticalScroller(table) {
+  if (!table) return null;
+  const row = table.querySelector?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
+  const candidates = new Set();
+  const knownSelectors = [
+    ".ant-table-body", ".ant-table-content", ".ant-virtual-list-holder",
+    ".arco-table-body", ".arco-scrollbar-container", ".arco-virtual-list",
+    ".art-table-body", ".art-virtual-scroll", "[class*='virtual-list']", "[class*='virtual-scroll']",
+    "[role='rowgroup']"
+  ].join(",");
+  table.querySelectorAll?.(knownSelectors).forEach((node) => candidates.add(node));
+  let ancestor = row || table;
+  for (let depth = 0; depth < 20 && ancestor; depth++, ancestor = ancestor.parentElement) candidates.add(ancestor);
+  // 一些嵌入式业务页面使用 iframe 文档本身驱动虚拟表格渲染，表格祖先没有 overflow。
+  if (document.scrollingElement) candidates.add(document.scrollingElement);
+  const ranked = [...candidates].filter((node) => {
+    if (!(node instanceof HTMLElement) || !node.isConnected) return false;
+    if (node !== document.scrollingElement && !isVisibleElement(node)) return false;
+    return node.clientHeight >= 40 && node.scrollHeight - node.clientHeight > 8;
+  }).map((node) => {
+    const className = String(node.className || "");
+    const style = getComputedStyle(node);
+    const known = /(ant-table-body|virtual-list-holder|arco-table-body|arco-scrollbar-container|virtual-list|virtual-scroll|art-table-body)/i.test(className);
+    const scrollStyle = /(auto|scroll)/.test(style.overflowY || "");
+    const containsRow = Boolean(row && node.contains(row));
+    const documentScroller = node === document.scrollingElement;
+    return { node, score: (known ? 8 : 0) + (scrollStyle ? 4 : 0) + (containsRow ? 3 : 0) - (documentScroller ? 1 : 0) - Math.min(node.clientHeight / 1000, 2) };
+  }).sort((a, b) => b.score - a.score);
+  return ranked[0]?.node || null;
+}
+
+function setVerticalScrollTop(scroller, top) {
+  const next = Math.max(0, Math.min(Number(top) || 0, Math.max(0, scroller.scrollHeight - scroller.clientHeight)));
+  scroller.scrollTop = next;
+  scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+  return scroller.scrollTop;
+}
+
+function isLikelyVirtualScroller(scroller, table) {
+  const className = `${String(scroller?.className || "")} ${String(table?.className || "")}`;
+  if (/(virtual-list|virtual-scroll)/i.test(className)) return true;
+  const renderedRows = Array.from(table?.querySelectorAll?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr") || [])
+    .filter((row) => !isHeaderRow(row));
+  const renderedHeight = renderedRows.reduce((sum, row) => sum + Math.max(0, row.getBoundingClientRect?.().height || 0), 0);
+  return renderedRows.length > 0 && scroller.scrollHeight > renderedHeight + Math.max(80, scroller.clientHeight * 0.5);
+}
+
+async function waitForVirtualRows(source, beforeTable, beforeDigest, beforeRows) {
+  await new Promise((resolve) => setTimeout(resolve, 140));
+  const tableIndex = beforeTable?.tagName === "TABLE" ? Array.from(document.querySelectorAll("table")).indexOf(beforeTable) : -1;
+  const changed = await waitForTableChange(beforeTable, beforeDigest, 2400, beforeRows, tableIndex);
+  if (changed) await waitForTableDataReady(findLiveTableAfterPageTurn(beforeTable, tableIndex), beforeDigest, 3000, tableIndex);
+}
+
+async function collectStoredSourcePage(source, { collectionId, control, page, maxPages, maxRows, rows, seen }) {
+  let headers = [];
+  let added = 0;
+  let scrollSteps = 0;
+  const addRenderedRows = () => {
+    const current = extractStoredSourceData(source, maxRows);
+    if (!current.found) return current;
+    headers = current.headers || headers;
+    for (const row of current.rows || []) {
+      const signature = row.join("\u241f");
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      rows.push(row);
+      added++;
+      if (rows.length >= maxRows) break;
+    }
+    return current;
+  };
+
+  let current = addRenderedRows();
+  if (!current.found) return { found: false, headers, added, scrollSteps };
+  let table = findStoredSourceTable(source);
+  let scroller = findStoredSourceVerticalScroller(table);
+  const virtual = Boolean(scroller && isLikelyVirtualScroller(scroller, table));
+  logSkillCollection("page scan", {
+    collectionId, page, table: describeCollectionElement(table), scroller: describeCollectionElement(scroller),
+    virtual, renderedRows: current.rowCount || 0, added, totalRows: rows.length,
+    scrollTop: Math.round(scroller?.scrollTop || 0), clientHeight: scroller?.clientHeight || 0,
+    scrollHeight: scroller?.scrollHeight || 0
+  });
+  if (!virtual) return { found: true, headers, added, scrollSteps };
+
+  try {
+    if (scroller.scrollTop > 1) {
+      const beforeDigest = getTableContentDigest(table);
+      const beforeRows = getTableRowTexts(table);
+      setVerticalScrollTop(scroller, 0);
+      await waitForVirtualRows(source, table, beforeDigest, beforeRows);
+      current = addRenderedRows();
+      if (!current.found) return { found: false, headers, added, scrollSteps };
+    }
+
+    let stableBottomPasses = 0;
+    for (let step = 0; step < 160 && rows.length < maxRows && !control.stopped; step++) {
+      table = findStoredSourceTable(source);
+      scroller = findStoredSourceVerticalScroller(table) || scroller;
+      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const currentTop = scroller.scrollTop;
+      if (currentTop >= maxScrollTop - 2) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        const expandedMax = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        if (expandedMax <= currentTop + 2) {
+          stableBottomPasses++;
+          if (stableBottomPasses >= 2) break;
+          continue;
+        }
+      }
+      stableBottomPasses = 0;
+      const distance = Math.max(80, Math.floor(scroller.clientHeight * 0.75));
+      const nextTop = Math.min(Math.max(0, scroller.scrollHeight - scroller.clientHeight), currentTop + distance);
+      if (nextTop <= currentTop + 1) break;
+      const beforeDigest = getTableContentDigest(table);
+      const beforeRows = getTableRowTexts(table);
+      const actualTop = setVerticalScrollTop(scroller, nextTop);
+      scrollSteps++;
+      emitCollectionProgress(collectionId, {
+        phase: "scrolling", page, pages: page - 1, rowCount: rows.length, scrollSteps,
+        scrollTop: Math.round(actualTop), maxScrollTop: Math.round(Math.max(0, scroller.scrollHeight - scroller.clientHeight)),
+        maxPages, maxRows
+      });
+      await waitForVirtualRows(source, table, beforeDigest, beforeRows);
+      const addedBeforeScrollRead = added;
+      current = addRenderedRows();
+      if (!current.found) return { found: false, headers, added, scrollSteps };
+      logSkillCollection("scroll step", {
+        collectionId, page, step: scrollSteps, targetTop: Math.round(nextTop), actualTop: Math.round(scroller.scrollTop),
+        clientHeight: scroller.clientHeight, scrollHeight: scroller.scrollHeight,
+        renderedRows: current.rowCount || 0, added: added - addedBeforeScrollRead, totalRows: rows.length
+      });
+    }
+    logSkillCollection("page scroll complete", { collectionId, page, scrollSteps, added, totalRows: rows.length, stopped: control.stopped });
+    return { found: true, headers, added, scrollSteps, stopped: control.stopped };
+  } finally {
+    table = findStoredSourceTable(source);
+    scroller = findStoredSourceVerticalScroller(table) || scroller;
+    if (scroller?.isConnected && scroller.scrollTop > 1) {
+      const beforeDigest = getTableContentDigest(table);
+      const beforeRows = getTableRowTexts(table);
+      setVerticalScrollTop(scroller, 0);
+      await waitForVirtualRows(source, table, beforeDigest, beforeRows).catch(() => void 0);
+      logSkillCollection("restore table top", { collectionId, page, success: scroller.scrollTop <= 1, scrollTop: Math.round(scroller.scrollTop) });
+    }
+  }
+}
+
+function findStoredSourcePagination(table) {
+  let scope = table;
+  for (let depth = 0; depth < 9 && scope; depth++, scope = scope.parentElement) {
+    const candidates = Array.from(scope.querySelectorAll?.(".ant-pagination,.arco-pagination,[class*='pagination'],[role='navigation']") || []);
+    const pagination = candidates.find((candidate) => {
+      const text = compactOneLine(candidate.innerText || candidate.textContent || "");
+      return /(^|\s)1(\s|$)/.test(text) || candidate.querySelector("[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active");
+    });
+    if (pagination) return pagination;
+  }
+  return null;
+}
+
+function paginationIsOnFirstPage(pagination) {
+  const active = pagination?.querySelector?.("[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active");
+  return compactOneLine(active?.innerText || active?.textContent || "") === "1";
+}
+
+async function clickPaginationAndWait(source, target) {
+  const table = findStoredSourceTable(source);
+  if (!table || !target) return false;
+  const beforeRows = getTableRowTexts(table);
+  const beforeDigest = getTableContentDigest(table);
+  const tableIndex = table?.tagName === "TABLE" ? Array.from(document.querySelectorAll("table")).indexOf(table) : -1;
+  if (!clickElement(target)) return false;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const changed = await waitForTableChange(table, beforeDigest, 6000, beforeRows, tableIndex);
+  if (!changed) return false;
+  await waitForTableDataReady(findLiveTableAfterPageTurn(table, tableIndex), beforeDigest, 6000, tableIndex);
+  return true;
+}
+
+async function restoreStoredSourceFirstPage(source) {
+  let table = findStoredSourceTable(source);
+  let pagination = findStoredSourcePagination(table);
+  if (!pagination) {
+    logSkillCollection("restore first page", { success: false, reason: "pagination-not-found" });
+    return false;
+  }
+  if (paginationIsOnFirstPage(pagination)) {
+    logSkillCollection("restore first page", { success: true, method: "already-first" });
+    return true;
+  }
+
+  const pageOneContainer = Array.from(pagination.querySelectorAll("li,button,a,[role='button']"))
+    .find((node) => compactOneLine(node.innerText || node.textContent || "") === "1");
+  const pageOne = pageOneContainer?.matches?.("button,a,[role='button']")
+    ? pageOneContainer
+    : pageOneContainer?.querySelector?.("button,a,[role='button']") || pageOneContainer;
+  if (pageOne && await clickPaginationAndWait(source, pageOne)) {
+    table = findStoredSourceTable(source);
+    pagination = findStoredSourcePagination(table);
+    if (paginationIsOnFirstPage(pagination)) {
+      logSkillCollection("restore first page", { success: true, method: "page-button" });
+      return true;
+    }
+  }
+
+  // 部分页码组件会折叠第一页，或只能通过“上一页”逐页返回。
+  for (let attempt = 0; attempt < 20; attempt++) {
+    table = findStoredSourceTable(source);
+    pagination = findStoredSourcePagination(table);
+    if (!pagination || paginationIsOnFirstPage(pagination)) return Boolean(pagination);
+    const previous = pagination.querySelector(
+      ".ant-pagination-prev button,.ant-pagination-prev a,.ant-pagination-prev .ant-pagination-item-link," +
+      ".arco-pagination-item-previous button,.arco-pagination-prev button," +
+      "button[aria-label*='上一页'],a[aria-label*='上一页'],button[aria-label*='previous' i],a[aria-label*='previous' i]"
+    );
+    const previousContainer = previous?.closest?.(".ant-pagination-prev,.arco-pagination-item-previous,.arco-pagination-prev");
+    const disabled = !previous || previous.disabled || previous.getAttribute?.("aria-disabled") === "true" ||
+      previousContainer?.classList?.contains("ant-pagination-disabled") ||
+      previousContainer?.classList?.contains("arco-pagination-item-disabled");
+    if (disabled || !await clickPaginationAndWait(source, previous)) break;
+  }
+  table = findStoredSourceTable(source);
+  const restored = paginationIsOnFirstPage(findStoredSourcePagination(table));
+  logSkillCollection("restore first page", { success: restored, method: "previous-buttons", reason: restored ? "" : "page-change-not-confirmed" });
+  return restored;
+}
+
+async function collectStoredSourceData(source, options = {}) {
+  const collectionId = String(options.collectionId || uid());
+  const maxPages = Math.max(1, Math.min(20, Number(options.maxPages) || 10));
+  const maxRows = Math.max(1, Math.min(2000, Number(options.maxRows) || 1000));
+  const control = { stopped: false };
+  activeCollections.set(collectionId, control);
+  const rows = [];
+  const seen = new Set();
+  let headers = [];
+  let pages = 0;
+  let reason = "complete";
+  let pageTurned = false;
+  let restoredFirstPage = false;
+  logSkillCollection("start", { collectionId, maxPages, maxRows });
+  try {
+    for (let page = 1; page <= maxPages; page++) {
+      if (control.stopped) { reason = "stopped"; break; }
+      logSkillCollection("page start", { collectionId, page, totalRows: rows.length });
+      emitCollectionProgress(collectionId, { phase: "reading", page, pages, rowCount: rows.length, maxPages, maxRows });
+      const currentPage = await collectStoredSourcePage(source, {
+        collectionId, control, page, maxPages, maxRows, rows, seen
+      });
+      if (!currentPage.found) throw new Error("数据源定位失败");
+      headers = currentPage.headers || headers;
+      pages = page;
+      emitCollectionProgress(collectionId, {
+        phase: "page-complete", page, pages, rowCount: rows.length,
+        added: currentPage.added, scrollSteps: currentPage.scrollSteps, maxPages, maxRows
+      });
+      logSkillCollection("page complete", {
+        collectionId, page, added: currentPage.added, scrollSteps: currentPage.scrollSteps,
+        totalRows: rows.length, stopped: control.stopped
+      });
+      if (control.stopped) { reason = "stopped"; break; }
+      if (rows.length >= maxRows) { reason = "row-limit"; break; }
+      if (page >= maxPages) { reason = "page-limit"; break; }
+      const table = findStoredSourceTable(source);
+      const anchorRow = table?.querySelector?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
+      const next = findPaginationNextButton(anchorRow);
+      const pagination = next?.closest?.(".ant-pagination,.arco-pagination,[class*='pagination'],[role='navigation']");
+      const nextContainer = next?.closest?.(".ant-pagination-next,.arco-pagination-item-next,.arco-pagination-next");
+      const disabled = !next || next.disabled || next.getAttribute?.("aria-disabled") === "true" ||
+        nextContainer?.classList?.contains("ant-pagination-disabled") ||
+        nextContainer?.classList?.contains("arco-pagination-item-disabled");
+      logSkillCollection("pagination next", {
+        collectionId, page, next: describeCollectionElement(next), pagination: describeCollectionElement(pagination), disabled
+      });
+      if (disabled) { reason = "last-page"; break; }
+      const beforeDigest = getTableContentDigest(table);
+      const beforeRows = getTableRowTexts(table);
+      const tableIndex = table?.tagName === "TABLE" ? Array.from(document.querySelectorAll("table")).indexOf(table) : -1;
+      emitCollectionProgress(collectionId, { phase: "turning", page, pages, rowCount: rows.length, maxPages, maxRows });
+      if (!clickElement(next)) { reason = "next-click-failed"; break; }
+      pageTurned = true;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      if (control.stopped) { reason = "stopped"; break; }
+      const changed = await waitForTableChange(table, beforeDigest, 8000, beforeRows, tableIndex);
+      if (!changed) {
+        logSkillCollection("page turn", { collectionId, page, success: false, reason: "table-not-changed" });
+        reason = "page-timeout";
+        break;
+      }
+      const ready = await waitForTableDataReady(findLiveTableAfterPageTurn(table, tableIndex), beforeDigest, 8000, tableIndex);
+      logSkillCollection("page turn", { collectionId, page, success: ready, reason: ready ? "" : "table-not-ready" });
+      if (!ready) { reason = "page-timeout"; break; }
+    }
+    if (pageTurned) {
+      emitCollectionProgress(collectionId, { phase: "restoring", pages, rowCount: rows.length, maxPages, maxRows });
+      restoredFirstPage = await restoreStoredSourceFirstPage(source);
+    }
+    emitCollectionProgress(collectionId, { phase: "complete", pages, rowCount: rows.length, maxPages, maxRows, reason });
+    logSkillCollection("complete", { collectionId, pages, rowCount: rows.length, uniqueSignatures: seen.size, reason, restoredFirstPage });
+    return {
+      found: true, status: "available", headers, rows, rowCount: rows.length,
+      totalRowCount: rows.length, collectedPages: pages, collectionReason: reason,
+      stopped: reason === "stopped", truncated: reason === "row-limit" || reason === "page-limit"
+    };
+  } finally {
+    if (pageTurned && !restoredFirstPage) {
+      emitCollectionProgress(collectionId, { phase: "restoring", pages, rowCount: rows.length, maxPages, maxRows });
+      await restoreStoredSourceFirstPage(source).catch(() => false);
+    }
+    activeCollections.delete(collectionId);
+  }
+}
+
+function stopStoredSourceCollection(collectionId) {
+  const control = activeCollections.get(String(collectionId || ""));
+  if (!control) return false;
+  control.stopped = true;
+  return true;
+}
+
 function findStoredSourceTable(source) {
   const candidates = tableCandidates();
   let selectorTable = null;
@@ -498,6 +838,7 @@ async function selectSkillTable() {
 async function startSkillCreation() {
   STATE.skillDraft = { id: "", name: "", sourceName: "", source: null, analysisMethod: emptyAnalysisMethod() };
   STATE.activePanelTab = "skills";
+  chrome.storage.sync.set({ lastPanelTab: "skills" }).catch(() => void 0);
   await selectSkillTable();
 }
 
@@ -560,6 +901,7 @@ function acceptSkillTablePickResult(payload) {
   STATE.skillPickSession = "";
   STATE.open = true;
   STATE.activePanelTab = "skills";
+  chrome.storage.sync.set({ lastPanelTab: "skills" }).catch(() => void 0);
   refs.suppressPanelCloseUntil = Date.now() + 1000;
   if (refs.panelCloseTimer) clearTimeout(refs.panelCloseTimer);
   refs.panelCloseTimer = null;
@@ -577,7 +919,6 @@ async function saveSkillDraft() {
   const draft = STATE.skillDraft;
   if (!draft?.source) return showToast("请先选择数据源");
   if (!String(draft.name).trim()) return showToast("请填写技能名称");
-  if (!String(draft.sourceName).trim()) return showToast("请填写数据源名称");
   const all = await readSkills();
   const now = Date.now();
   const existing = all.find((skill) => skill.id === draft.id);
@@ -588,7 +929,7 @@ async function saveSkillDraft() {
     pageKey: pageKey(),
     pageUrl: location.href,
     pageTitle: document.title,
-    sourceName: String(draft.sourceName).trim(),
+    sourceName: String(draft.sourceName || draft.source?.pageTitle || document.title || "页面数据源").trim(),
     source: draft.source,
     analysisMethod: normalizeAnalysisMethod(draft.analysisMethod),
     createdAt: existing?.createdAt || now,
@@ -730,6 +1071,7 @@ export {
   initSkills, reloadSkills, createSkillDraft, cancelSkillDraft, selectSkillTable, startSkillCreation,
   startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult,
   saveSkillDraft, rebindSkill, deleteSkill, deleteAllSkills, resolveStoredSource, switchToSkillPage,
-  renameCurrentSkillPage, buildAnalysisPrompt, getAnalysisGuidance,
-  extractStoredSourceData, focusStoredSource, saveSkillAnalysisMethod, scheduleSkillBars
+  renameCurrentSkillPage, buildAnalysisPrompt,
+  extractStoredSourceData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource,
+  saveSkillAnalysisMethod, scheduleSkillBars
 };

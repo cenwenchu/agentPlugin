@@ -17,7 +17,7 @@ import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition, startSkillExecution } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, removeContextByRef } from './context.js';
-import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, focusStoredSource, scheduleSkillBars } from './skills.js';
+import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars } from './skills.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
 try {
@@ -49,7 +49,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     setTableSelectionEnabled(true);
     refs.suppressPanelCloseUntil = Date.now() + 1000;
     setOpen(true);
-    chrome.storage.sync.set({ launcherHidden: false })
+    chrome.storage.sync.set({ launcherHidden: false, lastPanelTab: "skills" })
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
     return true;
@@ -78,6 +78,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
     STATE.launcherVisible = true;
+    STATE.activePanelTab = "chat";
     setTableSelectionEnabled(true);
     setOpen(true);
     Promise.all([
@@ -95,6 +96,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
     STATE.launcherVisible = true;
+    STATE.activePanelTab = "chat";
     setTableSelectionEnabled(true);
     setOpen(true);
     Promise.all([
@@ -262,6 +264,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (IS_TOP_FRAME) {
       acceptSkillTablePickResult(message.payload);
       STATE.activePanelTab = "skills";
+      chrome.storage.sync.set({ lastPanelTab: "skills" }).catch(() => void 0);
       refs.suppressPanelCloseUntil = Date.now() + 1200;
       setOpen(true);
     }
@@ -273,6 +276,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "EXTRACT_SKILL_SOURCE_DATA") {
     sendResponse({ ok: true, data: extractStoredSourceData(message.source, message.limit || 200) });
+    return;
+  }
+  if (message?.type === "INSPECT_SKILL_SOURCE_PAGINATION") {
+    sendResponse({ ok: true, data: inspectStoredSourcePagination(message.source) });
+    return;
+  }
+  if (message?.type === "COLLECT_SKILL_SOURCE_DATA") {
+    collectStoredSourceData(message.source, message.options)
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
+  }
+  if (message?.type === "STOP_SKILL_SOURCE_COLLECTION") {
+    sendResponse({ ok: true, stopped: stopStoredSourceCollection(message.collectionId) });
+    return;
+  }
+  if (message?.type === "SKILL_COLLECTION_PROGRESS") {
+    if (IS_TOP_FRAME && STATE.skillTest?.collectionId === message.collectionId) {
+      STATE.skillTest.collection = message.progress || null;
+      STATE.open = true;
+      refs.suppressPanelCloseUntil = Date.now() + 1000;
+      render();
+    }
+    sendResponse({ ok: true });
     return;
   }
   if (message?.type === "SYNC_SKILL_BARS") {
@@ -304,9 +331,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // ========== 监听 storage 变更 ==========
 
 chrome.storage.sync
-  .get(["panelMaximized", "launcherHidden"])
+  .get(["panelMaximized", "launcherHidden", "lastPanelTab"])
   .then((data) => {
     if (typeof data?.panelMaximized === "boolean") STATE.maximized = data.panelMaximized;
+    if (data?.lastPanelTab === "chat" || data?.lastPanelTab === "skills") STATE.activePanelTab = data.lastPanelTab;
     STATE.launcherVisible = data?.launcherHidden !== true;
     setTableSelectionEnabled(STATE.launcherVisible);
     render();
@@ -322,6 +350,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.launcherHidden) {
     STATE.launcherVisible = changes.launcherHidden.newValue !== true;
     setTableSelectionEnabled(STATE.launcherVisible);
+  }
+  if (changes.lastPanelTab && (changes.lastPanelTab.newValue === "chat" || changes.lastPanelTab.newValue === "skills")) {
+    STATE.activePanelTab = changes.lastPanelTab.newValue;
   }
   if (changes.settings) refreshModelOptions().catch(() => void 0);
   render();

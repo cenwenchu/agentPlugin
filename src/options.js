@@ -1,15 +1,13 @@
 /** 模型配置页：同步模型元数据，本地保存每个模型独立的 API Key。 */
 import { DEFAULT_MODEL_PROFILE } from "./shared.js";
 
-const PROVIDERS = {
-  deepseek: { baseUrl: "https://api.deepseek.com" },
-  openai: { baseUrl: "https://api.openai.com" }
-};
-
 let profiles = [];
 let activeId = "";
 let defaultId = "";
 let apiKeys = {};
+let creating = false;
+let createDraft = null;
+let createApiKey = "";
 
 function $(id) {
   const node = document.getElementById(id);
@@ -19,18 +17,15 @@ function $(id) {
 
 function setStatus(text) { $("status").textContent = text; }
 function makeId() { return globalThis.crypto?.randomUUID?.() || `model_${Date.now()}_${Math.random().toString(16).slice(2)}`; }
-function detectProvider(baseUrl) {
-  const normalized = String(baseUrl || "").replace(/\/+$/, "");
-  return Object.entries(PROVIDERS).find(([, provider]) => provider.baseUrl === normalized)?.[0] || "custom";
-}
-
 function normalizeProfile(profile = {}) {
   const contextWindow = Math.max(8192, Number(profile.contextWindow) || DEFAULT_MODEL_PROFILE.contextWindow);
+  const model = String(profile.model || DEFAULT_MODEL_PROFILE.model);
   return {
     ...DEFAULT_MODEL_PROFILE,
     ...profile,
     id: String(profile.id || makeId()),
-    name: String(profile.name || profile.model || "未命名模型"),
+    model,
+    name: model,
     supportsImages: profile.supportsImages === true,
     contextWindow,
     maxOutputTokens: Math.min(
@@ -40,34 +35,37 @@ function normalizeProfile(profile = {}) {
   };
 }
 
-function currentProfile() { return profiles.find((profile) => profile.id === activeId); }
+function currentProfile() { return creating ? createDraft : profiles.find((profile) => profile.id === activeId); }
+
+function createBlankProfile() {
+  return {
+    ...DEFAULT_MODEL_PROFILE,
+    id: makeId(),
+    name: "未命名模型",
+    baseUrl: "",
+    model: "",
+    supportsImages: false
+  };
+}
 
 function readForm() {
   const profile = currentProfile();
   if (!profile) return;
-  profile.name = $("name").value.trim() || $("model").value.trim() || "未命名模型";
-  profile.baseUrl = $("baseUrl").value.trim() || DEFAULT_MODEL_PROFILE.baseUrl;
-  profile.model = $("model").value.trim() || DEFAULT_MODEL_PROFILE.model;
+  profile.baseUrl = $("baseUrl").value.trim();
+  profile.model = $("model").value.trim();
+  profile.name = profile.model || "未命名模型";
   profile.supportsImages = $("supportsImages").checked;
-  profile.contextWindow = Math.max(8192, Number($("contextWindow").value) || DEFAULT_MODEL_PROFILE.contextWindow);
-  profile.maxOutputTokens = Math.min(
-    Math.floor(profile.contextWindow / 2),
-    Math.max(256, Number($("maxOutputTokens").value) || DEFAULT_MODEL_PROFILE.maxOutputTokens)
-  );
-  apiKeys[profile.id] = $("apiKey").value.trim();
+  if (creating) createApiKey = $("apiKey").value.trim();
+  else apiKeys[profile.id] = $("apiKey").value.trim();
 }
 
 function writeForm() {
   const profile = currentProfile();
   if (!profile) return;
-  $("name").value = profile.name;
   $("baseUrl").value = profile.baseUrl;
-  $("provider").value = detectProvider(profile.baseUrl);
   $("model").value = profile.model;
-  $("apiKey").value = apiKeys[profile.id] || "";
+  $("apiKey").value = creating ? createApiKey : (apiKeys[profile.id] || "");
   $("supportsImages").checked = profile.supportsImages === true;
-  $("contextWindow").value = profile.contextWindow;
-  $("maxOutputTokens").value = profile.maxOutputTokens;
 }
 
 function renderProfileSelect() {
@@ -83,6 +81,13 @@ function renderProfileSelect() {
   $("setDefault").textContent = isDefault ? "当前默认" : "设为默认";
   $("setDefault").classList.toggle("is-default", isDefault);
   $("setDefault").disabled = isDefault;
+  $("createTitle").hidden = !creating;
+  document.querySelector(".profile-select").hidden = creating;
+  $("setDefault").hidden = creating;
+  $("addProfile").hidden = creating;
+  $("deleteProfile").hidden = creating;
+  $("cancelAdd").hidden = !creating;
+  $("save").textContent = creating ? "保存新模型" : "保存修改";
 }
 
 async function load() {
@@ -111,6 +116,19 @@ async function load() {
 
 async function save() {
   readForm();
+  const editing = currentProfile();
+  if (!editing || !String(editing.baseUrl || "").trim() || !String(editing.model || "").trim()) {
+    throw new Error("请填写接口 URL 和模型参数");
+  }
+  if (creating) {
+    profiles.push(editing);
+    apiKeys[editing.id] = createApiKey;
+    activeId = editing.id;
+    if (!defaultId) defaultId = editing.id;
+    creating = false;
+    createDraft = null;
+    createApiKey = "";
+  }
   await Promise.all([
     chrome.storage.sync.set({ settings: { models: profiles, activeModelId: defaultId, defaultModelId: defaultId } }),
     chrome.storage.local.set({ modelApiKeys: apiKeys })
@@ -144,11 +162,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   $("addProfile").addEventListener("click", () => {
     readForm();
-    const profile = normalizeProfile({ id: makeId(), name: `新模型 ${profiles.length + 1}` });
-    profiles.push(profile);
-    activeId = profile.id;
+    creating = true;
+    createDraft = profiles.length ? createBlankProfile() : normalizeProfile({ id: makeId() });
+    createApiKey = "";
     renderProfileSelect();
     writeForm();
+    setStatus("请填写新模型配置");
+  });
+  $("cancelAdd").addEventListener("click", () => {
+    creating = false;
+    createDraft = null;
+    createApiKey = "";
+    renderProfileSelect();
+    writeForm();
+    setStatus("已取消新增");
   });
   $("deleteProfile").addEventListener("click", () => {
     if (profiles.length <= 1) return;
@@ -161,11 +188,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderProfileSelect();
     writeForm();
   });
-  $("provider").addEventListener("change", () => {
-    const provider = PROVIDERS[$("provider").value];
-    if (provider) $("baseUrl").value = provider.baseUrl;
-  });
-  $("baseUrl").addEventListener("input", () => { $("provider").value = detectProvider($("baseUrl").value); });
   $("save").addEventListener("click", async () => {
     try { setStatus("保存中..."); await save(); setStatus("已保存"); }
     catch (error) { setStatus(String(error?.message ?? error)); }

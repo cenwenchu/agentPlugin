@@ -9,45 +9,28 @@
   <body>
     <div class="container">
       <h1>Web-to-AI Context Chat</h1>
-      <p class="sub">配置多个 OpenAI 兼容模型。每个模型拥有独立的 Base URL、API Key 和图片能力；API Key 仅保存在当前浏览器。</p>
+      <p class="sub">添加 OpenAI 兼容模型，只需填写接口 URL、模型参数和 API Key。模型参数同时作为界面中的模型名称。</p>
 
       <div class="form">
         <div class="profile-row">
+          <strong id="createTitle" class="create-title" hidden>新增模型</strong>
           <label class="profile-select">
             <span>模型配置</span>
             <select id="profile"></select>
           </label>
           <button id="setDefault" type="button" class="default-button">设为默认</button>
           <button id="addProfile" type="button" class="secondary">新增</button>
+          <button id="cancelAdd" type="button" class="secondary" hidden>取消新增</button>
           <button id="deleteProfile" type="button" class="danger">删除</button>
         </div>
         <label>
-          <span>供应商预设</span>
-          <select id="provider">
-            <option value="deepseek">DeepSeek</option>
-            <option value="openai">OpenAI 兼容</option>
-            <option value="custom">自定义</option>
-          </select>
-        </label>
-
-        <label>
-          <span>Base URL</span>
+          <span>接口 URL</span>
           <input id="baseUrl" type="text" placeholder="https://api.deepseek.com 或 https://你的域名/v1" />
         </label>
 
         <label>
-          <span>配置名称</span>
-          <input id="name" type="text" placeholder="例如：GPT-4o Vision" />
-        </label>
-
-        <label>
-          <span>Model 参数</span>
+          <span>模型参数（同时作为模型名称）</span>
           <input id="model" type="text" placeholder="deepseek-v4-flash" />
-        </label>
-
-        <label class="check-label">
-          <input id="supportsImages" type="checkbox" />
-          <span>支持图片输入（仅在模型真实支持视觉能力时开启）</span>
         </label>
 
         <label>
@@ -55,14 +38,9 @@
           <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
         </label>
 
-        <label>
-          <span>模型上下文窗口（tokens）</span>
-          <input id="contextWindow" type="number" min="8192" step="1024" />
-        </label>
-
-        <label>
-          <span>预留最大输出（tokens）</span>
-          <input id="maxOutputTokens" type="number" min="256" step="256" />
+        <label class="check-label">
+          <input id="supportsImages" type="checkbox" />
+          <span>支持图片输入</span>
         </label>
 
         <div class="row">
