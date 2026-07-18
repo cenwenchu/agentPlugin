@@ -17,7 +17,7 @@ import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, removeContextByRef } from './context.js';
-import { initMonitor, locateMonitorRule, startMonitorPickInFrame, cancelMonitorPickInFrame, acceptMonitorPickResult, reloadMonitorRules } from './monitor.js';
+import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData } from './skills.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
 try {
@@ -34,6 +34,38 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     setTableSelectionEnabled(true);
     setOpen(true);
     chrome.storage.sync.set({ launcherHidden: false })
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
+  }
+
+  if (message?.type === "OPEN_SKILLS_PANEL") {
+    if (!IS_TOP_FRAME) {
+      sendResponse({ ok: false, error: "Skills panel must run in the top frame" });
+      return;
+    }
+    STATE.launcherVisible = true;
+    STATE.activePanelTab = "skills";
+    setTableSelectionEnabled(true);
+    refs.suppressPanelCloseUntil = Date.now() + 1000;
+    setOpen(true);
+    chrome.storage.sync.set({ launcherHidden: false })
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
+  }
+
+  if (message?.type === "START_SKILL_CREATION") {
+    if (!IS_TOP_FRAME) {
+      sendResponse({ ok: false, error: "Skill creation must run in the top frame" });
+      return;
+    }
+    STATE.launcherVisible = true;
+    setTableSelectionEnabled(true);
+    Promise.all([
+      chrome.storage.sync.set({ launcherHidden: false }),
+      startSkillCreation()
+    ])
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
     return true;
@@ -204,17 +236,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
-  if (message?.type === "LOCATE_MONITOR") {
-    locateMonitorRule(message.ruleId);
-    sendResponse({ ok: true });
-    return;
-  }
-  if (message?.type === "OPEN_MONITOR_PANEL") {
-    if (IS_TOP_FRAME) { STATE.open = true; STATE.activePanelTab = "monitor"; render(); }
-    sendResponse({ ok: true }); return;
-  }
   if (message?.type === "CLOSE_PANEL_FROM_PAGE_CLICK") {
-    if (IS_TOP_FRAME && STATE.open && !STATE.monitorPicking) setOpen(false);
+    const suppressed = Date.now() <= Number(refs.suppressPanelCloseUntil || 0);
+    if (IS_TOP_FRAME && STATE.open && !STATE.skillPicking && !suppressed) setOpen(false);
     sendResponse({ ok: true }); return;
   }
   if (message?.type === "KEEP_PANEL_OPEN_AFTER_EXTENSION_ACTION") {
@@ -226,17 +250,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     sendResponse({ ok: true }); return;
   }
-  if (message?.type === "START_MONITOR_PICK") {
-    startMonitorPickInFrame(message.sessionId);
+  if (message?.type === "START_SKILL_TABLE_PICK") {
+    startSkillTablePickInFrame(message.sessionId);
     sendResponse({ ok: true }); return;
   }
-  if (message?.type === "CANCEL_MONITOR_PICK") {
-    cancelMonitorPickInFrame(message.sessionId);
+  if (message?.type === "CANCEL_SKILL_TABLE_PICK") {
+    cancelSkillTablePickInFrame(message.sessionId);
     sendResponse({ ok: true }); return;
   }
-  if (message?.type === "MONITOR_PICK_RESULT") {
-    if (IS_TOP_FRAME) acceptMonitorPickResult(message.payload);
+  if (message?.type === "SKILL_TABLE_PICK_RESULT") {
+    if (IS_TOP_FRAME) {
+      acceptSkillTablePickResult(message.payload);
+      STATE.activePanelTab = "skills";
+      refs.suppressPanelCloseUntil = Date.now() + 1200;
+      setOpen(true);
+    }
     sendResponse({ ok: true }); return;
+  }
+  if (message?.type === "CHECK_SKILL_SOURCE") {
+    sendResponse({ ok: true, data: resolveStoredSource(message.source) });
+    return;
+  }
+  if (message?.type === "EXTRACT_SKILL_SOURCE_DATA") {
+    sendResponse({ ok: true, data: extractStoredSourceData(message.source, message.limit || 200) });
+    return;
   }
 });
 
@@ -253,7 +290,7 @@ chrome.storage.sync
   .catch(() => void 0);
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && changes.web2aiMonitors) reloadMonitorRules().catch(() => void 0);
+  if (areaName === "local" && (changes.web2aiSkills || changes.web2aiSkillPageNames)) reloadSkills().catch(() => void 0);
   if (areaName !== "sync") return;
   if (changes.panelMaximized && typeof changes.panelMaximized.newValue === "boolean") {
     STATE.maximized = changes.panelMaximized.newValue;
@@ -307,7 +344,6 @@ function isExtensionUiPointerEvent(event) {
 // 只有完成一次明确的页面点击才收起 Chat；pointerleave/mousemove 不改变展开状态。
 document.addEventListener("click", (event) => {
   const extensionUi = isExtensionUiPointerEvent(event);
-  if (STATE.monitorPicking) return;
   if (extensionUi) return;
   if (IS_TOP_FRAME) {
     const target = event.target instanceof Element ? event.target : null;
@@ -322,7 +358,7 @@ document.addEventListener("click", (event) => {
     refs.panelCloseTimer = setTimeout(() => {
       refs.panelCloseTimer = null;
       const suppressed = Date.now() <= Number(refs.suppressPanelCloseUntil || 0);
-      if (STATE.open && !STATE.monitorPicking && !suppressed) {
+      if (STATE.open && !suppressed) {
         setOpen(false);
       }
     }, 300);
@@ -339,7 +375,7 @@ document.addEventListener("click", (event) => {
 initTableListeners();
 initHighlightStyle();
 initOverlay();
-initMonitor(render);
+initSkills(render);
 
 } catch (e) {
   const message = e?.message || String(e);

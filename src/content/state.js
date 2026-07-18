@@ -27,11 +27,11 @@ const IS_TOP_FRAME = window.top === window;
  * @property {boolean} suppressAutoSuggest - 是否禁用自动建议
  * @property {boolean} maximized - 面板是否最大化
  * @property {boolean} launcherVisible - 页面上的 Chat 启动图标是否可见
+ * @property {"chat"|"skills"} activePanelTab - 浮层当前功能页
+ * @property {Array} skills - 当前页面绑定的技能
+ * @property {Object|null} skillDraft - 正在编辑的技能数据源
  * @property {Array} modelOptions - Chat 可切换的脱敏模型配置
  * @property {string} activeModelId - 当前请求使用的模型配置 ID
- * @property {"chat"|"monitor"} activePanelTab - 浮层当前功能页
- * @property {Array} monitorRules - 当前页面的监控规则
- * @property {Object|null} monitorDraft - 正在编辑的新监控规则表单
  */
 const STATE = {
   open: false,
@@ -49,9 +49,15 @@ const STATE = {
   modelOptions: [],
   activeModelId: "",
   activePanelTab: "chat",
-  monitorRules: [],
-  monitorDraft: null,
-  monitorPicking: false
+  skills: [],
+  skillCatalog: [],
+  skillPageNames: {},
+  skillDraft: null,
+  /** 当前全屏技能测试会话；仅保存在页面内存中 */
+  skillTest: null,
+  skillPicking: false,
+  skillPickSession: "",
+  skillSourceStatuses: {}
 };
 
 /** 表格列分隔符 */

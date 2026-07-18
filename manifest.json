@@ -3,7 +3,7 @@
   "name": "Web-to-AI Context Chat",
   "version": "0.1.0",
   "description": "Bring webpage tables, region screenshots, and multi-screen captures into an AI chat overlay as context.",
-  "permissions": ["storage", "contextMenus", "activeTab", "notifications", "tabs", "webNavigation"],
+  "permissions": ["storage", "contextMenus", "activeTab", "tabs", "webNavigation"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background.js",

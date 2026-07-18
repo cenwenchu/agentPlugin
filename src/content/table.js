@@ -2358,6 +2358,8 @@ export {
   getCellCount,
   isHeaderRow,
   hasHeaderCells,
+  findHeaderRowAbove,
+  getStableTableRoot,
   highlightRow,
   addRowElToContext,
   handleRowCheckboxChange,

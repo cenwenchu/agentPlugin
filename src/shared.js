@@ -19,5 +19,6 @@ export const DEFAULT_MODEL_PROFILE = {
 
 export const DEFAULT_SETTINGS = {
   models: [DEFAULT_MODEL_PROFILE],
-  activeModelId: DEFAULT_MODEL_PROFILE.id
+  activeModelId: DEFAULT_MODEL_PROFILE.id,
+  defaultModelId: DEFAULT_MODEL_PROFILE.id
 };

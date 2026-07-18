@@ -150,14 +150,6 @@ try {
     select.value = "vision-e2e";
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  await worker.evaluate(async () => {
-    for (let i = 0; i < 50; i++) {
-      const { settings } = await chrome.storage.sync.get(["settings"]);
-      if (settings.activeModelId === "vision-e2e") return;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    throw new Error("Chat model switch did not persist");
-  });
   await page.waitForFunction(() => {
     const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
     const select = shadow?.querySelector("#web2ai_model_select");
@@ -218,59 +210,48 @@ try {
   assert.ok(progressMessages.some((text) => text.startsWith("已完成 ")), `multi-screen capture must show per-screen progress: ${JSON.stringify(progressMessages)}`);
   assert.ok(progressMessages.some((text) => text.startsWith("多屏截图完成")), `multi-screen capture must show completion progress: ${JSON.stringify(progressMessages)}`);
 
-  // The left-side Monitor tab can create a local text-change sentinel. It
-  // remains active while this tab is open, even when the panel is not focused.
+  // First skill milestone: bind one table, persist its locator/header fingerprint,
+  // and keep it available after the page is refreshed.
   await page.$eval("#web2ai_overlay_host", (host) => {
-    const monitorTab = Array.from(host.shadowRoot.querySelectorAll(".sideTab"))
-      .find((button) => button.textContent?.trim() === "监控");
-    monitorTab.click();
-  });
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".sideTab.active")?.textContent?.trim() === "监控");
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    const create = Array.from(host.shadowRoot.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("创建监控"));
-    create.click();
-  });
-  await page.waitForFunction(() => Boolean(document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".monitorForm")));
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    const selectTarget = Array.from(host.shadowRoot.querySelectorAll(".monitorForm button"))
-      .find((button) => button.textContent?.includes("选择元素"));
-    selectTarget.click();
-  });
-  await page.hover("#replace");
-  await page.waitForSelector("[data-web2ai-monitor-confirm='1']");
-  await page.click("#replace");
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".monitorTarget")?.textContent?.includes("替换分页数据"));
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    const shadow = host.shadowRoot;
-    const name = shadow.querySelector(".monitorForm .monitorInput");
-    name.value = "E2E 页面状态";
-    name.dispatchEvent(new Event("input", { bubbles: true }));
-    const save = Array.from(shadow.querySelectorAll(".monitorForm button"))
-      .find((button) => button.textContent?.trim() === "创建监控");
-    save.click();
-  });
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".monitorCard")?.textContent?.includes("E2E 页面状态"));
-  await page.$eval("#replace", (button) => { button.textContent = "发现待处理订单"; });
-  await worker.evaluate(async () => {
-    for (let i = 0; i < 60; i++) {
-      const data = await chrome.storage.local.get(["web2aiMonitors"]);
-      const rule = (data.web2aiMonitors || []).find((item) => item.name === "E2E 页面状态");
-      if (rule?.triggerCount === 1) return;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    throw new Error("text-change monitor did not trigger");
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
   });
   await page.$eval("#web2ai_overlay_host", (host) => {
-    const remove = host.shadowRoot.querySelector(".monitorCard .btn.danger");
-    remove.click();
+    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
   });
-  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".monitorCard"));
   await page.$eval("#web2ai_overlay_host", (host) => {
-    const chatTab = Array.from(host.shadowRoot.querySelectorAll(".sideTab"))
-      .find((button) => button.textContent?.trim() === "Chat");
-    chatTab.click();
+    const inputs = host.shadowRoot.querySelectorAll(".skillInput");
+    inputs[0].value = "订单分析";
+    inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
+    inputs[1].value = "订单列表";
+    inputs[1].dispatchEvent(new Event("input", { bubbles: true }));
+    const objective = host.shadowRoot.querySelector(".skillTextarea");
+    objective.value = "识别异常订单并说明原因";
+    objective.dispatchEvent(new Event("input", { bubbles: true }));
+    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "选择数据源")?.click();
   });
+  await page.click("#orders");
+  await page.waitForFunction(() => {
+    const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+    return !shadow?.querySelector(".wrap")?.classList.contains("hidden") &&
+      shadow?.querySelector(".sideTab.active")?.textContent?.trim() === "技能" &&
+      shadow?.querySelector(".skillSource")?.textContent?.includes("序号");
+  });
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "保存")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("订单分析"));
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("分析方法已配置"));
+  const skillSummary = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillSummary")?.textContent || "");
+  assert.match(skillSummary, /全部技能 1 个/);
+  assert.doesNotMatch(skillSummary, /当前页面 1 个/);
+  await page.evaluate(() => history.pushState({}, "", "/another-business-page"));
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard"));
+  await page.evaluate(() => history.pushState({}, "", "/"));
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("订单分析"));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "Chat")?.click();
+  });
+
   await page.$eval("#web2ai_overlay_host", (host) => {
     const clearContext = Array.from(host.shadowRoot.querySelectorAll(".contextSec .sectionHead button"))
       .find((button) => button.textContent?.trim() === "清空上下文");
@@ -447,6 +428,36 @@ try {
   await page.waitForSelector("#web2ai_overlay_host");
   const contextCount = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".contextItem").length);
   assert.equal(contextCount, 0, "refresh must clear in-memory contexts");
+  await page.$eval("#web2ai_launcher_fab", (button) => button.click());
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard .skillStatus.available"));
+  const restoredSkill = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || "");
+  assert.match(restoredSkill, /订单分析/);
+  assert.match(restoredSkill, /分析方法：识别异常订单并说明原因/);
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillCard button"))
+      .find((button) => button.textContent?.trim() === "测试技能")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillTest"));
+  const testIsFullscreen = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".wrap")?.classList.contains("max"));
+  assert.equal(testIsFullscreen, true, "skill testing must use the full-screen interaction");
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillTest button"))
+      .find((button) => button.textContent?.trim() === "开始测试")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillDataPreviewStatus")?.textContent?.includes("本次提交"));
+  const loadedSkillData = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTestPanel")?.textContent || "");
+  assert.match(loadedSkillData, /当前已渲染共 \d+ 行，本次提交 \d+ 行/);
+  const previewedSkillRows = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillDataPreview tbody tr").length);
+  assert.ok(previewedSkillRows > 0 && previewedSkillRows <= 5, "skill test must preview up to five loaded rows");
+  const firstPreviewCells = await page.$eval("#web2ai_overlay_host", (host) =>
+    Array.from(host.shadowRoot.querySelectorAll(".skillDataPreview tbody tr:first-child td")).map((cell) => cell.textContent || "")
+  );
+  assert.deepEqual(firstPreviewCells, ["1", "A", "", "100"], "empty business cells must remain in their original columns");
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillTest button")?.disabled, { timeout: 15000 });
+  await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTest button")?.click());
 
   const innerPage = await browser.newPage();
   await innerPage.goto(`${url}inner-frame-host`);
@@ -467,7 +478,7 @@ try {
   assert.equal(await scrollingFrame.$eval("#scrollbox", (node) => node.scrollTop), 120, "child-frame scroll position must be restored");
   await innerPage.close();
 
-  console.log("Chrome E2E passed: model switching, screenshots, internal scrolling, page monitoring, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
+  console.log("Chrome E2E passed: model switching, screenshots, skill persistence, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
 } finally {
   await browser.close();
   server.close();

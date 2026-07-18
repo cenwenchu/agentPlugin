@@ -1,12 +1,12 @@
 <!doctype html><meta charset="utf-8"><title>Web2AI E2E</title>
 <div class="art-table" id="orders">
-  <table><thead><tr class="art-table-header-row"><th></th><th>序号</th><th>订单号</th><th>标签</th></tr></thead></table>
-  <table><tbody id="body"><tr id="order-1" class="art-table-row even" data-rowindex="0"><td></td><td>1</td><td>A</td><td>100</td></tr><tr id="order-2" class="art-table-row odd" data-rowindex="1"><td></td><td>2</td><td>B</td><td>200</td></tr><tr id="no-key-row" class="art-table-row even" data-rowindex="2"><td></td><td>3</td><td>No key</td><td>150</td></tr></tbody></table>
-  <div class="art-table-footer"><table><tfoot><tr id="orders-total" class="art-table-row" data-rowindex="0"><td></td><td>总计</td><td>3 单</td><td>450</td></tr></tfoot></table></div>
+  <table><thead><tr class="art-table-header-row"><th></th><th>序号</th><th>订单号</th><th>解决方案</th><th>标签</th></tr></thead></table>
+  <table><tbody id="body"><tr id="order-1" class="art-table-row even" data-rowindex="0"><td></td><td>1</td><td>A</td><td></td><td>100</td></tr><tr id="order-2" class="art-table-row odd" data-rowindex="1"><td></td><td>2</td><td>B</td><td>等待处理</td><td>200</td></tr><tr id="no-key-row" class="art-table-row even" data-rowindex="2"><td></td><td>3</td><td>No key</td><td></td><td>150</td></tr></tbody></table>
+  <div class="art-table-footer"><table><tfoot><tr id="orders-total" class="art-table-row" data-rowindex="0"><td></td><td>总计</td><td>3 单</td><td></td><td>450</td></tr></tfoot></table></div>
 </div>
 <div class="art-table" id="orders-secondary">
-  <table><thead><tr class="art-table-header-row"><th></th><th>序号</th><th>订单号</th><th>标签</th></tr></thead></table>
-  <table><tbody><tr id="secondary-order-1" class="art-table-row even" data-rowindex="0"><td></td><td>1</td><td>A</td><td>100</td></tr></tbody></table>
+  <table><thead><tr class="art-table-header-row"><th></th><th>序号</th><th>订单号</th><th>解决方案</th><th>标签</th></tr></thead></table>
+  <table><tbody><tr id="secondary-order-1" class="art-table-row even" data-rowindex="0"><td></td><td>1</td><td>A</td><td></td><td>100</td></tr></tbody></table>
 </div>
 <button id="page-click-target" style="display:block">普通页面区域</button>
 <button id="replace">替换分页数据</button>
@@ -16,15 +16,15 @@
 <div id="multi-screen-spacer" style="height:1800px;background:linear-gradient(#fff,#eef2ff)"></div>
 <script>
 document.querySelector('#replace').onclick = () => {
-  document.querySelector('#body').outerHTML = '<tbody id="body"><tr id="order-3" class="art-table-row odd" data-rowindex="3"><td></td><td>4</td><td>C</td><td>300</td></tr></tbody>';
+  document.querySelector('#body').outerHTML = '<tbody id="body"><tr id="order-3" class="art-table-row odd" data-rowindex="3"><td></td><td>4</td><td>C</td><td></td><td>300</td></tr></tbody>';
 };
 document.querySelector('#reuse').onclick = () => {
   const row = document.querySelector('#body tr');
   row.id = 'order-reused';
   row.dataset.rowindex = '10';
-  row.innerHTML = '<td></td><td>11</td><td>Reused</td><td>250</td>';
+  row.innerHTML = '<td></td><td>11</td><td>Reused</td><td></td><td>250</td>';
 };
 document.querySelector('#reuse-no-key').onclick = () => {
-  document.querySelector('#no-key-row').innerHTML = '<td></td><td>12</td><td>No key reused</td><td>175</td>';
+  document.querySelector('#no-key-row').innerHTML = '<td></td><td>12</td><td>No key reused</td><td></td><td>175</td>';
 };
 </script>

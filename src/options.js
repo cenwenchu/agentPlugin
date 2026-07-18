@@ -8,6 +8,7 @@ const PROVIDERS = {
 
 let profiles = [];
 let activeId = "";
+let defaultId = "";
 let apiKeys = {};
 
 function $(id) {
@@ -73,11 +74,15 @@ function renderProfileSelect() {
   $("profile").replaceChildren(...profiles.map((profile) => {
     const option = document.createElement("option");
     option.value = profile.id;
-    option.textContent = profile.name;
+    option.textContent = `${profile.name}${profile.id === defaultId ? "（默认）" : ""}`;
     option.selected = profile.id === activeId;
     return option;
   }));
   $("deleteProfile").disabled = profiles.length <= 1;
+  const isDefault = activeId === defaultId;
+  $("setDefault").textContent = isDefault ? "当前默认" : "设为默认";
+  $("setDefault").classList.toggle("is-default", isDefault);
+  $("setDefault").disabled = isDefault;
 }
 
 async function load() {
@@ -88,12 +93,16 @@ async function load() {
   const settings = syncData.settings ?? {};
   if (Array.isArray(settings.models) && settings.models.length) {
     profiles = settings.models.map(normalizeProfile);
-    activeId = profiles.some((profile) => profile.id === settings.activeModelId) ? settings.activeModelId : profiles[0].id;
+    defaultId = profiles.some((profile) => profile.id === settings.defaultModelId)
+      ? settings.defaultModelId
+      : profiles.some((profile) => profile.id === settings.activeModelId) ? settings.activeModelId : profiles[0].id;
+    activeId = defaultId;
     apiKeys = { ...(localData.modelApiKeys ?? {}) };
   } else {
     const legacy = normalizeProfile({ ...settings, id: "default", name: settings.model || DEFAULT_MODEL_PROFILE.name });
     profiles = [legacy];
     activeId = legacy.id;
+    defaultId = legacy.id;
     apiKeys = { [legacy.id]: localData.apiKey || settings.apiKey || "" };
   }
   renderProfileSelect();
@@ -103,7 +112,7 @@ async function load() {
 async function save() {
   readForm();
   await Promise.all([
-    chrome.storage.sync.set({ settings: { models: profiles, activeModelId: activeId } }),
+    chrome.storage.sync.set({ settings: { models: profiles, activeModelId: defaultId, defaultModelId: defaultId } }),
     chrome.storage.local.set({ modelApiKeys: apiKeys })
   ]);
   renderProfileSelect();
@@ -113,7 +122,7 @@ async function testConnection() {
   await save();
   const response = await chrome.runtime.sendMessage({
     type: "AI_CHAT",
-    payload: { messages: [{ role: "user", content: "Reply with 'ok'." }] }
+    payload: { modelId: activeId, messages: [{ role: "user", content: "Reply with 'ok'." }] }
   });
   if (!response?.ok) throw new Error(response?.error || "Unknown error");
   return String(response.data?.content ?? "").trim();
@@ -125,6 +134,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     readForm();
     activeId = event.target.value;
     writeForm();
+    renderProfileSelect();
+  });
+  $("setDefault").addEventListener("click", () => {
+    readForm();
+    defaultId = activeId;
+    renderProfileSelect();
+    setStatus("已设为默认模型，请点击保存");
   });
   $("addProfile").addEventListener("click", () => {
     readForm();
@@ -138,8 +154,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (profiles.length <= 1) return;
     const index = profiles.findIndex((profile) => profile.id === activeId);
     delete apiKeys[activeId];
+    const deletedDefault = activeId === defaultId;
     profiles.splice(index, 1);
     activeId = profiles[Math.max(0, index - 1)].id;
+    if (deletedDefault) defaultId = activeId;
     renderProfileSelect();
     writeForm();
   });

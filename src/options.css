@@ -90,6 +90,9 @@ button.secondary {
   color: #111827;
 }
 
+button.default-button { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
+button.default-button.is-default { border-color: #bbf7d0; background: #dcfce7; color: #166534; cursor: default; }
+
 button.danger { border-color: #fecaca; background: #fff; color: #b91c1c; }
 
 .status {

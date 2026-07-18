@@ -11,20 +11,76 @@
 import { DEFAULT_MODEL_PROFILE, DEFAULT_SETTINGS } from "./shared.js";
 import { createSseDataParser } from "./sse.js";
 
+function summarizeAiMessages(messages = []) {
+  const summary = messages.map((message) => {
+    const parts = Array.isArray(message?.content) ? message.content : null;
+    const textLength = parts
+      ? parts.reduce((sum, part) => sum + (part?.type === "text" ? String(part.text || "").length : 0), 0)
+      : String(message?.content || "").length;
+    return {
+      role: message?.role || "unknown",
+      textLength,
+      imageCount: parts ? parts.filter((part) => part?.type === "image_url").length : 0
+    };
+  });
+  return {
+    messageCount: summary.length,
+    totalTextLength: summary.reduce((sum, item) => sum + item.textLength, 0),
+    totalImages: summary.reduce((sum, item) => sum + item.imageCount, 0),
+    messages: summary
+  };
+}
+
+function sanitizeAiMessages(messages = []) {
+  return messages.filter((message) => {
+    if (!message || !["system", "user", "assistant"].includes(message.role)) return false;
+    if (Array.isArray(message.content)) {
+      return message.content.some((part) => (
+        part?.type === "image_url" || (part?.type === "text" && String(part.text || "").trim())
+      ));
+    }
+    return Boolean(String(message.content || "").trim());
+  });
+}
+
+function normalizedPageKey(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return String(url || "");
+  }
+}
+
+async function openSkillsPanelWhenReady(tabId) {
+  // 导航完成不代表 content script 已完成动态 import；短时重试可覆盖两者时序。
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.status === "complete") {
+        const response = await sendToFrame(tabId, 0, { type: "OPEN_SKILLS_PANEL" });
+        if (response?.ok) return true;
+      }
+    } catch { void 0; }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return false;
+}
+
 // ========== 设置 ==========
 
 /**
  * 获取用户设置（合并默认值）。
  * @returns {Promise<Object>} 当前模型的扁平配置，同时包含全部脱敏模型元数据
  */
-async function getSettings() {
+async function getSettings(preferredModelId = "") {
   const [syncData, localData] = await Promise.all([
     chrome.storage.sync.get(["settings"]),
     chrome.storage.local.get(["apiKey", "modelApiKeys"])
   ]);
   const synced = syncData.settings ?? {};
   let models = Array.isArray(synced.models) && synced.models.length ? synced.models : null;
-  let activeModelId = synced.activeModelId;
+  let activeModelId = synced.activeModelId || synced.defaultModelId;
   let modelApiKeys = { ...(localData.modelApiKeys ?? {}) };
 
   // 将旧版单模型配置无损迁移为模型列表；密钥继续只保存在 local。
@@ -40,12 +96,13 @@ async function getSettings() {
       chrome.storage.local.set({ modelApiKeys })
     ]);
   }
-  const active = models.find((profile) => profile.id === activeModelId) || models[0];
+  const active = models.find((profile) => profile.id === preferredModelId) || models.find((profile) => profile.id === activeModelId) || models[0];
   activeModelId = active.id;
   return {
     ...DEFAULT_MODEL_PROFILE,
     ...active,
     activeModelId,
+    defaultModelId: synced.defaultModelId || activeModelId,
     models: models.map((profile) => ({ ...profile, hasApiKey: Boolean(modelApiKeys[profile.id]) })),
     apiKey: modelApiKeys[active.id] || ""
   };
@@ -82,8 +139,16 @@ function buildChatCompletionsUrl(baseUrl) {
  * @param {{messages: Array}} params
  * @returns {Promise<{raw: Object, content: string}>}
  */
-async function chatCompletions({ messages }) {
-  const settings = await getSettings();
+async function chatCompletions({ messages, modelId = "", debugLabel = "chat" }) {
+  messages = sanitizeAiMessages(messages);
+  const settings = await getSettings(modelId);
+  const startedAt = Date.now();
+  console.info("[web2ai.ai.request] non-stream start", JSON.stringify({
+    label: debugLabel,
+    modelId: settings.id,
+    model: settings.model,
+    ...summarizeAiMessages(messages)
+  }));
   if (!settings.apiKey) {
     throw new Error("Missing API Key. Please set it in the extension Options.");
   }
@@ -113,16 +178,23 @@ async function chatCompletions({ messages }) {
 
   const json = await res.json();
   const content = json?.choices?.[0]?.message?.content ?? "";
+  console.info("[web2ai.ai.request] non-stream end", JSON.stringify({
+    label: debugLabel,
+    modelId: settings.id,
+    elapsedMs: Date.now() - startedAt,
+    responseLength: content.length
+  }));
   return { raw: json, content };
 }
 
 /**
  * 发送流式 AI 对话请求（SSE）。
  * 逐行解析 data: 开头的 JSON 片段，提取 delta 内容。
- * @param {{messages: Array, signal: AbortSignal, onDelta: Function}} params
+ * @param {{messages: Array, signal: AbortSignal, onDelta: Function, onActivity?: Function}} params
  */
-async function streamChatCompletions({ messages, signal, onDelta }) {
-  const settings = await getSettings();
+async function streamChatCompletions({ messages, modelId = "", signal, onDelta, onActivity = () => void 0 }) {
+  messages = sanitizeAiMessages(messages);
+  const settings = await getSettings(modelId);
   if (!settings.apiKey) {
     throw new Error("Missing API Key. Please set it in the extension Options.");
   }
@@ -173,6 +245,7 @@ async function streamChatCompletions({ messages, signal, onDelta }) {
   while (!doneReceived) {
     const { value, done } = await reader.read();
     if (done) break;
+    onActivity();
     parser.feed(decoder.decode(value, { stream: true }));
   }
   parser.feed(decoder.decode());
@@ -240,6 +313,11 @@ chrome.runtime.onInstalled.addListener(async () => {
     title: "多屏截图（最多 5 屏）",
     contexts: ["all"]
   });
+  chrome.contextMenus.create({
+    id: "web2ai_create_skill",
+    title: "创建技能",
+    contexts: ["all"]
+  });
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -256,6 +334,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
     if (info.menuItemId === "web2ai_capture_multiple") {
       await sendToFrame(tab.id, 0, { type: "START_MULTI_SCREEN_SCREENSHOT" });
+      return;
+    }
+    if (info.menuItemId === "web2ai_create_skill") {
+      await sendToFrame(tab.id, 0, { type: "START_SKILL_CREATION" });
       return;
     }
 
@@ -279,24 +361,6 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-chrome.notifications.onClicked.addListener(async (notificationId) => {
-  if (!notificationId.startsWith("web2ai-monitor:")) return;
-  const data = await chrome.storage.local.get(["monitorNotificationTargets"]);
-  const target = data.monitorNotificationTargets?.[notificationId];
-  if (!target) return;
-  try {
-    const tab = await chrome.tabs.get(target.tabId);
-    await chrome.windows.update(tab.windowId, { focused: true });
-    await chrome.tabs.update(target.tabId, { active: true });
-    await sendToFrame(target.tabId, 0, { type: "OPEN_MONITOR_PANEL", ruleId: target.ruleId });
-    if (target.frameId !== 0) await sendToFrame(target.tabId, target.frameId, { type: "LOCATE_MONITOR", ruleId: target.ruleId });
-    else await sendToFrame(target.tabId, 0, { type: "LOCATE_MONITOR", ruleId: target.ruleId });
-  } catch {
-    void 0;
-  }
-  chrome.notifications.clear(notificationId).catch(() => void 0);
-});
-
 // ========== 消息路由 ==========
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -309,7 +373,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     // 获取设置
     if (message?.type === "GET_SETTINGS") {
-      const settings = await getSettings();
+      const settings = await getSettings(message.modelId || "");
       const { apiKey, ...safeSettings } = settings;
       sendResponse({ ok: true, data: { ...safeSettings, hasApiKey: Boolean(apiKey) } });
       return;
@@ -320,38 +384,128 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const settings = data.settings ?? DEFAULT_SETTINGS;
       const models = Array.isArray(settings.models) ? settings.models : [];
       if (!models.some((profile) => profile.id === modelId)) throw new Error("模型配置不存在");
-      await chrome.storage.sync.set({ settings: { ...settings, activeModelId: modelId } });
       sendResponse({ ok: true });
       return;
     }
-    if (message?.type === "MONITOR_TRIGGER") {
-      if (!sender?.tab?.id) throw new Error("无法确定监控标签页");
-      const notificationId = `web2ai-monitor:${message.rule?.id || Date.now()}:${Date.now()}`;
-      const data = await chrome.storage.local.get(["monitorNotificationTargets"]);
-      const targets = { ...(data.monitorNotificationTargets || {}) };
-      targets[notificationId] = { tabId: sender.tab.id, frameId: sender.frameId || 0, ruleId: message.rule?.id, createdAt: Date.now() };
-      for (const [id, target] of Object.entries(targets)) {
-        if (Date.now() - target.createdAt > 7 * 86400000) delete targets[id];
-      }
-      await chrome.storage.local.set({ monitorNotificationTargets: targets });
-      await chrome.notifications.create(notificationId, {
-        type: "basic",
-        iconUrl: chrome.runtime.getURL("src/monitor-icon.svg"),
-        title: `页面监控：${message.rule?.name || "条件已满足"}`,
-        message: String(message.message || "监控条件已满足").slice(0, 220),
-        priority: 1
-      });
-      sendResponse({ ok: true });
-      return;
-    }
-    if (message?.type === "MONITOR_PICK_RESULT") {
-      if (!sender?.tab?.id) throw new Error("无法确定选择元素的标签页");
+    if (message?.type === "SKILL_TABLE_PICK_RESULT") {
+      if (!sender?.tab?.id) throw new Error("无法确定选择数据源的标签页");
       await sendToFrame(sender.tab.id, 0, {
-        type: "MONITOR_PICK_RESULT",
-        payload: { ...message.payload, frameId: sender.frameId || 0, frameUrl: sender.url || "" }
+        type: "SKILL_TABLE_PICK_RESULT",
+        payload: { ...message.payload, frameId: sender.frameId || 0, frameUrl: normalizedPageKey(sender.url || "") }
       });
-      await broadcastToTab(sender.tab.id, { type: "CANCEL_MONITOR_PICK", sessionId: message.payload?.sessionId });
+      await broadcastToTab(sender.tab.id, { type: "CANCEL_SKILL_TABLE_PICK", sessionId: message.payload?.sessionId });
       sendResponse({ ok: true });
+      return;
+    }
+    if (message?.type === "VALIDATE_SKILL_SOURCE") {
+      if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
+      const preferredFrameUrl = normalizedPageKey(message.source?.frameUrl || "");
+      let best = null;
+      let lastProbes = [];
+      let lastFoundSignature = "";
+      let stableFoundCount = 0;
+      // 页面刷新后，top frame 的技能配置通常早于业务子 frame 和异步表格完成渲染。
+      // 在有限窗口内重新枚举 frame 并校验，避免把“尚未渲染”误报成永久失效。
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: sender.tab.id });
+        const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
+        const frameResults = await Promise.all(ordered.map(async (frame) => {
+          try {
+            const response = await sendToFrame(sender.tab.id, frame.frameId, { type: "CHECK_SKILL_SOURCE", source: message.source });
+            return response?.ok
+              ? { ...(response.data || {}), frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url) }
+              : { found: false, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url), error: response?.error || "check failed" };
+          } catch (error) { return { found: false, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url), error: String(error?.message ?? error) }; }
+        }));
+        lastProbes = frameResults.map((result) => ({
+          frameId: result.frameId,
+          frameUrl: result.frameUrl,
+          found: Boolean(result.found),
+          candidateCount: result.candidateCount || 0,
+          error: result.error || ""
+        }));
+        const results = frameResults.filter((result) => result.found);
+        const candidate = results.sort((a, b) => {
+          const similarityDiff = (b.similarity || 0) - (a.similarity || 0);
+          if (similarityDiff) return similarityDiff;
+          return Number(normalizedPageKey(b.frameUrl) === preferredFrameUrl) - Number(normalizedPageKey(a.frameUrl) === preferredFrameUrl);
+        })[0];
+        if (candidate && (!best || (candidate.similarity || 0) > (best.similarity || 0))) best = candidate;
+        if (best?.status === "available") break;
+        if (candidate?.found) {
+          const signature = JSON.stringify(candidate.headers || []);
+          stableFoundCount = signature === lastFoundSignature ? stableFoundCount + 1 : 1;
+          lastFoundSignature = signature;
+          // 异步表格可能先出现部分列；连续三次相同后才接受“已变化”，
+          // 避免等待满 30 秒并重复打印同一诊断。
+          if (stableFoundCount >= 3) break;
+        } else {
+          stableFoundCount = 0;
+          lastFoundSignature = "";
+        }
+        if (attempt < 39) await new Promise((resolve) => setTimeout(resolve, 750));
+      }
+      sendResponse({ ok: true, data: best || { status: "missing", found: false, probes: lastProbes } });
+      return;
+    }
+    if (message?.type === "LOAD_SKILL_SOURCE_DATA") {
+      if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
+      const preferredFrameUrl = normalizedPageKey(message.source?.frameUrl || "");
+      const frames = await chrome.webNavigation.getAllFrames({ tabId: sender.tab.id });
+      const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
+      const results = [];
+      for (const frame of ordered) {
+        try {
+          const response = await sendToFrame(sender.tab.id, frame.frameId, {
+            type: "EXTRACT_SKILL_SOURCE_DATA",
+            source: message.source,
+            limit: 200
+          });
+          if (response?.ok && response.data?.found) {
+            results.push({ ...response.data, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url) });
+          }
+        } catch { /* frame 尚未注入时继续尝试其他 frame */ }
+      }
+      const best = results.sort((a, b) => {
+        const preferred = Number(b.frameUrl === preferredFrameUrl) - Number(a.frameUrl === preferredFrameUrl);
+        return preferred || (b.rowCount || 0) - (a.rowCount || 0);
+      })[0];
+      sendResponse(best
+        ? { ok: true, data: best }
+        : { ok: false, error: "未能读取数据源，请确认数据源所在页面已打开且内容已加载" });
+      return;
+    }
+    if (message?.type === "SWITCH_TO_SKILL_PAGE") {
+      const targetPageKey = String(message.pageKey || normalizedPageKey(message.pageUrl));
+      const tabs = await chrome.tabs.query({});
+      const target = tabs.find((tab) => tab.id && tab.url && normalizedPageKey(tab.url) === targetPageKey);
+      if (!target?.id) {
+        if (message.allowNavigateCurrentTab && sender?.tab?.id && message.pageUrl) {
+          let targetUrl;
+          try {
+            targetUrl = new URL(message.pageUrl);
+            if (!/^https?:$/.test(targetUrl.protocol) || normalizedPageKey(targetUrl.href) !== targetPageKey) throw new Error("Invalid skill page URL");
+          } catch {
+            sendResponse({ ok: false, error: "技能页面地址无效" });
+            return;
+          }
+          await chrome.tabs.update(sender.tab.id, { active: true, url: targetUrl.href });
+          if (Number.isInteger(sender.tab.windowId)) await chrome.windows.update(sender.tab.windowId, { focused: true });
+          await openSkillsPanelWhenReady(sender.tab.id);
+          sendResponse({ ok: true, data: { tabId: sender.tab.id, navigated: true } });
+          return;
+        }
+        sendResponse({ ok: false, code: "PAGE_NOT_OPEN", error: "目标页面尚未打开" });
+        return;
+      }
+      if (Number.isInteger(target.windowId)) await chrome.windows.update(target.windowId, { focused: true });
+      await chrome.tabs.update(target.id, { active: true });
+      const opened = await openSkillsPanelWhenReady(target.id);
+      if (!opened) {
+        sendResponse({ ok: false, error: "已切换页面，但暂时无法打开技能面板，请刷新页面后重试" });
+        return;
+      }
+      sendResponse({ ok: true, data: { tabId: target.id } });
       return;
     }
     // 捕获发起请求的标签页当前可见区域。图片只返回给内容脚本并保存在页面内存。
@@ -430,6 +584,11 @@ chrome.runtime.onConnect.addListener((port) => {
   const portStreams = new Set();
 
   port.onMessage.addListener((message) => {
+    if (message?.type === "AI_CHAT_STREAM_HEARTBEAT") {
+      // 双向消息活动可阻止首 token 前的 MV3 Service Worker 30 秒空闲回收。
+      try { port.postMessage({ type: "AI_CHAT_STREAM_HEARTBEAT_ACK", requestId: message.requestId }); } catch { void 0; }
+      return;
+    }
     (async () => {
       if (message?.type !== "AI_CHAT_STREAM") return;
       const requestId = message.requestId;
@@ -438,21 +597,63 @@ chrome.runtime.onConnect.addListener((port) => {
       const abort = new AbortController();
       ACTIVE_STREAMS.set(requestId, abort);
       portStreams.add(requestId);
+      let timedOut = false;
+      let watchdog = null;
+      const resetWatchdog = () => {
+        if (watchdog) clearTimeout(watchdog);
+        watchdog = setTimeout(() => {
+          timedOut = true;
+          abort.abort();
+        }, 90000);
+      };
+      resetWatchdog();
+      const debugLabel = String(message.payload?.debugLabel || "chat");
+      const startedAt = Date.now();
+      let firstChunkAt = 0;
+      console.info("[web2ai.ai.request] stream start", JSON.stringify({
+        requestId,
+        label: debugLabel,
+        modelId: message.payload?.modelId || "",
+        ...summarizeAiMessages(message.payload?.messages || [])
+      }));
 
       try {
         await streamChatCompletions({
           messages: message.payload?.messages ?? [],
+          modelId: message.payload?.modelId || "",
           signal: abort.signal,
-          onDelta: (delta) => port.postMessage({ type: "AI_CHAT_STREAM_CHUNK", requestId, delta })
+          onActivity: resetWatchdog,
+          onDelta: (delta) => {
+            if (!firstChunkAt) firstChunkAt = Date.now();
+            port.postMessage({ type: "AI_CHAT_STREAM_CHUNK", requestId, delta });
+          }
         });
+        console.info("[web2ai.ai.request] stream end", JSON.stringify({
+          requestId,
+          label: debugLabel,
+          elapsedMs: Date.now() - startedAt,
+          firstChunkMs: firstChunkAt ? firstChunkAt - startedAt : null
+        }));
         port.postMessage({ type: "AI_CHAT_STREAM_END", requestId });
       } catch (e) {
+        console.warn("[web2ai.ai.request] stream error", JSON.stringify({
+          requestId,
+          label: debugLabel,
+          elapsedMs: Date.now() - startedAt,
+          firstChunkMs: firstChunkAt ? firstChunkAt - startedAt : null,
+          timedOut,
+          error: String(e?.message ?? e)
+        }));
         port.postMessage({
           type: "AI_CHAT_STREAM_ERROR",
           requestId,
-          error: String(e?.message ?? e)
+          code: timedOut ? "STREAM_TIMEOUT" : "AI_STREAM_ERROR",
+          error: timedOut
+            ? "模型超过 90 秒没有返回任何新数据，请重试或切换模型"
+            : String(e?.message ?? e)
         });
       } finally {
+        if (watchdog) clearTimeout(watchdog);
         ACTIVE_STREAMS.delete(requestId);
         portStreams.delete(requestId);
       }
