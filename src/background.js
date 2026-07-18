@@ -67,6 +67,23 @@ async function openSkillsPanelWhenReady(tabId) {
   return false;
 }
 
+async function focusSkillSourceWhenReady(tabId, source) {
+  if (!source) return false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
+    const results = await Promise.all(frames.map(async (frame) => {
+      try {
+        return await sendToFrame(tabId, frame.frameId, { type: "FOCUS_SKILL_SOURCE", source });
+      } catch {
+        return null;
+      }
+    }));
+    if (results.some((result) => result?.ok && result.data?.found)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return false;
+}
+
 // ========== 设置 ==========
 
 /**
@@ -397,6 +414,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true });
       return;
     }
+    if (message?.type === "EXECUTE_SKILL_FROM_PAGE") {
+      if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
+      const response = await sendToFrame(sender.tab.id, 0, { type: "EXECUTE_SKILL", skillId: message.skillId });
+      sendResponse(response || { ok: true });
+      return;
+    }
     if (message?.type === "VALIDATE_SKILL_SOURCE") {
       if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
       const preferredFrameUrl = normalizedPageKey(message.source?.frameUrl || "");
@@ -492,6 +515,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await chrome.tabs.update(sender.tab.id, { active: true, url: targetUrl.href });
           if (Number.isInteger(sender.tab.windowId)) await chrome.windows.update(sender.tab.windowId, { focused: true });
           await openSkillsPanelWhenReady(sender.tab.id);
+          await focusSkillSourceWhenReady(sender.tab.id, message.source);
           sendResponse({ ok: true, data: { tabId: sender.tab.id, navigated: true } });
           return;
         }
@@ -505,6 +529,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: "已切换页面，但暂时无法打开技能面板，请刷新页面后重试" });
         return;
       }
+      await focusSkillSourceWhenReady(target.id, message.source);
       sendResponse({ ok: true, data: { tabId: target.id } });
       return;
     }

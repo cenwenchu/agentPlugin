@@ -21,6 +21,10 @@ let activePickSession = "";
 let cancelActivePick = null;
 let observedPageKey = "";
 let pageWatchTimer = null;
+let skillBarTimer = null;
+let skillBarBroadcastTimer = null;
+let lastSkillBarDiagnostic = "";
+let lastSkillBarDiagnosticAt = 0;
 
 function emptyAnalysisMethod() {
   return { description: "" };
@@ -284,6 +288,160 @@ function extractStoredSourceData(source, limit = 200) {
   };
 }
 
+function findStoredSourceTable(source) {
+  const candidates = tableCandidates();
+  let selectorTable = null;
+  try { selectorTable = source?.selector ? document.querySelector(source.selector) : null; } catch { selectorTable = null; }
+  if (selectorTable) {
+    const resolved = resolveTableFromTarget(selectorTable);
+    selectorTable = resolved && candidates.includes(resolved) ? resolved : null;
+  }
+  const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
+  if (!source?.headers?.length) return selectorTable || indexedTable;
+  return candidates.map((table) => ({
+    table,
+    score: headerSimilarity(source.headers, extractHeaders(table)),
+    priority: table === selectorTable ? 2 : table === indexedTable ? 1 : 0
+  })).sort((a, b) => (b.score - a.score) || (b.priority - a.priority))[0]?.table || null;
+}
+
+function focusStoredSource(source) {
+  const table = findStoredSourceTable(source);
+  if (!table) return { found: false, candidateCount: tableCandidates().length };
+  const similarity = source?.headers?.length
+    ? headerSimilarity(source.headers, extractHeaders(table))
+    : 1;
+  if (source?.headers?.length && similarity < 0.8) {
+    return { found: false, candidateCount: tableCandidates().length, similarity };
+  }
+  const bar = table.previousElementSibling?.matches?.("[data-web2ai-skill-bar]")
+    ? table.previousElementSibling
+    : null;
+  const target = bar || table;
+  target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  const oldOutline = target.style.outline;
+  const oldOutlineOffset = target.style.outlineOffset;
+  target.style.outline = "3px solid #3b82f6";
+  target.style.outlineOffset = "3px";
+  setTimeout(() => {
+    target.style.outline = oldOutline;
+    target.style.outlineOffset = oldOutlineOffset;
+  }, 1800);
+  return { found: true, similarity };
+}
+
+function renderSkillBars(skills = []) {
+  document.querySelectorAll("[data-web2ai-skill-bar]").forEach((node) => node.remove());
+  const grouped = new Map();
+  const probes = [];
+  for (const skill of skills) {
+    const expectedFrameUrl = pageKey(skill.source?.frameUrl || "");
+    const table = findStoredSourceTable(skill.source);
+    const similarity = table ? headerSimilarity(skill.source?.headers || [], extractHeaders(table)) : 0;
+    const frameMatches = !expectedFrameUrl || expectedFrameUrl === pageKey(location.href);
+    probes.push({
+      skillId: skill.id,
+      skillName: skill.name,
+      expectedFrameUrl,
+      frameMatches,
+      foundTable: Boolean(table),
+      similarity: Number(similarity.toFixed(3))
+    });
+    // frame 地址可能因站点路由、入口页或 iframe 重建而变化。横条与数据源
+    // 可用性校验采用相同的 0.8 表头覆盖率，避免技能显示可用却不展示横条。
+    if (!table || (!frameMatches && similarity < 0.8)) continue;
+    const list = grouped.get(table) || [];
+    list.push(skill);
+    grouped.set(table, list);
+  }
+  for (const [table, tableSkills] of grouped) {
+    const bar = document.createElement("div");
+    bar.dataset.web2aiSkillBar = "1";
+    bar.dataset.web2aiUi = "1";
+    Object.assign(bar.style, {
+      display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap",
+      boxSizing: "border-box", width: "100%", margin: "0 0 8px", padding: "8px 10px",
+      border: "1px solid #bfdbfe", borderRadius: "9px", background: "#eff6ff",
+      color: "#1e3a8a", fontFamily: "system-ui,-apple-system,sans-serif", fontSize: "12px"
+    });
+    const label = document.createElement("span");
+    label.textContent = "技能列表：";
+    Object.assign(label.style, { fontWeight: "700", marginRight: "2px", whiteSpace: "nowrap" });
+    bar.appendChild(label);
+    for (const skill of tableSkills) {
+      const item = document.createElement("span");
+      Object.assign(item.style, {
+        display: "inline-flex", alignItems: "center", gap: "6px", maxWidth: "100%",
+        padding: "4px 5px 4px 8px", border: "1px solid #dbeafe", borderRadius: "8px", background: "#fff"
+      });
+      const name = document.createElement("span");
+      name.textContent = skill.name;
+      name.title = skill.name;
+      Object.assign(name.style, { maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+      const button = document.createElement("button");
+      const canExecute = Boolean(buildAnalysisPrompt(skill.analysisMethod));
+      button.textContent = "执行";
+      button.disabled = !canExecute;
+      button.title = canExecute ? `执行技能：${skill.name}` : "请先配置分析方法";
+      Object.assign(button.style, {
+        height: "24px", padding: "0 8px", border: "0", borderRadius: "7px",
+        background: canExecute ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: canExecute ? "pointer" : "not-allowed", fontSize: "11px"
+      });
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        chrome.runtime.sendMessage({ type: "EXECUTE_SKILL_FROM_PAGE", skillId: skill.id }).catch(() => void 0);
+      });
+      item.append(name, button);
+      bar.appendChild(item);
+    }
+    table.parentNode?.insertBefore(bar, table);
+  }
+  const diagnostic = JSON.stringify({
+    frame: IS_TOP_FRAME ? "top" : "child",
+    frameUrl: pageKey(location.href),
+    skillCount: skills.length,
+    matchedSourceCount: grouped.size,
+    barCount: document.querySelectorAll("[data-web2ai-skill-bar]").length,
+    tableCandidateCount: tableCandidates().length,
+    probes
+  });
+  const now = Date.now();
+  const hasUnmatchedSkills = skills.length > 0 && grouped.size === 0;
+  if (diagnostic !== lastSkillBarDiagnostic || (hasUnmatchedSkills && now - lastSkillBarDiagnosticAt >= 10000)) {
+    lastSkillBarDiagnostic = diagnostic;
+    lastSkillBarDiagnosticAt = now;
+    if (hasUnmatchedSkills) {
+      console.warn("[web2ai.skill-bar] sync", diagnostic);
+    } else {
+      console.info("[web2ai.skill-bar] sync", diagnostic);
+    }
+  }
+}
+
+function scheduleSkillBars(skills = []) {
+  if (skillBarTimer) clearInterval(skillBarTimer);
+  if (skillBarBroadcastTimer) clearInterval(skillBarBroadcastTimer);
+  skillBarTimer = null;
+  skillBarBroadcastTimer = null;
+  renderSkillBars(skills);
+  if (skills.length) {
+    // 业务表可能在页面加载十几秒后才出现，也可能被 SPA/虚拟列表整体替换。
+    // 低频重建只在当前页面存在技能时运行，确保横条最终出现并持续存在。
+    skillBarTimer = setInterval(() => renderSkillBars(skills), 3000);
+    if (IS_TOP_FRAME) {
+      // 子 frame 的 main.js 通过动态 import 初始化，首次广播可能早于监听器注册。
+      // 顶层低频重发，使延迟加载、重新导航或后创建的 iframe 最终都能收到技能列表。
+      skillBarBroadcastTimer = setInterval(() => {
+        chrome.runtime.sendMessage({
+          type: "BROADCAST_TO_TAB",
+          payload: { message: { type: "SYNC_SKILL_BARS", skills } }
+        }).catch(() => void 0);
+      }, 3000);
+    }
+  }
+}
+
 async function readSkills() {
   const data = await chrome.storage.local.get([STORAGE_KEY]);
   return Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
@@ -306,6 +464,11 @@ async function loadSkills() {
   STATE.skills = all.filter((skill) => skill.pageKey === pageKey());
   STATE.skillSourceStatuses = Object.fromEntries(STATE.skills.map((skill) => [skill.id, { status: "checking" }]));
   renderCallback();
+  scheduleSkillBars(STATE.skills);
+  chrome.runtime.sendMessage({
+    type: "BROADCAST_TO_TAB",
+    payload: { message: { type: "SYNC_SKILL_BARS", skills: STATE.skills } }
+  }).catch(() => void 0);
   await Promise.all(STATE.skills.map((skill) => validateSkillSource(skill)));
 }
 
@@ -484,11 +647,12 @@ async function deleteAllSkills() {
   showToast("全部技能已删除");
 }
 
-async function switchToSkillPage(targetPageKey, targetUrl) {
+async function switchToSkillPage(targetPageKey, targetUrl, source = null) {
   let response = await chrome.runtime.sendMessage({
     type: "SWITCH_TO_SKILL_PAGE",
     pageKey: targetPageKey,
-    pageUrl: targetUrl
+    pageUrl: targetUrl,
+    source
   }).catch((error) => ({ ok: false, error: String(error?.message ?? error) }));
   if (!response?.ok && response?.code === "PAGE_NOT_OPEN") {
     const accepted = await showConfirmDialog("该技能页面当前没有保持打开，是否在当前标签页打开？");
@@ -497,6 +661,7 @@ async function switchToSkillPage(targetPageKey, targetUrl) {
       type: "SWITCH_TO_SKILL_PAGE",
       pageKey: targetPageKey,
       pageUrl: targetUrl,
+      source,
       allowNavigateCurrentTab: true
     }).catch((error) => ({ ok: false, error: String(error?.message ?? error) }));
   }
@@ -566,5 +731,5 @@ export {
   startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult,
   saveSkillDraft, rebindSkill, deleteSkill, deleteAllSkills, resolveStoredSource, switchToSkillPage,
   renameCurrentSkillPage, buildAnalysisPrompt, getAnalysisGuidance,
-  extractStoredSourceData, saveSkillAnalysisMethod
+  extractStoredSourceData, focusStoredSource, saveSkillAnalysisMethod, scheduleSkillBars
 };

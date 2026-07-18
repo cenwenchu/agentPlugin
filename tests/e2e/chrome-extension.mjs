@@ -436,28 +436,26 @@ try {
   const restoredSkill = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || "");
   assert.match(restoredSkill, /订单分析/);
   assert.match(restoredSkill, /分析方法：识别异常订单并说明原因/);
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll(".skillCard button"))
-      .find((button) => button.textContent?.trim() === "测试技能")?.click();
-  });
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillTest"));
+  await page.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("订单分析"));
+  const skillBarText = await page.$eval("[data-web2ai-skill-bar]", (bar) => bar.textContent || "");
+  assert.match(skillBarText, /技能列表：.*订单分析.*执行/, "bound skills must appear above their data source");
+  await page.$eval("[data-web2ai-skill-bar] button", (button) => button.click());
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillExecution"));
+  const executionTitle = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionTitle")?.textContent || "");
+  assert.match(executionTitle, /订单分析/);
   const testIsFullscreen = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".wrap")?.classList.contains("max"));
   assert.equal(testIsFullscreen, true, "skill testing must use the full-screen interaction");
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll(".skillTest button"))
-      .find((button) => button.textContent?.trim() === "开始测试")?.click();
-  });
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillDataPreviewStatus")?.textContent?.includes("本次提交"));
-  const loadedSkillData = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTestPanel")?.textContent || "");
-  assert.match(loadedSkillData, /当前已渲染共 \d+ 行，本次提交 \d+ 行/);
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillDataPreviewStatus")?.textContent?.includes("本次使用"));
+  const loadedSkillData = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionPanel")?.textContent || "");
+  assert.match(loadedSkillData, /已读取 \d+ 行，本次使用 \d+ 行/);
   const previewedSkillRows = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillDataPreview tbody tr").length);
   assert.ok(previewedSkillRows > 0 && previewedSkillRows <= 5, "skill test must preview up to five loaded rows");
   const firstPreviewCells = await page.$eval("#web2ai_overlay_host", (host) =>
     Array.from(host.shadowRoot.querySelectorAll(".skillDataPreview tbody tr:first-child td")).map((cell) => cell.textContent || "")
   );
   assert.deepEqual(firstPreviewCells, ["1", "A", "", "100"], "empty business cells must remain in their original columns");
-  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillTest button")?.disabled, { timeout: 15000 });
-  await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTest button")?.click());
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillExecutionHead button")?.disabled, { timeout: 15000 });
+  await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionHead button")?.click());
 
   const innerPage = await browser.newPage();
   await innerPage.goto(`${url}inner-frame-host`);

@@ -14,10 +14,10 @@
 import { DEBUG, IS_TOP_FRAME, STATE, refs } from './state.js';
 import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableSelectionEnabled, clearAllTableSelectionState } from './table.js';
 import { initHighlightStyle } from './highlight.js';
-import { initOverlay, render, setOpen, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition } from './overlay.js';
+import { initOverlay, render, setOpen, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition, startSkillExecution } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, removeContextByRef } from './context.js';
-import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData } from './skills.js';
+import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, focusStoredSource, scheduleSkillBars } from './skills.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
 try {
@@ -273,6 +273,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "EXTRACT_SKILL_SOURCE_DATA") {
     sendResponse({ ok: true, data: extractStoredSourceData(message.source, message.limit || 200) });
+    return;
+  }
+  if (message?.type === "SYNC_SKILL_BARS") {
+    scheduleSkillBars(Array.isArray(message.skills) ? message.skills : []);
+    sendResponse({ ok: true });
+    return;
+  }
+  if (message?.type === "FOCUS_SKILL_SOURCE") {
+    sendResponse({ ok: true, data: focusStoredSource(message.source) });
+    return;
+  }
+  if (message?.type === "EXECUTE_SKILL") {
+    if (!IS_TOP_FRAME) {
+      sendResponse({ ok: false, error: "Skill execution must run in the top frame" });
+      return;
+    }
+    const skill = STATE.skills.find((item) => item.id === message.skillId);
+    if (!skill) {
+      sendResponse({ ok: false, error: "技能不存在或不属于当前页面" });
+      return;
+    }
+    STATE.open = true;
+    startSkillExecution(skill);
+    sendResponse({ ok: true });
     return;
   }
 });

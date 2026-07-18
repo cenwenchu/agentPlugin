@@ -125,15 +125,18 @@ const OVERLAY_CSS = `
     .skillSummary { padding: 10px 11px; border-bottom: 1px solid rgba(0,0,0,.07); background: #f8fafc; color: #334155; font-size: 11px; }
     .skillSummaryTitle { display: flex; align-items: center; gap: 8px; font-weight: 650; color: #1e293b; }
     .skillSummaryTitleText { flex: 1; }
+    .skillCreateSummary { height: 25px; border: 1px solid #2563eb; border-radius: 7px; padding: 0 8px; background: #2563eb; color: #fff; font-size: 10px; font-weight: 650; cursor: pointer; }
     .skillDeleteAll { border: 0; padding: 2px 4px; background: transparent; color: #b91c1c; font-size: 10px; cursor: pointer; }
     .skillPagesLabel { margin-top: 8px; color: #64748b; font-size: 10px; }
-    .skillCurrentLabel { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-bottom: 1px solid rgba(0,0,0,.07); background: #fff; color: #475569; font-size: 10px; font-weight: 600; }
+    .skillCurrentLabel { display: flex; align-items: center; gap: 7px; padding: 11px; border-bottom: 1px solid rgba(0,0,0,.07); background: #fff; color: #334155; font-size: 13px; font-weight: 700; line-height: 1.5; }
     .skillCurrentLabelText { flex: 1; min-width: 0; overflow-wrap: anywhere; }
     .skillRename { border: 0; padding: 0 3px; background: transparent; color: #2563eb; font-size: 10px; cursor: pointer; vertical-align: baseline; }
     .skillList .skillCard { margin: 0; border: 0; border-radius: 0; }
     .skillList .skillCard + .skillCard { border-top: 1px solid rgba(0,0,0,.07); }
     .skillPages { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
     .skillPageLink { max-width: 100%; height: 27px; border: 1px solid #bfdbfe; border-radius: 8px; padding: 0 8px; background: #eff6ff; color: #1d4ed8; font-size: 10px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .skillPageName { color: #1d4ed8; }
+    .skillPageCount { margin: 0 2px; color: #dc2626; font-weight: 750; }
     .skillMethodTitle { margin-top: 13px; padding-top: 11px; border-top: 1px solid rgba(0,0,0,.07); color: #1e3a8a; font-size: 12px; font-weight: 650; }
     .skillSourceBlock { margin-top: 12px; padding: 10px; border: 1px solid rgba(59,130,246,.2); border-radius: 10px; background: #f8fbff; }
     .skillBlockTitle { margin-bottom: 8px; color: #1e3a8a; font-size: 12px; font-weight: 650; }
@@ -170,6 +173,13 @@ const OVERLAY_CSS = `
     .skillTestResult { color: #111827; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
     .skillTestResult.waiting { color: #64748b; }
     .skillTestError { color: #b91c1c; }
+    .skillExecution { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #f8fafc; }
+    .skillExecutionHead { display: flex; align-items: center; gap: 9px; padding: 12px 16px; border-bottom: 1px solid rgba(0,0,0,.08); background: #fff; }
+    .skillExecutionTitle { flex: 1; min-width: 0; color: #111827; font-size: 14px; font-weight: 700; }
+    .skillExecutionStatus { padding: 7px 16px; border-bottom: 1px solid rgba(0,0,0,.07); background: #eff6ff; color: #1d4ed8; font-size: 11px; }
+    .skillExecutionContent { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 36%) minmax(0, 1fr); gap: 12px; padding: 12px; overflow: hidden; }
+    .skillExecutionPanel { min-height: 0; padding: 13px; border: 1px solid rgba(0,0,0,.08); border-radius: 12px; background: #fff; overflow: auto; }
+    .skillExecutionMethod { padding: 10px; border: 1px solid #e2e8f0; border-radius: 9px; background: #f8fafc; color: #334155; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
     .skillResultSection { height: auto; min-height: 0; margin: 0 0 12px; padding: 12px; border: 1px solid #dbe3ee; border-radius: 11px; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
     .skillResultSection.conclusion { border-left: 4px solid #2563eb; background: #f8fbff; }
     .skillResultSection.advice { border-left: 4px solid #7c3aed; background: #faf8ff; }
@@ -183,11 +193,16 @@ const OVERLAY_CSS = `
     .skillSuggestionItemTitle { flex: 1; color: #1e293b; font-weight: 650; }
     .skillSuggestionApply { height: 25px; border: 1px solid #93c5fd; border-radius: 8px; padding: 0 8px; background: #eff6ff; color: #1d4ed8; font-size: 10px; cursor: pointer; }
     .skillSuggestionApply:disabled { border-color: #bbf7d0; background: #dcfce7; color: #166534; cursor: default; }
-    .skillResultActions { display: flex; gap: 7px; flex-wrap: wrap; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid #e5e7eb; }
+    .skillResultActions { display: flex; gap: 7px; flex-wrap: wrap; margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid #e5e7eb; }
+    .skillFollowup { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
+    .skillFollowupInput { width: 100%; min-height: 72px; box-sizing: border-box; resize: vertical; border: 1px solid #cbd5e1; border-radius: 9px; padding: 9px 10px; color: #111827; font: inherit; font-size: 12px; line-height: 1.5; }
+    .skillFollowupTurn { margin-top: 10px; }
+    .skillFollowupQuestion { margin: 0 0 6px 15%; padding: 8px 10px; border-radius: 10px; background: #dbeafe; color: #1e3a8a; font-size: 11px; line-height: 1.5; }
+    .skillFollowupAnswer { padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; color: #111827; font-size: 12px; line-height: 1.55; }
     .backdrop { position: fixed; inset: 0; background: transparent; pointer-events: none; }
   `;
 
-function startSkillTest(skill) {
+function startSkillTest(skill, { mode = "test", autoRun = false } = {}) {
   const method = buildAnalysisPrompt(skill.analysisMethod);
   if (!method) return showToast("请先配置分析方法");
   STATE.skillTest = {
@@ -195,6 +210,7 @@ function startSkillTest(skill) {
     skillName: skill.name,
     sourceName: skill.sourceName,
     source: skill.source,
+    mode,
     method,
     savedMethod: method,
     data: null,
@@ -202,9 +218,18 @@ function startSkillTest(skill) {
     response: "",
     error: "",
     pending: false,
-    attempts: 0
+    attempts: 0,
+    conversationMessages: [],
+    followups: [],
+    followupDraft: ""
   };
   render();
+  if (autoRun) setTimeout(() => runSkillTest(), 0);
+}
+
+function startSkillExecution(skill) {
+  STATE.open = true;
+  startSkillTest(skill, { mode: "execute", autoRun: true });
 }
 
 function skillDataText(data) {
@@ -276,7 +301,7 @@ function downloadSkillResult(test) {
   const content = [
     `# ${test.skillName}`,
     `\n- 数据源：${test.sourceName}`,
-    `- 测试时间：${new Date().toLocaleString()}`,
+    `- ${test.mode === "execute" ? "执行" : "测试"}时间：${new Date().toLocaleString()}`,
     `- 当前已渲染数据：${test.data?.totalRowCount ?? test.data?.rowCount ?? 0} 行`,
     `\n## 分析方法\n\n${normalizeText(test.method)}`,
     `\n## 模型反馈\n\n${normalizeText(test.response)}`
@@ -305,20 +330,30 @@ async function runSkillTest() {
     test.data = loaded.data;
     test.status = "submitting";
     render();
+    const outputInstructions = test.mode === "execute"
+      ? [
+          "你正在执行一个已经配置完成的数据分析技能。",
+          "只输出结论，不要提供分析方法建议、分析过程或其他附加内容。",
+          "## 结论",
+          "直接给出最重要的业务结论，突出异常、风险和明确的行动点；没有足够证据时要明确说明。"
+        ]
+      : [
+          "你正在测试一个可复用的数据分析技能。",
+          "请严格按照下面的顺序和标题输出，不要改变顺序：",
+          "## 结论",
+          "先给出最重要的分析结论，突出异常、风险或值得行动的发现；没有足够证据时要明确说明。",
+          "## 分析方法建议",
+          "只给简明、可直接修改到分析方法中的建议。优先检查：①输入条件是否需要修正或细化；②输出格式是否明确。必要时再提示数据范围、字段口径、空值或异常值处理。",
+          "每条建议必须严格使用以下格式，便于用户一键采用：",
+          "### 建议 N：简短标题",
+          "- 需要补充的内容：一句话说明缺少什么",
+          "- 简单范例：可直接追加到分析方法中的一句完整指令",
+          "如果某部分已经明确，不要为了凑数量提出建议。",
+          "## 分析过程",
+          "最后说明使用了哪些字段、判断步骤和主要依据，避免重复结论。"
+        ];
     const prompt = [
-      "你正在测试一个可复用的数据分析技能。",
-      "请严格按照下面的顺序和标题输出，不要改变顺序：",
-      "## 结论",
-      "先给出最重要的分析结论，突出异常、风险或值得行动的发现；没有足够证据时要明确说明。",
-      "## 分析方法建议",
-      "只给简明、可直接修改到分析方法中的建议。优先检查：①输入条件是否需要修正或细化；②输出格式是否明确。必要时再提示数据范围、字段口径、空值或异常值处理。",
-      "每条建议必须严格使用以下格式，便于用户一键采用：",
-      "### 建议 N：简短标题",
-      "- 需要补充的内容：一句话说明缺少什么",
-      "- 简单范例：可直接追加到分析方法中的一句完整指令",
-      "如果某部分已经明确，不要为了凑数量提出建议。",
-      "## 分析过程",
-      "最后说明使用了哪些字段、判断步骤和主要依据，避免重复结论。",
+      ...outputInstructions,
       `\n# 分析方法\n${normalizeText(test.method)}`,
       `\n# 本次数据源\n${skillDataText(test.data)}`
     ].join("\n");
@@ -332,16 +367,19 @@ async function runSkillTest() {
       promptLength: prompt.length
     }));
     test.status = "analyzing";
+    test.conversationMessages = [{ role: "user", content: prompt }];
+    test.followups = [];
     render();
     await streamChat({
       messages: [{ role: "user", content: prompt }],
-      debugLabel: "skill-test",
+      debugLabel: test.mode === "execute" ? "skill-execution" : "skill-test",
       onChunk: (delta) => {
         test.response += delta;
         scheduleRender();
       }
     });
     test.response = normalizeText(test.response) || "模型未返回内容";
+    test.conversationMessages.push({ role: "assistant", content: test.response });
     test.status = "complete";
     test.attempts += 1;
   } catch (error) {
@@ -362,6 +400,42 @@ async function runSkillTest() {
       test.status = "error";
     }
   } finally {
+    test.pending = false;
+    render();
+  }
+}
+
+async function continueSkillConversation() {
+  const test = STATE.skillTest;
+  const question = normalizeText(test?.followupDraft);
+  if (!test || test.pending || test.status !== "complete") return;
+  if (!question) return showToast("请填写需要继续问的问题");
+  const turn = { question, response: "", pending: true };
+  test.followups.push(turn);
+  test.followupDraft = "";
+  test.pending = true;
+  render();
+  const requestMessages = [...test.conversationMessages, { role: "user", content: question }];
+  try {
+    await streamChat({
+      messages: requestMessages,
+      debugLabel: "skill-followup",
+      onChunk: (delta) => {
+        turn.response += delta;
+        scheduleRender();
+      }
+    });
+    turn.response = normalizeText(turn.response) || "模型未返回内容";
+    test.conversationMessages.push(
+      { role: "user", content: question },
+      { role: "assistant", content: turn.response }
+    );
+  } catch (error) {
+    turn.response = normalizeText(turn.response)
+      ? `${normalizeText(turn.response)}\n\n> 回答中断：${String(error?.message ?? error)}`
+      : `继续提问失败：${String(error?.message ?? error)}`;
+  } finally {
+    turn.pending = false;
     test.pending = false;
     render();
   }
@@ -1002,6 +1076,16 @@ function render() {
       el("button", { class: "btn", onClick: () => copySkillText(test.method, "分析方法已复制") }, ["复制分析方法"]),
       el("button", { class: "btn primary", onClick: () => saveSkillTestMethod({ exitAfterSave: true }) }, ["保存分析方法并退出"])
     ]) : null;
+    const followupTurns = (test.followups || []).map((turn) => {
+      const answer = el("div", { class: "skillFollowupAnswer" }, []);
+      answer.innerHTML = turn.response
+        ? renderMarkdown(turn.response)
+        : "正在等待模型继续回答…";
+      return el("div", { class: "skillFollowupTurn" }, [
+        el("div", { class: "skillFollowupQuestion" }, [turn.question]),
+        answer
+      ]);
+    });
     const previewRows = (test.data?.rows || []).slice(0, 5);
     const previewHeaders = test.data?.headers || [];
     const dataPreview = el("div", { class: "skillDataPreview" }, [
@@ -1032,7 +1116,7 @@ function render() {
     return el("div", { class: "skillTest" }, [
       el("div", { class: "skillTestHead" }, [
         el("button", { class: "btn", disabled: test.pending, onClick: () => { STATE.skillTest = null; render(); } }, ["← 返回技能"]),
-        el("div", { class: "skillTestTitle" }, [`测试技能：${test.skillName}`]),
+        el("div", { class: "skillTestTitle" }, [`${test.mode === "execute" ? "执行技能" : "测试技能"}：${test.skillName}`]),
         modelSelect,
         el("button", { class: "btn", disabled: test.pending, onClick: () => { STATE.skillTest = null; render(); } }, ["退出测试"])
       ]),
@@ -1058,7 +1142,7 @@ function render() {
           }, [test.method]),
           el("div", { class: "skillActions" }, [
             el("button", { class: "btn primary", disabled: test.pending, style: test.pending ? { display: "none" } : {}, onClick: () => runSkillTest() }, [
-              test.pending ? "测试中…" : test.attempts ? "再次测试" : "开始测试"
+              test.pending ? "执行中…" : test.attempts ? (test.mode === "execute" ? "重新执行" : "再次测试") : (test.mode === "execute" ? "执行技能" : "开始测试")
             ]),
             el("button", { class: "btn danger", style: test.pending ? {} : { display: "none" }, onClick: () => stopGeneration() }, ["停止测试"]),
             el("button", {
@@ -1066,15 +1150,136 @@ function render() {
               disabled: test.pending || !finished || normalizeText(test.method) === normalizeText(test.savedMethod),
               onClick: () => saveSkillTestMethod()
             }, ["满意并保存"])
-          ])
+          ]),
+          finished ? el("div", { class: "skillFollowup" }, [
+            el("div", { class: "skillBlockTitle" }, ["继续问"]),
+            el("textarea", {
+              class: "skillFollowupInput",
+              placeholder: "基于本次分析继续提问，例如：只看高风险记录，并给出优先处理顺序。",
+              disabled: test.pending,
+              onInput: (event) => { test.followupDraft = event.target.value; }
+            }, [test.followupDraft || ""]),
+            el("div", { class: "skillActions" }, [
+              el("button", { class: "btn primary", disabled: test.pending, onClick: () => continueSkillConversation() }, ["继续问"])
+            ])
+          ]) : null
         ]),
         el("div", { id: "web2ai_skill_test_result_panel", class: "skillTestPanel" }, [
           el("div", { class: "skillBlockTitle" }, [test.pending ? "模型正在分析" : "模型反馈"]),
+          resultActions,
           conclusionContent,
           suggestionList,
           rawAdviceContent,
           processContent,
-          resultActions
+          ...followupTurns
+        ])
+      ])
+    ]);
+  }
+
+  function renderSkillExecutionPanel() {
+    const execution = STATE.skillTest;
+    const loaded = Boolean(execution.data);
+    const finished = execution.status === "complete";
+    const previewRows = (execution.data?.rows || []).slice(0, 5);
+    const previewHeaders = execution.data?.headers || [];
+    const dataPreview = el("div", { class: "skillDataPreview" }, [
+      el("div", { class: "skillDataPreviewHead" }, [
+        "数据源",
+        el("span", { class: "skillDataPreviewStatus" }, [
+          execution.status === "loading"
+            ? "正在载入…"
+            : loaded
+              ? `已读取 ${execution.data.totalRowCount ?? execution.data.rowCount ?? 0} 行，本次使用 ${execution.data.rowCount || 0} 行`
+              : "等待载入"
+        ])
+      ]),
+      el("div", { class: "skillDataPreviewBody" }, [
+        execution.status === "loading"
+          ? el("div", { class: "skillDataPreviewEmpty" }, ["正在读取页面数据…"])
+          : previewRows.length
+            ? el("table", {}, [
+                el("thead", {}, [el("tr", {}, previewHeaders.map((header) => el("th", { title: header }, [header])))]),
+                el("tbody", {}, previewRows.map((row) => el("tr", {}, row.map((cell) => el("td", { title: cell }, [cell])))))
+              ])
+            : el("div", { class: "skillDataPreviewEmpty" }, [loaded ? "当前没有可读取的数据行" : "数据载入后将在这里展示部分内容"]),
+        previewRows.length && (execution.data.totalRowCount || execution.data.rowCount) > previewRows.length
+          ? el("div", { class: "skillDataPreviewMore" }, [`仅展示前 ${previewRows.length} 行`])
+          : null
+      ])
+    ]);
+    const conclusion = el("div", {
+      class: `skillTestResult${execution.response ? " bubble assistant skillResultSection conclusion" : " waiting"}`
+    }, []);
+    if (execution.error) {
+      conclusion.className = "skillTestError";
+      conclusion.textContent = `执行失败：${execution.error}`;
+    } else if (execution.response) {
+      const sections = splitSkillResult(execution.response);
+      conclusion.innerHTML = renderMarkdown(sections.conclusion || execution.response);
+    } else {
+      conclusion.textContent = execution.pending ? "正在分析数据，请稍候…" : "等待执行";
+    }
+    const followupTurns = (execution.followups || []).map((turn) => {
+      const answer = el("div", { class: "skillFollowupAnswer" }, []);
+      answer.innerHTML = turn.response ? renderMarkdown(turn.response) : "正在等待回答…";
+      return el("div", { class: "skillFollowupTurn" }, [
+        el("div", { class: "skillFollowupQuestion" }, [turn.question]),
+        answer
+      ]);
+    });
+    const statusText = execution.status === "loading"
+      ? "正在载入数据源"
+      : execution.status === "submitting" || execution.status === "analyzing"
+        ? "数据已载入，正在生成结论"
+        : finished
+          ? "分析完成"
+          : execution.error
+            ? "执行未完成"
+            : "准备执行";
+    return el("div", { class: "skillExecution" }, [
+      el("div", { class: "skillExecutionHead" }, [
+        el("div", { class: "skillExecutionTitle" }, [execution.skillName]),
+        modelSelect,
+        el("button", { class: "btn", disabled: execution.pending, onClick: () => { STATE.skillTest = null; render(); } }, ["关闭"])
+      ]),
+      el("div", { class: "skillExecutionStatus" }, [statusText]),
+      el("div", { class: "skillExecutionContent" }, [
+        el("div", { class: "skillExecutionPanel" }, [
+          el("div", { class: "skillBlockTitle" }, [`数据源：${execution.sourceName}`]),
+          dataPreview,
+          el("div", { class: "skillBlockTitle" }, ["分析方法"]),
+          el("div", { class: "skillExecutionMethod" }, [execution.method]),
+          execution.pending
+            ? el("div", { class: "skillActions" }, [
+                el("button", { class: "btn danger", onClick: () => stopGeneration() }, ["停止执行"])
+              ])
+            : execution.error
+              ? el("div", { class: "skillActions" }, [
+                  el("button", { class: "btn primary", onClick: () => runSkillTest() }, ["重新执行"])
+                ])
+              : null,
+          finished ? el("div", { class: "skillFollowup" }, [
+            el("div", { class: "skillBlockTitle" }, ["继续问"]),
+            el("textarea", {
+              class: "skillFollowupInput",
+              placeholder: "基于本次结论继续提问…",
+              disabled: execution.pending,
+              onInput: (event) => { execution.followupDraft = event.target.value; }
+            }, [execution.followupDraft || ""]),
+            el("div", { class: "skillActions" }, [
+              el("button", { class: "btn primary", disabled: execution.pending, onClick: () => continueSkillConversation() }, ["发送"])
+            ])
+          ]) : null
+        ]),
+        el("div", { id: "web2ai_skill_execution_result_panel", class: "skillExecutionPanel" }, [
+          el("div", { class: "skillBlockTitle" }, [execution.pending ? "正在生成结论" : "结论"]),
+          finished && execution.response ? el("div", { class: "skillResultActions" }, [
+            el("button", { class: "btn", onClick: () => copySkillText(execution.response, "结论已复制") }, ["复制结论"]),
+            el("button", { class: "btn", onClick: () => downloadSkillResult(execution) }, ["下载 Markdown"])
+          ]) : null,
+          conclusion,
+          ...followupTurns
         ])
       ])
     ]);
@@ -1305,8 +1510,9 @@ function render() {
     })();
     const pageGroups = new Map();
     for (const skill of STATE.skillCatalog) {
-      const group = pageGroups.get(skill.pageKey) || { pageKey: skill.pageKey, pageUrl: skill.pageUrl, count: 0, label: STATE.skillPageNames[skill.pageKey] || skill.pageTitle || skill.source?.pageTitle || skill.pageKey };
+      const group = pageGroups.get(skill.pageKey) || { pageKey: skill.pageKey, pageUrl: skill.pageUrl, count: 0, skills: [], label: STATE.skillPageNames[skill.pageKey] || skill.pageTitle || skill.source?.pageTitle || skill.pageKey };
       group.count++;
+      group.skills.push(skill);
       pageGroups.set(skill.pageKey, group);
     }
     const otherPages = [...pageGroups.values()].filter((group) => group.pageKey !== currentPageKey);
@@ -1378,30 +1584,44 @@ function render() {
           analysisPrompt ? el("div", { style: { marginTop: "5px", color: "#475569" } }, [`分析方法：${analysisPrompt.slice(0, 80)}${analysisPrompt.length > 80 ? "…" : ""}`]) : null
         ]),
         el("div", { class: "skillActions" }, [
-          el("button", { class: "btn primary", disabled: !analysisPrompt || status === "missing" || status === "checking", onClick: () => startSkillTest(skill) }, ["测试技能"]),
+          el("button", {
+            class: "btn primary",
+            disabled: status === "missing" || status === "checking",
+            onClick: async () => {
+              if (analysisPrompt) {
+                startSkillTest(skill);
+                return;
+              }
+              const accepted = await showConfirmDialog("当前技能未配置分析方法，点击修改技能配置");
+              if (accepted) rebindSkill(skill.id);
+            }
+          }, ["测试技能"]),
           el("button", { class: "btn", onClick: () => rebindSkill(skill.id) }, ["修改技能"]),
           el("button", { class: "btn danger", onClick: () => deleteSkill(skill.id) }, ["删除"])
         ])
       ]);
     });
     return el("div", { class: "skillBody" }, [
-      !draft ? el("div", { class: "skillCreateBar" }, [
-        el("button", { class: "btn primary", onClick: () => createSkillDraft() }, ["＋ 创建技能"])
-      ]) : null,
       el("div", { class: "skillIntro" }, ["选择数据源，并用自己的话描述分析需求。配置完成后可进入全屏测试，根据模型反馈继续优化分析方法。"]),
       form,
       el("div", { class: "skillList" }, [
         el("div", { class: "skillSummary" }, [
           el("div", { class: "skillSummaryTitle" }, [
             el("span", { class: "skillSummaryTitleText" }, [`全部技能 ${STATE.skillCatalog.length} 个`]),
+            !draft ? el("button", { class: "skillCreateSummary", onClick: () => createSkillDraft() }, ["＋ 创建技能"]) : null,
             STATE.skillCatalog.length ? el("button", { class: "skillDeleteAll", onClick: () => deleteAllSkills() }, ["删除全部技能"]) : null
           ]),
           otherPages.length ? el("div", { class: "skillPagesLabel" }, ["其他页面技能："]) : null,
           otherPages.length ? el("div", { class: "skillPages" }, otherPages.map((group) => el("button", {
             class: "skillPageLink",
             title: group.pageKey,
-            onClick: () => switchToSkillPage(group.pageKey, group.pageUrl)
-          }, [`${group.label}  ${group.count} 个技能`]))) : null
+            onClick: () => switchToSkillPage(group.pageKey, group.pageUrl, group.skills[0]?.source)
+          }, [
+            el("span", { class: "skillPageName" }, [`【${group.label}】`]),
+            " ",
+            el("span", { class: "skillPageCount" }, [String(group.count)]),
+            " 个技能"
+          ]))) : null
         ]),
         el("div", { class: "skillCurrentLabel" }, [
           el("span", { class: "skillCurrentLabelText" }, [
@@ -1421,7 +1641,7 @@ function render() {
   const mainPane = el("div", { class: "mainPane" }, [header, STATE.activePanelTab === "skills" ? renderSkillsPanel() : body]);
   const card = el("div", { class: "card" }, [
     STATE.skillTest
-      ? renderSkillTestPanel()
+      ? (STATE.skillTest.mode === "execute" ? renderSkillExecutionPanel() : renderSkillTestPanel())
       : el("div", { class: "workspace" }, [sideTabs, mainPane])
   ]);
   wrap.appendChild(card);
@@ -1466,6 +1686,10 @@ function render() {
   const skillResultPanel = refs.overlayShadow.getElementById("web2ai_skill_test_result_panel");
   if (skillResultPanel && STATE.skillTest?.pending) {
     skillResultPanel.scrollTop = skillResultPanel.scrollHeight;
+  }
+  const skillExecutionResultPanel = refs.overlayShadow.getElementById("web2ai_skill_execution_result_panel");
+  if (skillExecutionResultPanel && STATE.skillTest?.pending) {
+    skillExecutionResultPanel.scrollTop = skillExecutionResultPanel.scrollHeight;
   }
 }
 
@@ -2077,5 +2301,6 @@ export {
   captureMultipleScreens,
   inspectMultiScreenScrollTarget,
   setMultiScreenScrollPosition,
-  restoreMultiScreenScrollPosition
+  restoreMultiScreenScrollPosition,
+  startSkillExecution
 };
