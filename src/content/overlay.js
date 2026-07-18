@@ -167,6 +167,7 @@ const OVERLAY_CSS = `
     .skillDataPreview { margin-bottom: 12px; border: 1px solid rgba(59,130,246,.18); border-radius: 10px; overflow: hidden; background: #fff; }
     .skillDataPreviewHead { display: flex; align-items: center; gap: 8px; padding: 8px 9px; background: #eff6ff; color: #1e3a8a; font-size: 11px; font-weight: 650; }
     .skillDataPreviewStatus { margin-left: auto; color: #64748b; font-size: 10px; font-weight: 500; }
+    .skillDataPreviewStatus.collecting { color: #dc2626; font-weight: 700; }
     .skillDataPreviewBody { max-height: 190px; overflow: auto; padding: 8px; }
     .skillDataPreview table { width: max-content; min-width: 100%; border-collapse: collapse; color: #334155; font-size: 10px; }
     .skillDataPreview th, .skillDataPreview td { max-width: 180px; padding: 5px 6px; border: 1px solid #e2e8f0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1145,7 +1146,7 @@ function render() {
     const dataPreview = el("div", { class: "skillDataPreview" }, [
       el("div", { class: "skillDataPreviewHead" }, [
         "数据源预览",
-        el("span", { class: "skillDataPreviewStatus" }, [
+        el("span", { class: `skillDataPreviewStatus${test.status === "loading" ? " collecting" : ""}` }, [
           test.status === "loading"
             ? testCollectionProgress
             : loaded
@@ -1254,7 +1255,7 @@ function render() {
     const dataPreview = el("div", { class: "skillDataPreview" }, [
       el("div", { class: "skillDataPreviewHead" }, [
         "数据源",
-        el("span", { class: "skillDataPreviewStatus" }, [
+        el("span", { class: `skillDataPreviewStatus${execution.status === "loading" ? " collecting" : ""}` }, [
           execution.status === "loading"
             ? collectionProgress
             : loaded

@@ -31,14 +31,29 @@ function showDialog({ message, inputValue = null, confirmText = "确定", cancel
     shadow.querySelector(".confirm").textContent = confirmText;
     const input = shadow.querySelector("input");
     if (input) input.value = String(inputValue ?? "");
+    let finished = false;
     const finish = (confirmed) => {
+      if (finished) return;
+      finished = true;
       const value = input?.value ?? "";
       host.remove();
       resolve(inputValue === null ? confirmed : (confirmed ? value : null));
     };
     shadow.querySelector(".cancel").addEventListener("click", () => finish(false));
     shadow.querySelector(".confirm").addEventListener("click", () => finish(true));
-    shadow.querySelector(".mask").addEventListener("click", (event) => { if (event.target.classList.contains("mask")) finish(false); });
+    const mask = shadow.querySelector(".mask");
+    let pointerStartedOnMask = false;
+    // 文本拖选可能从 input 开始、在遮罩区域松开。不能只根据最终 click
+    // 的 target 关闭弹窗；只有完整点击都发生在遮罩空白处才视为取消。
+    mask.addEventListener("pointerdown", (event) => {
+      pointerStartedOnMask = event.target === mask;
+    });
+    mask.addEventListener("pointerup", (event) => {
+      const shouldClose = pointerStartedOnMask && event.target === mask;
+      pointerStartedOnMask = false;
+      if (shouldClose) finish(false);
+    });
+    mask.addEventListener("pointercancel", () => { pointerStartedOnMask = false; });
     shadow.addEventListener("keydown", (event) => {
       if (event.key === "Escape") finish(false);
       if (event.key === "Enter") finish(true);
