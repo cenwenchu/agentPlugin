@@ -24,9 +24,10 @@ import { tableGroupToCsv, tableGroupToMarkdown } from './table-export.js';
 import { buildOnboardingPrompt, createFallbackOnboarding, parseOnboardingResponse } from './onboarding.js';
 import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab, setTableSelectionEnabled } from './table.js';
 import { showToast } from './toast.js';
-import { showConfirmDialog, showPromptDialog } from './dialog.js';
+import { showConfirmDialog, showPromptDialog, showTextDialog } from './dialog.js';
 import { createSkillDraft, cancelSkillDraft, selectSkillTable, saveSkillDraft, rebindSkill, removeSkillDraftSource, deleteSkill, deleteAllSkills, switchToSkillPage, renameCurrentSkillPage, buildAnalysisPrompt, saveSkillAnalysisMethod, updateSkillSourceHeaders, downloadSkillsExport, previewSkillsImport, applySkillsImport } from './skills.js';
 import { buildSkillRequestPrompt, incompleteSkillDataSources } from './skill-request-model.js';
+import { parseSpreadsheetFile } from './spreadsheet-file.js';
 
 const OVERLAY_CSS = `
     :host { all: initial; }
@@ -266,6 +267,7 @@ async function startSkillTest(skill, { mode = "test", autoRun = false } = {}) {
     data: null,
     status: "ready",
     response: "",
+    submittedPrompt: "",
     methodReview: "",
     error: "",
     pending: false,
@@ -277,6 +279,8 @@ async function startSkillTest(skill, { mode = "test", autoRun = false } = {}) {
     structureUpdateDeclined: false,
     dataSources: sources.map((source, index) => ({
       source,
+      runtimeOnly: false,
+      sourceType: "web",
       name: source.displayName || source.pageTitle || `数据源 ${index + 1}`,
       status: "ready",
       data: null,
@@ -386,6 +390,112 @@ async function importAllSkills() {
   }
 }
 
+function chooseRuntimeDataFiles() {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,.tsv,.xlsx,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    input.multiple = true;
+    input.style.display = "none";
+    input.addEventListener("change", () => {
+      const files = Array.from(input.files || []);
+      input.remove();
+      resolve(files);
+    }, { once: true });
+    document.documentElement.appendChild(input);
+    input.click();
+  });
+}
+
+function invalidateSkillResultForRuntimeSourceChange(test) {
+  test.response = "";
+  test.error = "";
+  test.status = "ready";
+  test.attempts = 0;
+  test.conversationMessages = [];
+  test.followups = [];
+  test.followupDraft = "";
+  test.methodReview = "";
+  test.submittedPrompt = "";
+  test.resultTab = "result";
+}
+
+async function uploadSkillRuntimeFiles() {
+  const test = STATE.skillTest;
+  if (!test || test.pending) return;
+  const existingCount = test.dataSources.filter((item) => item.runtimeOnly).length;
+  if (existingCount >= 5) return showToast("本次最多添加 5 个临时文件数据源");
+  const files = await chooseRuntimeDataFiles();
+  if (!files.length) return;
+  let added = 0;
+  const failures = [];
+  for (const file of files.slice(0, 5 - existingCount)) {
+    try {
+      const sheets = await parseSpreadsheetFile(file);
+      let selected = sheets[0];
+      if (sheets.length > 1) {
+        const answer = await showPromptDialog(
+          `“${file.name}”包含 ${sheets.length} 个工作表：\n${sheets.map((sheet, index) => `${index + 1}. ${sheet.name}`).join("\n")}\n请输入工作表序号或名称。`,
+          "1",
+          { confirmText: "载入工作表" }
+        );
+        if (answer === null) continue;
+        const index = Number.parseInt(normalizeText(answer), 10) - 1;
+        selected = Number.isInteger(index) && sheets[index]
+          ? sheets[index]
+          : sheets.find((sheet) => sheet.name === normalizeText(answer));
+        if (!selected) throw new Error("未找到选择的工作表");
+      }
+      const name = selected.name ? `${file.name} / ${selected.name}` : file.name;
+      test.dataSources.push({
+        runtimeOnly: true,
+        sourceType: "file",
+        source: { sourceType: "file", fileName: file.name, sheetName: selected.name || "" },
+        name,
+        status: "complete",
+        data: selected.data,
+        error: "",
+        collectionId: "",
+        collection: null,
+        collectionMaxPages: 1,
+        previewPage: 1
+      });
+      added++;
+    } catch (error) {
+      failures.push(`${file.name}：${String(error?.message ?? error)}`);
+    }
+  }
+  setOpen(true);
+  if (added) {
+    invalidateSkillResultForRuntimeSourceChange(test);
+    test.activeDataSourceIndex = test.dataSources.length - 1;
+  }
+  render();
+  if (failures.length) showToast(`部分文件载入失败：\n${failures.join("\n")}`, 5000, { position: "center" });
+  else if (added) showToast(`已添加 ${added} 个临时文件数据源`);
+}
+
+function removeSkillRuntimeSource(index) {
+  const test = STATE.skillTest;
+  const item = test?.dataSources?.[index];
+  if (!test || !item?.runtimeOnly || test.pending) return;
+  test.dataSources.splice(index, 1);
+  test.activeDataSourceIndex = clamp(test.activeDataSourceIndex, 0, Math.max(0, test.dataSources.length - 1));
+  invalidateSkillResultForRuntimeSourceChange(test);
+  render();
+}
+
+async function viewSkillSubmittedPrompt(test) {
+  const prompt = String(test?.submittedPrompt || "");
+  if (!prompt) return showToast("当前还没有已提交的内容");
+  const shouldCopy = await showTextDialog("提交给大模型的完整内容", prompt, {
+    message: "以下是最近一次测试或执行实际发送给模型的完整用户消息。",
+    confirmText: "复制内容",
+    cancelText: "关闭"
+  });
+  if (shouldCopy) await copySkillText(prompt, "提交内容已复制");
+}
+
 async function runSkillTest({ reuseData = false } = {}) {
   const test = STATE.skillTest;
   if (!test || test.pending) return;
@@ -396,6 +506,7 @@ async function runSkillTest({ reuseData = false } = {}) {
   test.pending = true;
   test.status = shouldLoadData ? "loading" : "submitting";
   test.response = "";
+  test.submittedPrompt = "";
   test.resultTab = "result";
   test.error = "";
   if (shouldLoadData) {
@@ -403,6 +514,12 @@ async function runSkillTest({ reuseData = false } = {}) {
     test.structureUpdateDeclined = false;
     test.data = null;
     for (const item of dataSources) {
+      if (item.runtimeOnly) {
+        item.status = "complete";
+        item.error = "";
+        item.previewPage = 1;
+        continue;
+      }
       item.status = "ready";
       item.data = null;
       item.error = "";
@@ -416,6 +533,7 @@ async function runSkillTest({ reuseData = false } = {}) {
     if (shouldLoadData) {
       for (let index = 0; index < dataSources.length; index++) {
         const item = dataSources[index];
+        if (item.runtimeOnly) continue;
         item.status = "loading";
         test.activeDataSourceIndex = index;
         render();
@@ -501,6 +619,9 @@ async function runSkillTest({ reuseData = false } = {}) {
     test.status = "submitting";
     render();
     const prompt = buildSkillRequestPrompt({ method: test.method, dataSources });
+    // 保存实际发送的文本快照；查看时不能重新组装，否则后续编辑会让
+    // 展示内容与本次真实请求不一致。
+    test.submittedPrompt = prompt;
     console.info("[web2ai.ai.request] skill-test prepared", JSON.stringify({
       modelId: STATE.activeModelId,
       sourceCount: dataSources.length,
@@ -1260,7 +1381,7 @@ function render() {
     test.activeDataSourceIndex = clamp(Number(test.activeDataSourceIndex) || 0, 0, Math.max(0, sourceItems.length - 1));
     const activeSource = sourceItems[test.activeDataSourceIndex] || { data: test.data, collection: test.collection, status: test.status };
     const activeData = activeSource.data;
-    const loaded = sourceItems.some((item) => item.data);
+    const loaded = Boolean(sourceItems.length) && sourceItems.every((item) => item.data);
     const finished = test.status === "complete";
     const testCollection = activeSource.collection || {};
     const testCollectionProgress = testCollection.phase === "scrolling"
@@ -1307,6 +1428,11 @@ function render() {
         onClick: () => { test.activeDataSourceIndex = index; render(); }
       }, [`${index + 1}. ${item.name}${countText}`]);
     }));
+    const runtimeSourceActions = el("div", { class: "skillActions" }, [
+      el("button", { class: "btn", disabled: test.pending || sourceItems.filter((item) => item.runtimeOnly).length >= 5, onClick: () => uploadSkillRuntimeFiles() }, ["＋ 上传 CSV / Excel"]),
+      activeSource.runtimeOnly ? el("button", { class: "btn danger", disabled: test.pending, onClick: () => removeSkillRuntimeSource(test.activeDataSourceIndex) }, ["移除临时数据源"]) : null,
+      el("span", { class: "skillMeta" }, ["文件仅用于本次测试，不保存到技能中"])
+    ]);
     const allPreviewRows = activeData?.rows || [];
     const previewPageSize = 10;
     const previewPageCount = Math.max(1, Math.ceil(allPreviewRows.length / previewPageSize));
@@ -1366,6 +1492,7 @@ function render() {
               : `共 ${sourceItems.length} 个数据源。开始测试后将依次采集，每个最多 10 页或 1000 行。`
           ]),
           sourceTabs,
+          runtimeSourceActions,
           dataPreview,
           el("label", { class: "skillFieldLabel" }, ["分析方法（可根据反馈直接修改）"]),
           el("textarea", {
@@ -1387,6 +1514,7 @@ function render() {
               disabled: test.pending || !finished || normalizeText(test.method) === normalizeText(test.savedMethod),
               onClick: () => saveSkillTestMethod()
             }, ["满意并保存"]),
+            el("button", { class: "btn", disabled: !test.submittedPrompt, onClick: () => viewSkillSubmittedPrompt(test) }, ["查看提交内容"]),
             el("button", { class: "btn", disabled: test.pending || !finished || !normalizeText(test.response), onClick: () => reviewSkillAnalysisMethod() }, [test.methodReview ? "重新优化分析方法" : "优化分析方法"])
           ])
         ]),
@@ -1409,7 +1537,6 @@ function render() {
     execution.activeDataSourceIndex = clamp(Number(execution.activeDataSourceIndex) || 0, 0, Math.max(0, sourceItems.length - 1));
     const activeSource = sourceItems[execution.activeDataSourceIndex] || { data: execution.data, collection: execution.collection, status: execution.status };
     const activeData = activeSource.data;
-    const loaded = sourceItems.some((item) => item.data);
     const finished = execution.status === "complete";
     const collection = activeSource.collection || {};
     const collectionProgress = activeSource.status === "loading"
@@ -1435,6 +1562,11 @@ function render() {
         onClick: () => { execution.activeDataSourceIndex = index; render(); }
       }, [`${index + 1}. ${item.name}${countText}`]);
     }));
+    const runtimeSourceActions = el("div", { class: "skillActions" }, [
+      el("button", { class: "btn", disabled: execution.pending || sourceItems.filter((item) => item.runtimeOnly).length >= 5, onClick: () => uploadSkillRuntimeFiles() }, ["＋ 上传 CSV / Excel"]),
+      activeSource.runtimeOnly ? el("button", { class: "btn danger", disabled: execution.pending, onClick: () => removeSkillRuntimeSource(execution.activeDataSourceIndex) }, ["移除临时数据源"]) : null,
+      el("span", { class: "skillMeta" }, ["文件仅用于本次执行，不保存到技能中"])
+    ]);
     const allPreviewRows = activeData?.rows || [];
     const previewPageSize = 10;
     const previewPageCount = Math.max(1, Math.ceil(allPreviewRows.length / previewPageSize));
@@ -1515,10 +1647,14 @@ function render() {
         el("div", { class: "skillExecutionPanel" }, [
           el("div", { class: "skillBlockTitle" }, ["数据源"]),
           sourceTabs,
+          runtimeSourceActions,
           dataPreview,
           el("div", { class: "skillBlockTitle" }, ["分析方法"]),
           el("div", { class: "skillExecutionMethod" }, [execution.method]),
-          !execution.pending && !loaded && !execution.error ? el("div", { class: "skillActions" }, [
+          execution.submittedPrompt ? el("div", { class: "skillActions" }, [
+            el("button", { class: "btn", onClick: () => viewSkillSubmittedPrompt(execution) }, ["查看提交内容"])
+          ]) : null,
+          !execution.pending && !execution.attempts && !execution.error ? el("div", { class: "skillActions" }, [
             el("button", { id: "web2ai_run_skill", class: "btn primary", onClick: () => runSkillTest() }, ["执行技能"])
           ]) : null,
           execution.data && !execution.pending ? el("div", { class: "skillActions" }, [

@@ -29,9 +29,13 @@ function buildSourceSection(item, index, maxChars) {
   }
   const collectedRows = Number(data.totalRowCount ?? data.rowCount ?? rows.length) || 0;
   const submittedRows = rowLines.length;
+  const isFile = item?.runtimeOnly || item?.sourceType === "file" || item?.source?.sourceType === "file";
   const lines = [
     `### 数据源 ${index + 1}：${text(item?.name) || `数据源 ${index + 1}`}`,
-    `来源页面：${text(item?.source?.pageTitle || item?.source?.pageKey) || "未命名页面"}`,
+    isFile ? "数据源类型：本次运行上传的临时文件" : "数据源类型：网页",
+    isFile
+      ? `文件：${text(item?.source?.fileName) || text(item?.name) || "未命名文件"}${item?.source?.sheetName ? `；工作表：${text(item.source.sheetName)}` : ""}`
+      : `来源页面：${text(item?.source?.pageTitle || item?.source?.pageKey) || "未命名页面"}`,
     `数据源字段：${headers.join(" | ") || "未识别"}`,
     `本次已采集：${collectedRows} 行；本次提交：${submittedRows} 行${submittedRows < rows.length || data.truncated ? "（数据较多，已按本次请求上限截取）" : ""}`
   ];

@@ -41,3 +41,16 @@ test("reports every source that has not completed loading", () => {
   const missing = { name: "未完成", source: { pageTitle: "页面二" }, data: null };
   assert.deepEqual(incompleteSkillDataSources([complete, missing]), [missing]);
 });
+
+test("labels uploaded spreadsheets as runtime file sources", () => {
+  const fileSource = {
+    runtimeOnly: true,
+    sourceType: "file",
+    name: "售后.xlsx / 明细",
+    source: { sourceType: "file", fileName: "售后.xlsx", sheetName: "明细" },
+    data: { headers: ["售后单号"], rows: [["R-1"]], rowCount: 1, totalRowCount: 1 }
+  };
+  const prompt = buildSkillRequestPrompt({ method: "汇总", dataSources: [fileSource] });
+  assert.match(prompt, /数据源类型：本次运行上传的临时文件/);
+  assert.match(prompt, /文件：售后.xlsx；工作表：明细/);
+});

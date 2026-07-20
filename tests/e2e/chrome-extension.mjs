@@ -3,15 +3,74 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { deflateRawSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const crcTable = Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  return crc >>> 0;
+});
+const crc32 = (buffer) => {
+  let crc = 0xffffffff;
+  for (const byte of buffer) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff];
+  return (crc ^ 0xffffffff) >>> 0;
+};
+const createZip = (files) => {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const nameBuffer = Buffer.from(name);
+    const data = Buffer.from(content);
+    const compressed = deflateRawSync(data);
+    const checksum = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(checksum, 14);
+    local.writeUInt32LE(compressed.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuffer.length, 26);
+    localParts.push(local, nameBuffer, compressed);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(checksum, 16);
+    central.writeUInt32LE(compressed.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuffer.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centralParts.push(central, nameBuffer);
+    offset += local.length + nameBuffer.length + compressed.length;
+  }
+  const centralDirectory = Buffer.concat(centralParts);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(Object.keys(files).length, 8);
+  end.writeUInt16LE(Object.keys(files).length, 10);
+  end.writeUInt32LE(centralDirectory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...localParts, centralDirectory, end]);
+};
 const temp = await fs.mkdtemp(path.join(os.tmpdir(), "web2ai-e2e-"));
 const extension = path.join(temp, "extension");
+const runtimeCsv = path.join(temp, "runtime-orders.csv");
+const runtimeXlsx = path.join(temp, "runtime-after-sales.xlsx");
 await fs.mkdir(extension);
 await fs.cp(path.join(ROOT, "src"), path.join(extension, "src"), { recursive: true });
+await fs.writeFile(runtimeCsv, "渠道,订单数,备注\n线上,12,\n线下,8,人工订单\n", "utf8");
+await fs.writeFile(runtimeXlsx, createZip({
+  "xl/workbook.xml": '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="售后明细" sheetId="1" r:id="rId1"/></sheets></workbook>',
+  "xl/_rels/workbook.xml.rels": '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/></Relationships>',
+  "xl/worksheets/sheet1.xml": '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>售后单号</t></is></c><c r="B1" t="inlineStr"><is><t>状态</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>R-100</t></is></c><c r="B2" t="inlineStr"><is><t>待处理</t></is></c></row></sheetData></worksheet>'
+}));
 const manifest = JSON.parse(await fs.readFile(path.join(ROOT, "manifest.json"), "utf8"));
 // Keep the production host permission because captureVisibleTab requires
 // activeTab or <all_urls>; narrowing it would test a different permission model.
@@ -521,18 +580,39 @@ try {
     Array.from(host.shadowRoot.querySelectorAll(".skillCard button")).find((button) => button.textContent?.trim() === "测试技能")?.click();
   });
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillTest"));
+  const fileChooserPromise = page.waitForFileChooser();
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillTestPanel button")).find((button) => button.textContent?.includes("上传 CSV"))?.click();
+  });
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.accept([runtimeCsv]);
+  await page.waitForFunction(() => (
+    document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillDataSourceTab").length === 4
+  ));
+  const uploadedPreview = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTestPanel")?.textContent || "");
+  assert.match(uploadedPreview, /runtime-orders.csv/);
+  assert.match(uploadedPreview, /共 2 条/, "uploaded CSV must be parsed and previewed as a runtime source");
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".skillTestPanel button")).find((button) => button.textContent?.trim() === "开始测试")?.click();
   });
   await page.waitForFunction(() => {
     const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
-    return shadow?.querySelectorAll(".skillDataSourceTab.complete").length === 3 && !shadow.querySelector(".skillTestHead button")?.disabled;
+    return shadow?.querySelectorAll(".skillDataSourceTab.complete").length === 4 && !shadow.querySelector(".skillTestHead button")?.disabled;
   }, { timeout: 30000 });
   const testedSources = await page.$eval("#web2ai_overlay_host", (host) =>
     Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => tab.textContent || "")
   );
-  assert.equal(testedSources.length, 3, "test mode must retain all configured source tabs");
+  assert.equal(testedSources.length, 4, "test mode must combine configured sources with the uploaded runtime source");
   assert.ok(testedSources.every((label) => /共 \d+ 条/.test(label)), `test mode must show a row count for every source: ${JSON.stringify(testedSources)}`);
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillActions button")).find((button) => button.textContent?.trim() === "查看提交内容")?.click();
+  });
+  await page.waitForSelector("[data-web2ai-ui='dialog']");
+  const submittedSnapshot = await page.$eval("[data-web2ai-ui='dialog']", (host) => host.shadowRoot.querySelector("textarea")?.value || "");
+  assert.match(submittedSnapshot, /【分析任务】/);
+  assert.match(submittedSnapshot, /runtime-orders.csv/);
+  assert.match(submittedSnapshot, /\| 线上 \| 12 \|  \|/, "submitted-content viewer must show the exact runtime CSV row");
+  await page.$eval("[data-web2ai-ui='dialog']", (host) => host.shadowRoot.querySelector(".cancel")?.click());
   await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTestHead button")?.click());
 
   await page.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("订单综合分析"));
@@ -544,6 +624,23 @@ try {
   assert.match(executionTitle, /订单综合分析/);
   const testIsFullscreen = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".wrap")?.classList.contains("max"));
   assert.equal(testIsFullscreen, true, "skill testing must use the full-screen interaction");
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillDataSourceTab").length),
+    3,
+    "the CSV uploaded in test mode must be released before execution mode opens"
+  );
+  const executionFileChooserPromise = page.waitForFileChooser();
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillExecutionPanel button")).find((button) => button.textContent?.includes("上传 CSV"))?.click();
+  });
+  const executionFileChooser = await executionFileChooserPromise;
+  await executionFileChooser.accept([runtimeXlsx]);
+  await page.waitForFunction(() => (
+    document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillDataSourceTab").length === 4
+  ));
+  const xlsxPreview = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionPanel")?.textContent || "");
+  assert.match(xlsxPreview, /runtime-after-sales.xlsx \/ 售后明细/);
+  assert.match(xlsxPreview, /R-100/);
   await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector("#web2ai_run_skill")?.click());
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillDataPreviewStatus")?.textContent?.includes("本次使用"));
   const loadedSkillData = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionPanel")?.textContent || "");
@@ -551,7 +648,7 @@ try {
   const executedSources = await page.$eval("#web2ai_overlay_host", (host) =>
     Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => tab.textContent || "")
   );
-  assert.equal(executedSources.length, 3, "execution mode must retain all configured source tabs");
+  assert.equal(executedSources.length, 4, "execution mode must combine configured sources with its own uploaded XLSX source");
   assert.ok(executedSources.every((label) => /共 \d+ 条/.test(label)), `execution mode must show a row count for every source: ${JSON.stringify(executedSources)}`);
   const previewedSkillRows = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillDataPreview tbody tr").length);
   assert.ok(previewedSkillRows > 0 && previewedSkillRows <= 10, "skill execution must preview up to ten loaded rows per page");
@@ -618,7 +715,7 @@ try {
   assert.equal(await optionsPage.$$eval("#profile option", (options) => options.length), profileCountBeforeAdd);
   await optionsPage.close();
 
-console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
+console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, runtime CSV/XLSX sources, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
 } finally {
   await browser.close();
   server.close();
