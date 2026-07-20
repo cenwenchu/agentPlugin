@@ -1,8 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop, shouldStopAfterNoProgress
+  classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch
 } from "../../src/content/skill-collection-model.js";
+
+test("requires the same field count, order and normalized names before collection", () => {
+  assert.equal(skillHeadersMatch(["订单号", "SKU 信息"], ["订单号", "SKU信息"]), true);
+  assert.equal(skillHeadersMatch(["订单号", "SKU信息"], ["SKU信息", "订单号"]), false);
+  assert.equal(skillHeadersMatch(["订单号", "SKU信息"], ["订单号"]), false);
+  assert.equal(skillHeadersMatch(["订单号", "SKU信息"], ["订单号", "商品信息"]), false);
+});
 
 test("recognizes explicit framework virtual-scroll class names", () => {
   const metrics = { scrollHeight: 1000, clientHeight: 300, renderedRowHeights: [40, 40, 40] };

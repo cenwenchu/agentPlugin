@@ -11,13 +11,13 @@
  * 扩展上下文失效时静默退出（不过 loader.js 已做了同样的保护）。
  */
 
-import { DEBUG, IS_TOP_FRAME, STATE, refs } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, refs, compactOneLine } from './state.js';
 import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableSelectionEnabled, clearAllTableSelectionState } from './table.js';
 import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition, startSkillExecution } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, removeContextByRef } from './context.js';
-import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars } from './skills.js';
+import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars, getBusinessPageTabs } from './skills.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
 try {
@@ -28,6 +28,35 @@ try {
 // ========== 消息监听 ==========
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "RELOAD_SKILLS") {
+    if (!IS_TOP_FRAME) {
+      sendResponse({ ok: false, error: "Skills reload must run in the top frame" });
+      return;
+    }
+    sendResponse({ ok: true });
+    reloadSkills().catch(() => void 0);
+    return;
+  }
+
+  if (message?.type === "GET_PAGE_IDENTITY") {
+    if (!IS_TOP_FRAME) {
+      sendResponse({ ok: false, error: "Page identity must come from the top frame" });
+      return;
+    }
+    const businessTabs = getBusinessPageTabs();
+    sendResponse({
+      ok: true,
+      data: {
+        url: location.href,
+        title: document.title,
+        businessTabTitles: businessTabs.titles,
+        activeBusinessTabTitle: businessTabs.activeTitle,
+        activeBusinessTabTitleConfirmed: businessTabs.activeTitleConfirmed
+      }
+    });
+    return;
+  }
+
   // 打开面板
   if (message?.type === "OPEN_PANEL") {
     STATE.launcherVisible = true;
@@ -233,7 +262,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   // 显示 Toast
   if (message?.type === "TOAST") {
-    if (IS_TOP_FRAME) showToast(message.text);
+    if (IS_TOP_FRAME) showToast(message.text, 1500, { position: message.position });
     sendResponse({ ok: true });
     return;
   }
@@ -274,6 +303,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true, data: resolveStoredSource(message.source) });
     return;
   }
+  if (message?.type === "ACTIVATE_BUSINESS_PAGE_TAB") {
+    if (!IS_TOP_FRAME) {
+      sendResponse({ ok: false, error: "仅顶层页面可切换业务标签" });
+      return;
+    }
+    const title = compactOneLine(message.title || "");
+    const target = Array.from(document.querySelectorAll('[class*="realTab"]'))
+      .filter((element) => String(element.className || "").split(/\s+/).some((name) => name.endsWith("-realTab")))
+      .find((element) => compactOneLine(element.textContent || "") === title);
+    if (!target) {
+      sendResponse({ ok: false, error: `页面“${title}”未打开` });
+      return;
+    }
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    sendResponse({ ok: true });
+    return;
+  }
   if (message?.type === "EXTRACT_SKILL_SOURCE_DATA") {
     sendResponse({ ok: true, data: extractStoredSourceData(message.source, message.limit || 200) });
     return;
@@ -293,7 +339,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
   if (message?.type === "SKILL_COLLECTION_PROGRESS") {
-    if (IS_TOP_FRAME && STATE.skillTest?.collectionId === message.collectionId) {
+    if (IS_TOP_FRAME && STATE.skillTest) {
+      const item = STATE.skillTest.dataSources?.find((candidate) => candidate.collectionId === message.collectionId);
+      if (!item && STATE.skillTest.collectionId !== message.collectionId) {
+        sendResponse({ ok: true });
+        return;
+      }
+      if (item) item.collection = message.progress || null;
       STATE.skillTest.collection = message.progress || null;
       STATE.open = true;
       refs.suppressPanelCloseUntil = Date.now() + 1000;

@@ -57,6 +57,8 @@ const STATE = {
   skillTest: null,
   skillPicking: false,
   skillPickSession: "",
+  /** 重新选择时被替换的数据源 ID；空字符串表示追加数据源。 */
+  skillPickSourceId: "",
   skillSourceStatuses: {}
 };
 

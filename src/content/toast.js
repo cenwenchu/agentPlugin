@@ -1,6 +1,6 @@
 /**
  * @fileoverview Toast 提示组件。
- * 在页面底部居中显示错误/提示信息，支持自动排队。
+ * 默认在页面底部居中显示错误/提示信息，重要结果也可显示在屏幕中央。
  * 如果在 iframe 中调用，会转发到 top frame 显示。
  */
 
@@ -13,20 +13,21 @@ import { el } from './dom.js';
  * - iframe 中会通过 chrome.runtime.sendMessage 转发到 top frame
  * @param {string} message - 提示内容
  * @param {number} [duration=1500] - 每条消息的展示时长（毫秒）
+ * @param {{ position?: "bottom" | "center" }} [options] - 提示位置
  */
-function showToast(message, duration = 1500) {
+function showToast(message, duration = 1500, options = {}) {
   DEBUG && console.log(`[web2ai] showToast called: "${String(message ?? "").slice(0, 60)}" IS_TOP_FRAME=${IS_TOP_FRAME}`);
   // 如果在 iframe 中，转发到 top frame 显示
   if (!IS_TOP_FRAME) {
     try {
       chrome.runtime.sendMessage({
         type: "BROADCAST_TO_TAB",
-        payload: { message: { type: "TOAST", text: String(message ?? "") } }
+        payload: { message: { type: "TOAST", text: String(message ?? ""), position: options.position } }
       }).catch(() => void 0);
     } catch {}
     return;
   }
-  refs.toastQueue.push({ message: String(message ?? ""), duration });
+  refs.toastQueue.push({ message: String(message ?? ""), duration, position: options.position || "bottom" });
   if (refs.toastTimer) {
     DEBUG && console.log(`[web2ai] showToast: timer already active, queued. queue.length=${refs.toastQueue.length}`);
     return;
@@ -67,8 +68,12 @@ function showToast(message, duration = 1500) {
     const item = refs.toastQueue.shift();
     const msg = typeof item === "string" ? item : item.message;
     const itemDuration = typeof item === "string" ? duration : item.duration;
+    const position = typeof item === "string" ? "bottom" : item.position;
     DEBUG && console.log(`[web2ai] showToast: displaying "${msg.slice(0, 60)}" queue.length=${refs.toastQueue.length}`);
     node.textContent = msg;
+    node.style.top = position === "center" ? "50%" : "auto";
+    node.style.bottom = position === "center" ? "auto" : "18px";
+    node.style.transform = position === "center" ? "translate(-50%, -50%)" : "translateX(-50%)";
     node.style.display = "block";
     refs.toastTimer = setTimeout(showNext, itemDuration);
   };

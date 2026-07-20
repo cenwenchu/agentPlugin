@@ -39,6 +39,17 @@ function shouldStopAfterNoProgress(consecutiveEmptySteps, limit = 2) {
   return Math.max(0, Number(consecutiveEmptySteps) || 0) >= Math.max(1, Number(limit) || 2);
 }
 
+function normalizeSkillHeader(value) {
+  return String(value ?? "").replace(/\s+/g, "").trim().toLowerCase();
+}
+
+/** 采集前使用严格结构校验：字段数量、顺序和规范化名称必须全部一致。 */
+function skillHeadersMatch(expected = [], actual = []) {
+  return expected.length === actual.length && expected.every((header, index) => (
+    normalizeSkillHeader(header) === normalizeSkillHeader(actual[index])
+  ));
+}
+
 /** 以 75% 可视高度向下推进，并始终限制在当前滚动范围内。 */
 function nextVirtualScrollTop({ scrollTop = 0, scrollHeight = 0, clientHeight = 0 } = {}) {
   const current = Math.max(0, Number(scrollTop) || 0);
@@ -48,4 +59,4 @@ function nextVirtualScrollTop({ scrollTop = 0, scrollHeight = 0, clientHeight = 
   return Math.min(max, current + distance);
 }
 
-export { classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop, shouldStopAfterNoProgress };
+export { classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch };

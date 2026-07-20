@@ -11,6 +11,28 @@
 import { DEFAULT_MODEL_PROFILE, DEFAULT_SETTINGS } from "./shared.js";
 import { createSseDataParser } from "./sse.js";
 
+/** 跨浏览器标签页的数据源选择会话：sessionId → 发起方信息。 */
+const SKILL_PICK_SESSIONS = new Map();
+/** collectionId → { ownerTabId, sourceTabId }，用于跨标签页转发进度和停止。 */
+const SKILL_COLLECTION_ROUTES = new Map();
+/** 仅记录由扩展为采集自动创建的标签页；用户原有标签页永不自动关闭。 */
+const SKILL_AUTO_OPENED_TABS = new Set();
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  SKILL_AUTO_OPENED_TABS.delete(tabId);
+});
+
+async function waitForTabReady(tabId, timeoutMs = 15000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) throw new Error("数据源页面已关闭");
+    if (tab.status === "complete") return tab;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  throw new Error("数据源页面加载超时");
+}
+
 function summarizeAiMessages(messages = []) {
   const summary = messages.map((message) => {
     const parts = Array.isArray(message?.content) ? message.content : null;
@@ -300,6 +322,22 @@ function sendToFrame(tabId, frameId, message) {
   });
 }
 
+async function getTabPageKey(tabId) {
+  const identity = await sendToFrame(tabId, 0, { type: "GET_PAGE_IDENTITY" }).catch(() => null);
+  if (identity?.ok && identity.data?.url) return normalizedPageKey(identity.data.url);
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  return normalizedPageKey(tab?.url || "");
+}
+
+async function waitForTabPageKey(tabId, expectedPageKey, attempts = 12) {
+  if (!expectedPageKey) return true;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (await getTabPageKey(tabId) === expectedPageKey) return true;
+    if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return false;
+}
+
 async function broadcastToTab(tabId, message) {
   const frames = await chrome.webNavigation.getAllFrames({ tabId });
   return Promise.allSettled(frames.map((frame) => sendToFrame(tabId, frame.frameId, message)));
@@ -402,23 +440,116 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message?.type === "SKILL_TABLE_PICK_RESULT") {
       if (!sender?.tab?.id) throw new Error("无法确定选择数据源的标签页");
-      await sendToFrame(sender.tab.id, 0, {
-        type: "SKILL_TABLE_PICK_RESULT",
-        payload: { ...message.payload, frameId: sender.frameId || 0, frameUrl: normalizedPageKey(sender.url || "") }
-      });
-      await broadcastToTab(sender.tab.id, { type: "CANCEL_SKILL_TABLE_PICK", sessionId: message.payload?.sessionId });
+      const sessionId = message.payload?.sessionId;
+      const storedPickKey = `web2aiSkillPick:${sessionId}`;
+      const storedInitiator = (await chrome.storage.session.get([storedPickKey]))[storedPickKey];
+      const initiator = SKILL_PICK_SESSIONS.get(sessionId) || storedInitiator || { tabId: sender.tab.id, kind: "content" };
+      const initiatorTabId = initiator.tabId;
+      SKILL_PICK_SESSIONS.delete(sessionId);
+      await chrome.storage.session.remove(storedPickKey);
+      const capturedSource = message.payload?.source || {};
+      const selectedInTopFrame = capturedSource.isTopFrame === true;
+      const selectedFrameId = selectedInTopFrame ? 0 : (sender.frameId || 0);
+      // 表格所在 content script 在 pointerdown 时记录的 URL 最接近用户实际点击，
+      // 优先级高于异步送达后台后的 sender.url。
+      const selectedFrameUrl = normalizedPageKey(capturedSource.frameUrl || sender.url || "");
+      // sender.tab.url 在站点内部 Tab/SPA 切换时可能仍是上一个路由。
+      // 选中瞬间向 top frame 读取 location.href，作为数据源所属页面的权威值。
+      const topIdentityResponse = await sendToFrame(sender.tab.id, 0, { type: "GET_PAGE_IDENTITY" }).catch(() => null);
+      const topIdentity = topIdentityResponse?.ok ? topIdentityResponse.data : null;
+      const selectedPageUrl = selectedInTopFrame
+        ? (capturedSource.capturedPageUrl || capturedSource.frameUrl || sender.url || topIdentity?.url || sender.tab.url || "")
+        : (topIdentity?.url || sender.tab.url || "");
+      const payload = {
+        ...message.payload,
+        source: {
+          ...message.payload?.source,
+          // 顶层表格的标题由点击所在页面直接记录；iframe 表格才使用 top frame 标题。
+          pageTitle: selectedInTopFrame
+            ? (capturedSource.pageTitle || topIdentity?.title || "")
+            : (topIdentity?.title || capturedSource.pageTitle || ""),
+          businessTabTitle: topIdentity?.activeBusinessTabTitle || capturedSource.businessTabTitle || ""
+        },
+        frameId: selectedFrameId,
+        frameUrl: selectedFrameUrl,
+        pageKey: normalizedPageKey(selectedPageUrl),
+        pageUrl: selectedPageUrl
+      };
+      console.info("[web2ai.skill-pick] accepted source", JSON.stringify({
+        sessionId,
+        frameId: selectedFrameId,
+        frameUrl: selectedFrameUrl,
+        senderTabUrl: normalizedPageKey(sender.tab.url || ""),
+        topFrameUrl: normalizedPageKey(topIdentity?.url || ""),
+        selectedPageKey: payload.pageKey,
+        selector: payload.source?.selector || "",
+        tableIndex: payload.source?.tableIndex ?? -1,
+        headerCount: payload.source?.headers?.length || 0
+      }));
+      await sendToFrame(initiatorTabId, 0, { type: "SKILL_TABLE_PICK_RESULT", payload });
+      const tabs = await chrome.tabs.query({});
+      await Promise.allSettled(tabs.filter((tab) => tab.id).map((tab) => broadcastToTab(tab.id, { type: "CANCEL_SKILL_TABLE_PICK", sessionId })));
       sendResponse({ ok: true });
+      // 先让目标页面的 pointerdown/click 调度完整结束，再切回技能编辑页。
+      // 同步切换标签页可能中断网页自身事件，也会造成自动化 Runtime 调用悬挂。
+      setTimeout(() => chrome.tabs.update(initiatorTabId, { active: true }).catch(() => void 0), 500);
+      return;
+    }
+    if (message?.type === "START_SKILL_SOURCE_PICK") {
+      if (!sender?.tab?.id) throw new Error("无法确定创建技能的标签页");
+      const sessionId = String(message.sessionId || "");
+      if (!sessionId) throw new Error("数据源选择会话无效");
+      const initiator = {
+        tabId: sender.tab.id,
+        kind: "content"
+      };
+      SKILL_PICK_SESSIONS.set(sessionId, initiator);
+      await chrome.storage.session.set({ [`web2aiSkillPick:${sessionId}`]: initiator });
+      const tabs = await chrome.tabs.query({});
+      const eligibleTabs = tabs.filter((tab) => tab.id && /^(https?|file):/i.test(tab.url || ""));
+      await Promise.allSettled(eligibleTabs.map((tab) => broadcastToTab(tab.id, { type: "START_SKILL_TABLE_PICK", sessionId })));
+      sendResponse({ ok: true, tabCount: eligibleTabs.length });
       return;
     }
     if (message?.type === "SKILL_COLLECTION_PROGRESS") {
       if (!sender?.tab?.id) throw new Error("无法确定采集数据所在标签页");
-      await sendToFrame(sender.tab.id, 0, message);
+      const route = SKILL_COLLECTION_ROUTES.get(String(message.collectionId || ""));
+      await sendToFrame(route?.ownerTabId || sender.tab.id, 0, message);
       sendResponse({ ok: true });
       return;
     }
     if (message?.type === "STOP_SKILL_SOURCE_COLLECTION") {
       if (!sender?.tab?.id) throw new Error("无法确定采集数据所在标签页");
-      await broadcastToTab(sender.tab.id, message);
+      const route = SKILL_COLLECTION_ROUTES.get(String(message.collectionId || ""));
+      await broadcastToTab(route?.sourceTabId || sender.tab.id, message);
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message?.type === "CLOSE_AUTO_OPENED_SKILL_PAGE") {
+      const requestedTabId = Number(message.tabId) || 0;
+      const targetPageKey = normalizedPageKey(message.source?.pageKey || message.source?.pageUrl || "");
+      const tabs = await chrome.tabs.query({});
+      const ids = tabs.filter((tab) => (
+        tab.id && SKILL_AUTO_OPENED_TABS.has(tab.id) && (
+          (requestedTabId && tab.id === requestedTabId) || (!requestedTabId && normalizedPageKey(tab.url || "") === targetPageKey)
+        )
+      )).map((tab) => tab.id);
+      ids.forEach((tabId) => SKILL_AUTO_OPENED_TABS.delete(tabId));
+      if (ids.length) await chrome.tabs.remove(ids).catch(() => void 0);
+      sendResponse({ ok: true, closed: ids.length });
+      return;
+    }
+    if (message?.type === "FINALIZE_SKILL_SOURCE_COLLECTION") {
+      if (!sender?.tab?.id) throw new Error("无法确定技能执行页面");
+      const sourceTabId = Number(message.sourceTabId) || 0;
+      // 只有发起采集的测试/执行页面确认数据已经写入会话状态后，才恢复焦点
+      // 和关闭扩展自动创建的页面。用户原本打开的页面只切回，不关闭。
+      await chrome.tabs.update(sender.tab.id, { active: true }).catch(() => void 0);
+      if (Number.isInteger(sender.tab.windowId)) await chrome.windows.update(sender.tab.windowId, { focused: true }).catch(() => void 0);
+      if (sourceTabId && sourceTabId !== sender.tab.id && SKILL_AUTO_OPENED_TABS.has(sourceTabId)) {
+        SKILL_AUTO_OPENED_TABS.delete(sourceTabId);
+        await chrome.tabs.remove(sourceTabId).catch(() => void 0);
+      }
       sendResponse({ ok: true });
       return;
     }
@@ -435,9 +566,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       let lastProbes = [];
       let lastFoundSignature = "";
       let stableFoundCount = 0;
-      // 页面刷新后，top frame 的技能配置通常早于业务子 frame 和异步表格完成渲染。
-      // 在有限窗口内重新枚举 frame 并校验，避免把“尚未渲染”误报成永久失效。
-      for (let attempt = 0; attempt < 40; attempt++) {
+      for (let attempt = 0; attempt < 12; attempt++) {
         const frames = await chrome.webNavigation.getAllFrames({ tabId: sender.tab.id });
         const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
         const frameResults = await Promise.all(ordered.map(async (frame) => {
@@ -455,6 +584,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           candidateCount: result.candidateCount || 0,
           error: result.error || ""
         }));
+        const preferredFramePresent = !preferredFrameUrl || lastProbes.some((probe) => probe.frameUrl === preferredFrameUrl);
+        if (!preferredFramePresent && attempt >= 2) break;
         const results = frameResults.filter((result) => result.found);
         const candidate = results.sort((a, b) => {
           const similarityDiff = (b.similarity || 0) - (a.similarity || 0);
@@ -474,58 +605,190 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           stableFoundCount = 0;
           lastFoundSignature = "";
         }
-        if (attempt < 39) await new Promise((resolve) => setTimeout(resolve, 750));
+        if (attempt < 11) await new Promise((resolve) => setTimeout(resolve, 500));
       }
-      sendResponse({ ok: true, data: best || { status: "missing", found: false, probes: lastProbes } });
+      const targetFramePresent = Boolean(preferredFrameUrl && lastProbes.some((probe) => probe.frameUrl === preferredFrameUrl));
+      sendResponse({
+        ok: true,
+        data: best || {
+          status: "missing",
+          found: false,
+          targetFramePresent,
+          probes: lastProbes
+        }
+      });
       return;
     }
     if (message?.type === "LOAD_SKILL_SOURCE_DATA") {
       if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
+      const ownerTabId = sender.tab.id;
+      const collectionId = String(message.collectionId || "");
       const preferredFrameUrl = normalizedPageKey(message.source?.frameUrl || "");
-      const frames = await chrome.webNavigation.getAllFrames({ tabId: sender.tab.id });
-      const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
-      const results = [];
-      for (const frame of ordered) {
-        try {
-          const response = await sendToFrame(sender.tab.id, frame.frameId, {
-            type: "COLLECT_SKILL_SOURCE_DATA",
-            source: message.source,
-            options: {
-              collectionId: message.collectionId,
-              maxPages: message.maxPages || 10,
-              maxRows: message.maxRows || 1000
-            }
-          });
-          if (response?.ok && response.data?.found) {
-            results.push({ ...response.data, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url) });
-            break;
+      const sourcePageKey = normalizedPageKey(message.source?.pageKey || message.source?.pageUrl || "");
+      const tryCollectFromTab = async (tabId, attempts = 1) => {
+        SKILL_COLLECTION_ROUTES.set(collectionId, { ownerTabId, sourceTabId: tabId });
+        for (let attempt = 0; attempt < attempts; attempt++) {
+          const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
+          const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
+          for (const frame of ordered) {
+            try {
+              const validation = await sendToFrame(tabId, frame.frameId, {
+                type: "CHECK_SKILL_SOURCE",
+                source: message.source
+              });
+              if (!validation?.ok || !validation.data?.found) continue;
+              if (validation.data.status === "changed") {
+                return { changed: true, headers: validation.data.headers || [] };
+              }
+              const response = await sendToFrame(tabId, frame.frameId, {
+                type: "COLLECT_SKILL_SOURCE_DATA",
+                source: message.source,
+                options: {
+                  collectionId,
+                  maxPages: message.maxPages || 10,
+                  maxRows: message.maxRows || 1000,
+                  waitForInitialRowsMs: SKILL_AUTO_OPENED_TABS.has(tabId) ? 8000 : 2500
+                }
+              });
+              if (response?.ok && response.data?.found) {
+                return { best: { ...response.data, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url) } };
+              }
+            } catch { /* 页面或 frame 尚未完成注入，继续等待或尝试其他 frame */ }
           }
-        } catch { /* frame 尚未注入时继续尝试其他 frame */ }
+          if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        return {};
+      };
+
+      let ownerMatchesSource = await waitForTabPageKey(ownerTabId, sourcePageKey, 1);
+      if (!ownerMatchesSource && message.source?.businessTabTitle) {
+        const activated = await sendToFrame(ownerTabId, 0, {
+          type: "ACTIVATE_BUSINESS_PAGE_TAB",
+          title: message.source.businessTabTitle
+        }).catch(() => null);
+        if (activated?.ok) ownerMatchesSource = await waitForTabPageKey(ownerTabId, sourcePageKey, 16);
       }
-      const best = results.sort((a, b) => {
-        const preferred = Number(b.frameUrl === preferredFrameUrl) - Number(a.frameUrl === preferredFrameUrl);
-        return preferred || (b.rowCount || 0) - (a.rowCount || 0);
-      })[0];
-      sendResponse(best
-        ? { ok: true, data: best }
-        : { ok: false, error: "未能读取数据源，请确认数据源所在页面已打开且内容已加载" });
+      let sourceTabId = ownerTabId;
+      // 只有明确确认当前应用页面就是目标页面时才允许在 owner tab 采集。
+      // 目标业务 Tab 已关闭时不能拿当前页的相似表格兜底。
+      let result = ownerMatchesSource ? await tryCollectFromTab(ownerTabId, 2) : {};
+      let openedOrSwitched = false;
+      if (!result.best && !result.changed) {
+        let sourceUrl = "";
+        try {
+          const parsed = new URL(message.source?.pageUrl || "");
+          if (/^https?:$/.test(parsed.protocol)) sourceUrl = parsed.href;
+        } catch { sourceUrl = ""; }
+        if (!sourceUrl) {
+          SKILL_COLLECTION_ROUTES.delete(collectionId);
+          sendResponse({ ok: false, error: "数据源页面地址无效，无法自动打开" });
+          return;
+        }
+        const tabs = await chrome.tabs.query({});
+        let target = tabs.find((tab) => tab.id && tab.id !== ownerTabId && normalizedPageKey(tab.url || "") === sourcePageKey);
+        if (!target?.id) {
+          target = await chrome.tabs.create({ url: sourceUrl, active: true });
+          SKILL_AUTO_OPENED_TABS.add(target.id);
+        } else await chrome.tabs.update(target.id, { active: true });
+        if (Number.isInteger(target.windowId)) await chrome.windows.update(target.windowId, { focused: true });
+        sourceTabId = target.id;
+        openedOrSwitched = true;
+        await waitForTabReady(sourceTabId);
+        // content script 和业务 iframe 往往晚于 document complete，限定时间内轮询定位。
+        result = await tryCollectFromTab(sourceTabId, 24);
+      }
+      // 失败或需要用户确认结构变化时先回到执行页面展示提示；成功结果必须
+      // 等执行页面写入数据并发送 FINALIZE 后才能切回或关闭来源页面。
+      if (openedOrSwitched && !result.best) {
+        await chrome.tabs.update(ownerTabId, { active: true }).catch(() => void 0);
+        if (Number.isInteger(sender.tab.windowId)) await chrome.windows.update(sender.tab.windowId, { focused: true }).catch(() => void 0);
+      }
+      const autoOpenedTabId = sourceTabId !== ownerTabId && SKILL_AUTO_OPENED_TABS.has(sourceTabId) ? sourceTabId : 0;
+      SKILL_COLLECTION_ROUTES.delete(collectionId);
+      if (result.changed) {
+        sendResponse({ ok: false, code: "SOURCE_STRUCTURE_CHANGED", error: "数据源结构已更新", headers: result.headers, autoOpenedTabId });
+      } else if (result.best) {
+        sendResponse({
+          ok: true,
+          data: result.best,
+          autoOpenedTabId,
+          sourceTabId,
+          requiresFinalize: openedOrSwitched
+        });
+      } else {
+        if (autoOpenedTabId) {
+          SKILL_AUTO_OPENED_TABS.delete(autoOpenedTabId);
+          await chrome.tabs.remove(autoOpenedTabId).catch(() => void 0);
+        }
+        sendResponse({ ok: false, error: `已打开数据源页面，但在限定时间内未能读取“${message.source?.displayName || message.source?.pageTitle || "数据源"}”` });
+      }
+      return;
+    }
+    if (message?.type === "ACTIVATE_SKILL_BUSINESS_TAB") {
+      if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
+      const response = await sendToFrame(sender.tab.id, 0, {
+        type: "ACTIVATE_BUSINESS_PAGE_TAB",
+        title: message.title
+      }).catch((error) => ({ ok: false, error: String(error?.message ?? error) }));
+      sendResponse(response || { ok: false, error: "页面切换失败" });
       return;
     }
     if (message?.type === "INSPECT_SKILL_SOURCE_PAGINATION") {
       if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
+      const ownerTabId = sender.tab.id;
       const preferredFrameUrl = normalizedPageKey(message.source?.frameUrl || "");
-      const frames = await chrome.webNavigation.getAllFrames({ tabId: sender.tab.id });
-      const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
-      for (const frame of ordered) {
-        try {
-          const response = await sendToFrame(sender.tab.id, frame.frameId, { type: "INSPECT_SKILL_SOURCE_PAGINATION", source: message.source });
-          if (response?.ok && response.data?.found) {
-            sendResponse({ ok: true, data: response.data });
-            return;
+      const sourcePageKey = normalizedPageKey(message.source?.pageKey || message.source?.pageUrl || "");
+      const inspectTab = async (tabId, attempts = 1) => {
+        let lastFound = null;
+        for (let attempt = 0; attempt < attempts; attempt++) {
+          const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
+          const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
+          for (const frame of ordered) {
+            try {
+              const response = await sendToFrame(tabId, frame.frameId, { type: "INSPECT_SKILL_SOURCE_PAGINATION", source: message.source });
+              if (response?.ok && response.data?.found) {
+                lastFound = response.data;
+                // 应用内页面切换时表格通常先出现，分页控件稍后渲染。
+                // 发现分页可以立即返回；暂时未发现时继续观察到限定窗口结束。
+                if (response.data.multiPage) return response.data;
+              }
+            } catch { void 0; }
           }
-        } catch { void 0; }
+          if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        return lastFound;
+      };
+      let ownerMatchesSource = await waitForTabPageKey(ownerTabId, sourcePageKey, 1);
+      if (!ownerMatchesSource && message.source?.businessTabTitle) {
+        const activated = await sendToFrame(ownerTabId, 0, {
+          type: "ACTIVATE_BUSINESS_PAGE_TAB",
+          title: message.source.businessTabTitle
+        }).catch(() => null);
+        if (activated?.ok) ownerMatchesSource = await waitForTabPageKey(ownerTabId, sourcePageKey, 16);
       }
-      sendResponse({ ok: true, data: { found: false, multiPage: false, totalPages: 0 } });
+      // 当前页面只需短暂确认；刚切换的应用内页面最多等待约6秒，让分页
+      // 与异步表格完成渲染。没有分页时最终仍返回单页，不会误报多页。
+      let data = ownerMatchesSource ? await inspectTab(ownerTabId, 3) : null;
+      if (!data) {
+        let sourceUrl = "";
+        try {
+          const parsed = new URL(message.source?.pageUrl || "");
+          if (/^https?:$/.test(parsed.protocol)) sourceUrl = parsed.href;
+        } catch { sourceUrl = ""; }
+        if (sourceUrl) {
+          const tabs = await chrome.tabs.query({});
+          let target = tabs.find((tab) => tab.id && tab.id !== ownerTabId && normalizedPageKey(tab.url || "") === sourcePageKey);
+          if (!target?.id) {
+            target = await chrome.tabs.create({ url: sourceUrl, active: true });
+            SKILL_AUTO_OPENED_TABS.add(target.id);
+          } else await chrome.tabs.update(target.id, { active: true });
+          await waitForTabReady(target.id).catch(() => null);
+          data = await inspectTab(target.id, 24);
+          await chrome.tabs.update(ownerTabId, { active: true }).catch(() => void 0);
+          if (Number.isInteger(sender.tab.windowId)) await chrome.windows.update(sender.tab.windowId, { focused: true }).catch(() => void 0);
+        }
+      }
+      sendResponse({ ok: true, data: data || { found: false, multiPage: false, totalPages: 0 } });
       return;
     }
     if (message?.type === "SWITCH_TO_SKILL_PAGE") {
@@ -619,6 +882,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!msg) throw new Error("Missing payload.message");
       await broadcastToTab(tabId, msg);
       sendResponse({ ok: true });
+      return;
+    }
+
+    if (message?.type === "REFRESH_SKILLS_ALL_TABS") {
+      const tabs = await chrome.tabs.query({});
+      const results = await Promise.allSettled(tabs.filter((tab) => tab.id && /^(https?|file):/i.test(tab.url || "")).map((tab) => (
+        sendToFrame(tab.id, 0, { type: "RELOAD_SKILLS" })
+      )));
+      sendResponse({ ok: true, refreshed: results.filter((result) => result.status === "fulfilled" && result.value?.ok).length });
       return;
     }
 

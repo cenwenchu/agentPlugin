@@ -237,42 +237,92 @@ try {
   assert.ok(progressMessages.some((text) => text.startsWith("已完成 ")), `multi-screen capture must show per-screen progress: ${JSON.stringify(progressMessages)}`);
   assert.ok(progressMessages.some((text) => text.startsWith("多屏截图完成")), `multi-screen capture must show completion progress: ${JSON.stringify(progressMessages)}`);
 
-  // First skill milestone: bind one table, persist its locator/header fingerprint,
-  // and keep it available after the page is refreshed.
+  // Multi-source first milestone: bind two same-page tables and one table from
+  // another open page, then keep all independent locators after refresh.
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
   });
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
   });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
   await page.$eval("#web2ai_overlay_host", (host) => {
-    const inputs = host.shadowRoot.querySelectorAll(".skillInput");
-    inputs[0].value = "订单分析";
-    inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
-    const objective = host.shadowRoot.querySelector(".skillTextarea");
-    objective.value = "识别异常订单并说明原因";
-    objective.dispatchEvent(new Event("input", { bubbles: true }));
-    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "选择数据源")?.click();
+    const name = host.shadowRoot.querySelector(".skillInput");
+    const method = host.shadowRoot.querySelector(".skillTextarea");
+    name.value = "订单分析";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    method.value = "识别异常订单并说明原因";
+    method.dispatchEvent(new Event("input", { bubbles: true }));
+    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.includes("选择数据源"))?.click();
   });
-  await page.click("#orders");
-  await page.waitForFunction(() => {
-    const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
-    return !shadow?.querySelector(".wrap")?.classList.contains("hidden") &&
-      shadow?.querySelector(".sideTab.active")?.textContent?.trim() === "技能" &&
-      shadow?.querySelector(".skillSource")?.textContent?.includes("序号");
+  await page.waitForSelector("[data-web2ai-ui='skill-picker']");
+  await page.hover("#orders");
+  await page.$eval("#orders", (node) => node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 })));
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillSourceItem").length === 1);
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.includes("添加数据源"))?.click();
   });
+  await page.waitForSelector("[data-web2ai-ui='skill-picker']");
+  await page.hover("#orders-secondary");
+  await page.$eval("#orders-secondary", (node) => node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 })));
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillSourceItem").length === 2);
+  const crossSourcePage = await browser.newPage();
+  await crossSourcePage.goto(`${url}source-page`);
+  await crossSourcePage.waitForSelector("#web2ai_overlay_host");
+  await page.bringToFront();
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.includes("添加数据源"))?.click();
+  });
+  await crossSourcePage.bringToFront();
+  await crossSourcePage.waitForSelector("[data-web2ai-ui='skill-picker']");
+  await crossSourcePage.hover("#orders");
+  await crossSourcePage.$eval("#orders", (node) => {
+    node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+  });
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  await page.bringToFront();
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillSourceItem").length === 3);
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "保存")?.click();
   });
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("订单分析"));
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("分析方法已配置"));
+  assert.match(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || ""), /数据源：共 3 个/);
   const skillSummary = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillSummary")?.textContent || "");
   assert.match(skillSummary, /全部技能 1 个/);
-  assert.doesNotMatch(skillSummary, /当前页面 1 个/);
+  assert.match(skillSummary, /其他页面技能：/);
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillCard button")).find((button) => button.textContent?.trim() === "修改技能")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+  assert.equal(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillInput")?.value), "订单分析");
+  assert.equal(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillSourceItem").length), 3, "modify mode must load every saved data source");
+  assert.match(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTextarea")?.value || ""), /识别异常订单并说明原因/);
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const name = host.shadowRoot.querySelector(".skillInput");
+    const method = host.shadowRoot.querySelector(".skillTextarea");
+    const firstSourceName = host.shadowRoot.querySelector(".skillSourceNameInput");
+    name.value = "订单综合分析";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    method.value = "识别异常订单并说明原因，使用列表输出";
+    method.dispatchEvent(new Event("input", { bubbles: true }));
+    firstSourceName.value = "主订单明细";
+    firstSourceName.dispatchEvent(new Event("input", { bubbles: true }));
+    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "保存修改")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("订单综合分析"));
+  const modifiedSkill = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || "");
+  assert.match(modifiedSkill, /主订单明细/, "modified data-source display names must persist");
+  assert.match(modifiedSkill, /使用列表输出/, "modified analysis methods must persist");
+  await page.bringToFront();
   await page.evaluate(() => history.pushState({}, "", "/another-business-page"));
-  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard"));
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.equal(await page.$eval("#web2ai_overlay_host", (host) => Boolean(host.shadowRoot.querySelector(".skillCard"))), false);
   await page.evaluate(() => history.pushState({}, "", "/"));
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("订单分析"));
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.match(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || ""), /订单综合分析/);
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "Chat")?.click();
   });
@@ -459,20 +509,50 @@ try {
   });
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard .skillStatus.available"));
   const restoredSkill = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || "");
-  assert.match(restoredSkill, /订单分析/);
-  assert.match(restoredSkill, /分析方法：识别异常订单并说明原因/);
-  await page.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("订单分析"));
+  assert.match(restoredSkill, /订单综合分析/);
+  assert.match(restoredSkill, /数据源：共 3 个/, "same-page and cross-page data sources must survive refresh");
+  assert.match(restoredSkill, /主订单明细/);
+  assert.match(restoredSkill, /分析方法：识别异常订单并说明原因，使用列表输出/);
+
+  // Test mode must load every source before it attempts the model request. The
+  // fixture intentionally has no API key, so the model step fails after the
+  // data assertions without depending on an external service.
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillCard button")).find((button) => button.textContent?.trim() === "测试技能")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillTest"));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillTestPanel button")).find((button) => button.textContent?.trim() === "开始测试")?.click();
+  });
+  await page.waitForFunction(() => {
+    const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+    return shadow?.querySelectorAll(".skillDataSourceTab.complete").length === 3 && !shadow.querySelector(".skillTestHead button")?.disabled;
+  }, { timeout: 30000 });
+  const testedSources = await page.$eval("#web2ai_overlay_host", (host) =>
+    Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => tab.textContent || "")
+  );
+  assert.equal(testedSources.length, 3, "test mode must retain all configured source tabs");
+  assert.ok(testedSources.every((label) => /共 \d+ 条/.test(label)), `test mode must show a row count for every source: ${JSON.stringify(testedSources)}`);
+  await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTestHead button")?.click());
+
+  await page.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("订单综合分析"));
   const skillBarText = await page.$eval("[data-web2ai-skill-bar]", (bar) => bar.textContent || "");
-  assert.match(skillBarText, /技能列表：.*订单分析.*执行/, "bound skills must appear above their data source");
+  assert.match(skillBarText, /技能列表：.*订单综合分析.*执行/, "bound skills must appear above their data source");
   await page.$eval("[data-web2ai-skill-bar] button", (button) => button.click());
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillExecution"));
   const executionTitle = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionTitle")?.textContent || "");
-  assert.match(executionTitle, /订单分析/);
+  assert.match(executionTitle, /订单综合分析/);
   const testIsFullscreen = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".wrap")?.classList.contains("max"));
   assert.equal(testIsFullscreen, true, "skill testing must use the full-screen interaction");
+  await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector("#web2ai_run_skill")?.click());
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillDataPreviewStatus")?.textContent?.includes("本次使用"));
   const loadedSkillData = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionPanel")?.textContent || "");
   assert.match(loadedSkillData, /已读取 \d+ 行，本次使用 \d+ 行/);
+  const executedSources = await page.$eval("#web2ai_overlay_host", (host) =>
+    Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => tab.textContent || "")
+  );
+  assert.equal(executedSources.length, 3, "execution mode must retain all configured source tabs");
+  assert.ok(executedSources.every((label) => /共 \d+ 条/.test(label)), `execution mode must show a row count for every source: ${JSON.stringify(executedSources)}`);
   const previewedSkillRows = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillDataPreview tbody tr").length);
   assert.ok(previewedSkillRows > 0 && previewedSkillRows <= 10, "skill execution must preview up to ten loaded rows per page");
   const firstPreviewCells = await page.$eval("#web2ai_overlay_host", (host) =>
@@ -538,7 +618,7 @@ try {
   assert.equal(await optionsPage.$$eval("#profile option", (options) => options.length), profileCountBeforeAdd);
   await optionsPage.close();
 
-  console.log("Chrome E2E passed: model switching/configuration, screenshots, skill persistence, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
+console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
 } finally {
   await browser.close();
   server.close();

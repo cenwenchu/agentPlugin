@@ -9,7 +9,8 @@ import { IS_TOP_FRAME, STATE, compactOneLine, refs, uid } from "./state.js";
 import { getCssSelector, isVisibleElement } from "./dom.js";
 import { showToast } from "./toast.js";
 import { showConfirmDialog, showPromptDialog } from "./dialog.js";
-import { classifyScrollCollection, nextVirtualScrollTop, shouldStopAfterNoProgress } from "./skill-collection-model.js";
+import { classifyScrollCollection, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch } from "./skill-collection-model.js";
+import { skillContentFingerprint } from "./skill-import-model.js";
 import {
   clickElement, findHeaderRowAbove, findLiveTableAfterPageTurn, findPaginationNextButton,
   getRowCells, getStableTableRoot, getTableContentDigest, getTableRowTexts, isHeaderRow,
@@ -30,12 +31,36 @@ let observedPageKey = "";
 let pageWatchTimer = null;
 let skillBarTimer = null;
 let skillBarBroadcastTimer = null;
+let skillValidationRunId = 0;
 let lastSkillBarDiagnostic = "";
 let lastSkillBarDiagnosticAt = 0;
+let activeBusinessTabTitle = "";
+let confirmedBusinessTabTitle = "";
+let pendingBusinessTabTitle = "";
+let businessTabClickListenerInstalled = false;
 const activeCollections = new Map();
 // 默认关闭，避免在业务页面控制台持续输出采集轨迹。真实站点排障时可临时
 // 改为 true；所有采集日志都通过 logSkillCollection 这一处控制。
 const SKILL_COLLECTION_DIAGNOSTICS = false;
+
+function readBusinessPageTabs() {
+  const titles = Array.from(document.querySelectorAll('[class*="realTab"]'))
+    .filter((element) => String(element.className || "").split(/\s+/).some((name) => name.endsWith("-realTab")))
+    .map((element) => compactOneLine(element.textContent || ""))
+    .filter(Boolean);
+  const uniqueTitles = [...new Set(titles)];
+  return {
+    titles: uniqueTitles,
+    activeTitle: uniqueTitles.includes(confirmedBusinessTabTitle)
+      ? confirmedBusinessTabTitle
+      : uniqueTitles[uniqueTitles.length - 1] || "",
+    activeTitleConfirmed: Boolean(confirmedBusinessTabTitle && uniqueTitles.includes(confirmedBusinessTabTitle))
+  };
+}
+
+function getBusinessPageTabs() {
+  return readBusinessPageTabs();
+}
 
 function emptyAnalysisMethod() {
   return { description: "" };
@@ -70,7 +95,9 @@ function pageKey(url = location.href) {
 }
 
 function normalizeHeader(value) {
-  return compactOneLine(value).toLowerCase();
+  // 组件重渲染时，相邻文本节点可能从“SKU信息 展示设置”变为
+  // “SKU信息展示设置”。空白来自 DOM 布局而非字段语义，比较时应忽略。
+  return compactOneLine(value).toLowerCase().replace(/\s+/g, "");
 }
 
 function tableCandidates() {
@@ -152,23 +179,54 @@ function extractHeaders(table, preferredTarget = null) {
   return cellTexts(cells);
 }
 
+function inferTableTitle(table) {
+  const direct = [
+    table.querySelector("caption")?.textContent,
+    table.getAttribute("aria-label"),
+    table.getAttribute("data-title")
+  ];
+  for (let node = table, depth = 0; node && depth < 4; node = node.parentElement, depth++) {
+    const title = node.querySelector?.(
+      ":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > [class*='card-title' i], " +
+      ":scope > [class*='header-title' i], :scope > [class*='table-title' i], " +
+      ":scope > * > [class*='card-title' i], :scope > * > [class*='header-title' i], :scope > * > [class*='table-title' i]"
+    );
+    if (title && !title.closest("thead, tr, [role='row']")) direct.push(title.textContent);
+  }
+  return direct.map(compactOneLine).find((value) => value && value.length <= 40) || "";
+}
+
 function describeTable(table, preferredTarget = null) {
   const candidates = tableCandidates();
   const headers = extractHeaders(table, preferredTarget);
+  const tableTitle = inferTableTitle(table);
+  const selector = getCssSelector(table);
+  const tableIndex = Math.max(0, candidates.indexOf(table));
   console.info("[web2ai.skill] selected table", {
     frame: IS_TOP_FRAME ? "top" : "child",
+    frameUrl: pageKey(location.href),
     root: `${table.tagName.toLowerCase()}${table.id ? `#${table.id}` : ""}.${String(table.className || "").split(/\s+/).slice(0, 3).join(".")}`,
     clicked: preferredTarget ? `${preferredTarget.tagName.toLowerCase()}.${String(preferredTarget.className || "").split(/\s+/).slice(0, 3).join(".")}` : "none",
+    selector,
+    tableIndex,
+    candidateCount: candidates.length,
     headerCount: headers.length,
     headers: headers.slice(0, 12)
   });
   return {
-    selector: getCssSelector(table),
-    tableIndex: Math.max(0, candidates.indexOf(table)),
+    selector,
+    tableIndex,
     headers,
     headerFingerprint: headers.map(normalizeHeader).join("|"),
     preview: headers.join("、") || "未识别到数据源字段",
+    tableTitle,
+    // 初次绑定优先记录明确的表格标题；业务 Tab 和字段兜底会在 top frame
+    // 收到选择结果后补齐。保存后该名称不再自动重算。
+    displayName: tableTitle,
+    displayNameOrigin: "auto",
+    isTopFrame: IS_TOP_FRAME,
     frameUrl: pageKey(location.href),
+    capturedPageUrl: location.href,
     pageTitle: document.title,
     capturedAt: Date.now()
   };
@@ -188,7 +246,15 @@ function headerSimilarity(expected, actual) {
   return overlap / left.size;
 }
 
+function sourceMatchesCurrentFrame(source) {
+  const expected = pageKey(source?.frameUrl || "");
+  return !expected || expected === pageKey(location.href);
+}
+
 function resolveStoredSource(source) {
+  if (!sourceMatchesCurrentFrame(source)) {
+    return { found: false, candidateCount: 0, frameMismatch: true, frameUrl: pageKey(location.href) };
+  }
   const candidates = tableCandidates();
   let selectorTable = null;
   let matchMethod = "none";
@@ -200,17 +266,10 @@ function resolveStoredSource(source) {
     selectorTable = resolved && candidates.includes(resolved) ? resolved : null;
   }
   const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
-  const ranked = candidates.map((table) => ({
-    table,
-    score: headerSimilarity(source?.headers || [], extractHeaders(table)),
-    priority: table === selectorTable ? 2 : table === indexedTable ? 1 : 0,
-    method: table === selectorTable ? "selector" : table === indexedTable ? "tableIndex" : "headerSimilarity"
-  })).sort((a, b) => (b.score - a.score) || (b.priority - a.priority));
-  const selectedMatch = source?.headers?.length
-    ? ranked[0]
-    : ranked.find((item) => item.table === selectorTable) || ranked.find((item) => item.table === indexedTable);
-  const selected = selectedMatch?.table || null;
-  matchMethod = selectedMatch?.method || "none";
+  // 数据源身份必须由保存时的 DOM 定位确定。表头只负责校验变化，不能在
+  // 多个相似表格之间替我们重新选择，否则订单/售后等同构表会互相串绑。
+  const selected = selectorTable || indexedTable || null;
+  matchMethod = selectorTable ? "selector" : indexedTable ? "tableIndex" : "none";
   if (!selected) return { found: false, candidateCount: candidates.length, frameUrl: pageKey(location.href) };
   const headers = extractHeaders(selected);
   const similarity = headerSimilarity(source?.headers || [], headers);
@@ -226,19 +285,20 @@ function resolveStoredSource(source) {
     actualHeaderCount: headers.length,
     actualHeaders: headers.slice(0, 80),
     similarity,
-    status: similarity >= 0.8 ? "available" : "changed"
+    status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed"
   };
   // 单行 JSON 便于从复杂业务页面控制台直接复制；仅包含表头，不输出业务数据行。
   console.info("[web2ai.skill] validated source", JSON.stringify(diagnostic));
   return {
     found: true,
-    status: similarity >= 0.8 ? "available" : "changed",
+    status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
     headers,
     similarity
   };
 }
 
 function extractStoredSourceData(source, limit = 200) {
+  if (!sourceMatchesCurrentFrame(source)) return { found: false, candidateCount: 0, frameMismatch: true };
   const candidates = tableCandidates();
   let selectorTable = null;
   try { selectorTable = source?.selector ? document.querySelector(source.selector) : null; } catch { selectorTable = null; }
@@ -247,14 +307,7 @@ function extractStoredSourceData(source, limit = 200) {
     selectorTable = resolved && candidates.includes(resolved) ? resolved : null;
   }
   const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
-  const ranked = candidates.map((table) => ({
-    table,
-    score: headerSimilarity(source?.headers || [], extractHeaders(table)),
-    priority: table === selectorTable ? 2 : table === indexedTable ? 1 : 0
-  })).sort((a, b) => (b.score - a.score) || (b.priority - a.priority));
-  const selected = source?.headers?.length
-    ? ranked[0]?.table
-    : selectorTable || indexedTable;
+  const selected = selectorTable || indexedTable;
   if (!selected) return { found: false, candidateCount: candidates.length };
   const headers = extractHeaders(selected);
   const allRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
@@ -272,7 +325,7 @@ function extractStoredSourceData(source, limit = 200) {
   const rows = uniqueRows.slice(0, limit);
   return {
     found: true,
-    status: headerSimilarity(source?.headers || [], headers) >= 0.8 ? "available" : "changed",
+    status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
     headers,
     rows,
     rowCount: rows.length,
@@ -311,6 +364,27 @@ function describeCollectionElement(node) {
   const id = node.id ? `#${node.id}` : "";
   const classes = String(node.className || "").trim().split(/\s+/).filter(Boolean).slice(0, 4).join(".");
   return `${node.tagName?.toLowerCase?.() || "element"}${id}${classes ? `.${classes}` : ""}`;
+}
+
+function describeScrollCandidates(table) {
+  if (!table) return [];
+  const nodes = new Set();
+  table.querySelectorAll?.([
+    ".ant-table-body", ".ant-table-content", ".ant-virtual-list-holder",
+    ".arco-table-body", ".arco-scrollbar-container", ".arco-virtual-list",
+    ".art-table-body", ".art-virtual-scroll", "[class*='virtual-list']", "[class*='virtual-scroll']",
+    "[role='rowgroup']"
+  ].join(",")).forEach((node) => nodes.add(node));
+  let ancestor = table;
+  for (let depth = 0; depth < 10 && ancestor; depth++, ancestor = ancestor.parentElement) nodes.add(ancestor);
+  return [...nodes].filter((node) => node instanceof HTMLElement).slice(0, 16).map((node) => ({
+    element: describeCollectionElement(node),
+    clientHeight: Math.round(node.clientHeight || 0),
+    scrollHeight: Math.round(node.scrollHeight || 0),
+    scrollTop: Math.round(node.scrollTop || 0),
+    overflowY: getComputedStyle(node).overflowY || "",
+    visible: isVisibleElement(node)
+  }));
 }
 
 function findStoredSourceVerticalScroller(table) {
@@ -378,7 +452,31 @@ async function waitForVirtualRows(source, beforeTable, beforeDigest, beforeRows)
   if (changed) await waitForTableDataReady(findLiveTableAfterPageTurn(beforeTable, tableIndex), beforeDigest, 3000, tableIndex);
 }
 
-async function collectStoredSourcePage(source, { collectionId, control, page, maxPages, maxRows, rows, seen }) {
+async function resolvePageScrollCollection(source, initialTable, page) {
+  let table = initialTable;
+  let scroller = findStoredSourceVerticalScroller(table);
+  let mode = scroller ? classifyVerticalCollection(scroller, table) : "none";
+  // 第一页没有“翻页完成”的等待过程。虚拟列表的占位高度和滚动容器可能
+  // 比首批行晚一两个渲染周期出现；短暂重试只读取布局，不主动滚动，避免
+  // 把普通表格误判为虚拟列表。后续页已经由 waitForTableDataReady 稳定过。
+  const attempts = page === 1 ? 4 : 1;
+  for (let attempt = 1; mode === "none" && attempt < attempts; attempt++) {
+    logSkillCollection("scroll detection retry", {
+      page,
+      attempt,
+      table: describeCollectionElement(table),
+      scroller: describeCollectionElement(scroller),
+      candidates: describeScrollCandidates(table)
+    });
+    await new Promise((resolve) => setTimeout(resolve, 140));
+    table = findStoredSourceTable(source) || table;
+    scroller = findStoredSourceVerticalScroller(table);
+    mode = scroller ? classifyVerticalCollection(scroller, table) : "none";
+  }
+  return { table, scroller, mode };
+}
+
+async function collectStoredSourcePage(source, { collectionId, control, page, maxPages, maxRows, rows, seen, waitForInitialRowsMs = 0 }) {
   let headers = [];
   let added = 0;
   let scrollSteps = 0;
@@ -399,14 +497,35 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
 
   let current = addRenderedRows();
   if (!current.found) return { found: false, headers, added, scrollSteps };
+  if (page === 1 && !current.rowCount && waitForInitialRowsMs > 0) {
+    const startedAt = Date.now();
+    while (!control.stopped && Date.now() - startedAt < waitForInitialRowsMs) {
+      emitCollectionProgress(collectionId, {
+        phase: "waiting-rows", page, pages: 0, rowCount: rows.length, maxPages, maxRows
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      current = addRenderedRows();
+      if (!current.found) return { found: false, headers, added, scrollSteps };
+      if (current.rowCount > 0) break;
+    }
+    logSkillCollection("initial rows ready", {
+      collectionId, page, waitedMs: Date.now() - startedAt, renderedRows: current.rowCount || 0
+    });
+  }
   let table = findStoredSourceTable(source);
-  let scroller = findStoredSourceVerticalScroller(table);
-  const scrollMode = scroller ? classifyVerticalCollection(scroller, table) : "none";
+  const scrollCollection = await resolvePageScrollCollection(source, table, page);
+  table = scrollCollection.table;
+  let scroller = scrollCollection.scroller;
+  const scrollMode = scrollCollection.mode;
+  // 等待期间首屏可能继续补行，先收录再开始滚动。
+  current = addRenderedRows();
+  if (!current.found) return { found: false, headers, added, scrollSteps };
   logSkillCollection("page scan", {
     collectionId, page, table: describeCollectionElement(table), scroller: describeCollectionElement(scroller),
     scrollMode, renderedRows: current.rowCount || 0, added, totalRows: rows.length,
     scrollTop: Math.round(scroller?.scrollTop || 0), clientHeight: scroller?.clientHeight || 0,
-    scrollHeight: scroller?.scrollHeight || 0
+    scrollHeight: scroller?.scrollHeight || 0,
+    candidates: page === 1 ? describeScrollCandidates(table) : undefined
   });
   if (scrollMode === "none") return { found: true, headers, added, scrollSteps };
 
@@ -422,6 +541,7 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
 
     let stableBottomPasses = 0;
     let consecutiveEmptySteps = 0;
+    let scrollingConfirmed = scrollMode === "confirmed";
     for (let step = 0; step < 160 && rows.length < maxRows && !control.stopped; step++) {
       table = findStoredSourceTable(source);
       scroller = findStoredSourceVerticalScroller(table) || scroller;
@@ -457,13 +577,17 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
       current = addRenderedRows();
       if (!current.found) return { found: false, headers, added, scrollSteps };
       const newlyAdded = added - addedBeforeScrollRead;
+      // `probe` 只表示初次缺少框架级虚拟滚动特征。一旦实际滚动获得了
+      // 新数据，就已经用行为证明确实需要滚动；后续应容忍一个短暂空白
+      // 区间，不能仍按“一次无新增即停止”的防误判规则提前结束。
+      if (newlyAdded > 0) scrollingConfirmed = true;
       consecutiveEmptySteps = newlyAdded > 0 ? 0 : consecutiveEmptySteps + 1;
       logSkillCollection("scroll step", {
         collectionId, page, step: scrollSteps, targetTop: Math.round(nextTop), actualTop: Math.round(scroller.scrollTop),
         clientHeight: scroller.clientHeight, scrollHeight: scroller.scrollHeight,
-        renderedRows: current.rowCount || 0, added: newlyAdded, consecutiveEmptySteps, totalRows: rows.length
+        renderedRows: current.rowCount || 0, added: newlyAdded, consecutiveEmptySteps, scrollingConfirmed, totalRows: rows.length
       });
-      const emptyStepLimit = scrollMode === "probe" ? 1 : 2;
+      const emptyStepLimit = scrollingConfirmed ? 2 : 1;
       if (shouldStopAfterNoProgress(consecutiveEmptySteps, emptyStepLimit)) {
         logSkillCollection("page scroll stopped", {
           collectionId, page, reason: "no-new-rows", scrollSteps, consecutiveEmptySteps, totalRows: rows.length
@@ -586,7 +710,8 @@ async function collectStoredSourceData(source, options = {}) {
       logSkillCollection("page start", { collectionId, page, totalRows: rows.length });
       emitCollectionProgress(collectionId, { phase: "reading", page, pages, rowCount: rows.length, maxPages, maxRows });
       const currentPage = await collectStoredSourcePage(source, {
-        collectionId, control, page, maxPages, maxRows, rows, seen
+        collectionId, control, page, maxPages, maxRows, rows, seen,
+        waitForInitialRowsMs: Number(options.waitForInitialRowsMs) || 0
       });
       if (!currentPage.found) throw new Error("数据源定位失败");
       headers = currentPage.headers || headers;
@@ -660,6 +785,7 @@ function stopStoredSourceCollection(collectionId) {
 }
 
 function findStoredSourceTable(source) {
+  if (!sourceMatchesCurrentFrame(source)) return null;
   const candidates = tableCandidates();
   let selectorTable = null;
   try { selectorTable = source?.selector ? document.querySelector(source.selector) : null; } catch { selectorTable = null; }
@@ -668,12 +794,7 @@ function findStoredSourceTable(source) {
     selectorTable = resolved && candidates.includes(resolved) ? resolved : null;
   }
   const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
-  if (!source?.headers?.length) return selectorTable || indexedTable;
-  return candidates.map((table) => ({
-    table,
-    score: headerSimilarity(source.headers, extractHeaders(table)),
-    priority: table === selectorTable ? 2 : table === indexedTable ? 1 : 0
-  })).sort((a, b) => (b.score - a.score) || (b.priority - a.priority))[0]?.table || null;
+  return selectorTable || indexedTable;
 }
 
 function focusStoredSource(source) {
@@ -706,24 +827,25 @@ function renderSkillBars(skills = []) {
   const grouped = new Map();
   const probes = [];
   for (const skill of skills) {
-    const expectedFrameUrl = pageKey(skill.source?.frameUrl || "");
-    const table = findStoredSourceTable(skill.source);
-    const similarity = table ? headerSimilarity(skill.source?.headers || [], extractHeaders(table)) : 0;
-    const frameMatches = !expectedFrameUrl || expectedFrameUrl === pageKey(location.href);
-    probes.push({
-      skillId: skill.id,
-      skillName: skill.name,
-      expectedFrameUrl,
-      frameMatches,
-      foundTable: Boolean(table),
-      similarity: Number(similarity.toFixed(3))
-    });
-    // frame 地址可能因站点路由、入口页或 iframe 重建而变化。横条与数据源
-    // 可用性校验采用相同的 0.8 表头覆盖率，避免技能显示可用却不展示横条。
-    if (!table || (!frameMatches && similarity < 0.8)) continue;
-    const list = grouped.get(table) || [];
-    list.push(skill);
-    grouped.set(table, list);
+    for (const source of (Array.isArray(skill.pageSources) ? skill.pageSources : skillSources(skill))) {
+      const expectedFrameUrl = pageKey(source.frameUrl || "");
+      const table = findStoredSourceTable(source);
+      const similarity = table ? headerSimilarity(source.headers || [], extractHeaders(table)) : 0;
+      const frameMatches = !expectedFrameUrl || expectedFrameUrl === pageKey(location.href);
+      probes.push({
+        skillId: skill.id,
+        skillName: skill.name,
+        sourceId: source.id,
+        expectedFrameUrl,
+        frameMatches,
+        foundTable: Boolean(table),
+        similarity: Number(similarity.toFixed(3))
+      });
+      if (!table || !frameMatches) continue;
+      const list = grouped.get(table) || [];
+      if (!list.some((item) => item.id === skill.id)) list.push(skill);
+      grouped.set(table, list);
+    }
   }
   for (const [table, tableSkills] of grouped) {
     const bar = document.createElement("div");
@@ -815,36 +937,239 @@ function scheduleSkillBars(skills = []) {
 
 async function readSkills() {
   const data = await chrome.storage.local.get([STORAGE_KEY]);
-  return Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
+  const stored = Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
+  // 读取时只做结构兼容，绝不回写或重新生成已经保存的数据源名称。
+  return stored.map(normalizeStoredSkill);
 }
 
 async function writeSkills(skills) {
   await chrome.storage.local.set({ [STORAGE_KEY]: skills });
 }
 
+async function downloadSkillsExport() {
+  const [skills, pageNamesData] = await Promise.all([
+    readSkills(),
+    chrome.storage.local.get([PAGE_NAMES_STORAGE_KEY])
+  ]);
+  const payload = {
+    format: "web2ai-skills",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    skills,
+    pageNames: pageNamesData[PAGE_NAMES_STORAGE_KEY] || {}
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `web2ai-skills-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return skills.length;
+}
+
+async function previewSkillsImport(text) {
+  if (String(text || "").length > 5 * 1024 * 1024) throw new Error("导入文件不能超过 5MB");
+  let parsed;
+  try { parsed = JSON.parse(String(text || "")); } catch { throw new Error("文件不是有效的 JSON"); }
+  const rawSkills = Array.isArray(parsed) ? parsed : parsed?.skills;
+  if (!Array.isArray(rawSkills) || !rawSkills.length) throw new Error("文件中没有可导入的技能");
+  if (rawSkills.length > 500) throw new Error("一次最多导入 500 个技能");
+  const existing = await readSkills();
+  const seenFingerprints = new Set(existing.map(skillContentFingerprint));
+  const imported = [];
+  const failures = [];
+  let duplicate = 0;
+  rawSkills.forEach((raw, skillIndex) => {
+    try {
+      const normalized = normalizeStoredSkill(raw);
+      const name = compactOneLine(normalized?.name);
+      const sources = skillSources(normalized);
+      if (!name) throw new Error("缺少技能名称");
+      if (!sources.length) throw new Error("没有数据源");
+      for (const source of sources) {
+        if (!source.pageKey || !Array.isArray(source.headers) || !source.headers.length || (!source.selector && !Number.isInteger(source.tableIndex))) {
+          throw new Error("包含无效的数据源绑定");
+        }
+      }
+      const candidate = { ...normalized, name, sources, source: sources[0] };
+      const fingerprint = skillContentFingerprint(candidate);
+      if (seenFingerprints.has(fingerprint)) {
+        duplicate++;
+        return;
+      }
+      seenFingerprints.add(fingerprint);
+      const id = uid();
+      const importedSources = sources.map((source, sourceIndex) => ({
+        ...source,
+        id: `source_${id}_${sourceIndex + 1}`
+      }));
+      imported.push({
+        ...candidate,
+        id,
+        sources: importedSources,
+        source: importedSources[0],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+    } catch (error) {
+      failures.push({
+        index: skillIndex + 1,
+        name: compactOneLine(raw?.name) || `第 ${skillIndex + 1} 个技能`,
+        error: String(error?.message ?? error)
+      });
+    }
+  });
+  const pageNames = parsed?.pageNames && typeof parsed.pageNames === "object" && !Array.isArray(parsed.pageNames)
+    ? Object.fromEntries(Object.entries(parsed.pageNames).filter(([key, value]) => key && typeof value === "string"))
+    : {};
+  return {
+    skills: imported,
+    pageNames,
+    total: rawSkills.length,
+    success: imported.length,
+    duplicate,
+    failed: failures.length,
+    failures
+  };
+}
+
+async function applySkillsImport(preview) {
+  const existing = await readSkills();
+  const merged = [...existing, ...preview.skills];
+  const pageNamesData = await chrome.storage.local.get([PAGE_NAMES_STORAGE_KEY]);
+  await Promise.all([
+    writeSkills(merged),
+    chrome.storage.local.set({
+      [PAGE_NAMES_STORAGE_KEY]: { ...(pageNamesData[PAGE_NAMES_STORAGE_KEY] || {}), ...(preview.pageNames || {}) }
+    })
+  ]);
+  await loadSkills();
+  await chrome.runtime.sendMessage({ type: "REFRESH_SKILLS_ALL_TABS" }).catch(() => void 0);
+  return { total: preview.total, success: preview.success, duplicate: preview.duplicate, failed: preview.failed };
+}
+
+function autoSourceDisplayName(source, index = 0) {
+  const direct = compactOneLine(source.tableTitle || source.businessTabTitle || "");
+  if (direct) return direct;
+  const ignored = /^(序号|操作|选择|全选|checkbox)$/i;
+  const representativeHeaders = (source.headers || []).map(compactOneLine).filter((header) => header && !ignored.test(header)).slice(0, 2);
+  if (representativeHeaders.length) return `${representativeHeaders.join("、")}${representativeHeaders.length > 1 ? "等数据" : "数据"}`;
+  return `数据源 ${index + 1}`;
+}
+
+function normalizeSkillSource(source, index = 0) {
+  if (!source || typeof source !== "object") return null;
+  const frameId = Number(source.frameId) || 0;
+  const normalizedFrameUrl = pageKey(source.frameUrl || "");
+  // 非历史迁移数据中，顶层 frame 的地址必然就是数据源所属页面。
+  // 这也会在加载时自动修复曾因 tab.url 与 sender.url 不同步而保存错页的数据源。
+  const repairTopFrameOwnership = frameId === 0 && !source.legacyPageOwnership && /^https?:\/\//.test(normalizedFrameUrl);
+  const sourcePageUrl = repairTopFrameOwnership ? (source.frameUrl || normalizedFrameUrl) : (source.pageUrl || source.frameUrl || "");
+  const storedDisplayName = compactOneLine(source.displayName || source.sourceName || source.pageTitle || "");
+  // 名称是绑定时的用户可见快照。只在首次绑定且完全没有历史名称时生成，
+  // 页面标题、业务 Tab 或表头后续变化都不能隐式改名。
+  const hasStoredDisplayName = Boolean(storedDisplayName);
+  return {
+    ...source,
+    frameId,
+    id: source.id || uid(),
+    displayName: hasStoredDisplayName ? storedDisplayName : autoSourceDisplayName(source, index),
+    displayNameCustomized: source.displayNameCustomized === true,
+    displayNameOrigin: source.displayNameOrigin || (hasStoredDisplayName ? "recorded" : "auto"),
+    pageKey: repairTopFrameOwnership ? normalizedFrameUrl : (source.pageKey || pageKey(sourcePageUrl)),
+    pageUrl: sourcePageUrl
+  };
+}
+
+function skillSources(skill) {
+  const values = Array.isArray(skill?.sources) && skill.sources.length ? skill.sources : (skill?.source ? [skill.source] : []);
+  return values.map((source, index) => normalizeSkillSource({
+    ...source,
+    id: source?.id || (skill?.id ? `source_${skill.id}_${index + 1}` : "")
+  }, index)).filter(Boolean);
+}
+
+function normalizeStoredSkill(skill) {
+  if (!skill || typeof skill !== "object") return skill;
+  const sources = skillSources(skill).map((source, index) => {
+    const migrationId = skill.id ? `source_${skill.id}_${index + 1}` : "";
+    // 修复上一版从旧 `source` 推导 pageKey 时误用了 frameUrl 的记录。
+    // 迁移生成的稳定 ID 只代表历史数据源，原始归属必须以 skill.pageKey 为准。
+    if (source.id === migrationId) {
+      return { ...source, pageKey: skill.pageKey || source.pageKey, pageUrl: skill.pageUrl || source.pageUrl, legacyPageOwnership: true };
+    }
+    return source;
+  });
+  const primarySource = sources[0] || null;
+  const sourcePageKeys = new Set(sources.map((source) => source.pageKey).filter(Boolean));
+  // 独立编辑器早期版本曾把“创建入口页”误存为技能主页面。
+  // 当主页面不属于任何数据源时，可确定为错归属并安全迁移到第一个数据源页面。
+  const repairPrimaryPage = Boolean(primarySource?.pageKey && !sourcePageKeys.has(skill.pageKey));
+  return {
+    ...skill,
+    version: Math.max(3, Number(skill.version) || 1),
+    pageKey: repairPrimaryPage ? primarySource.pageKey : skill.pageKey,
+    pageUrl: repairPrimaryPage ? (primarySource.pageUrl || skill.pageUrl) : skill.pageUrl,
+    pageTitle: repairPrimaryPage ? (primarySource.pageTitle || skill.pageTitle) : skill.pageTitle,
+    sourceName: primarySource?.displayName || skill.sourceName,
+    sources,
+    source: primarySource
+  };
+}
+
 async function loadSkills() {
   if (!IS_TOP_FRAME) return;
+  const validationRunId = ++skillValidationRunId;
   const [all, pageNamesData] = await Promise.all([
     readSkills(),
     chrome.storage.local.get([PAGE_NAMES_STORAGE_KEY])
   ]);
+  const businessTabs = readBusinessPageTabs();
+  activeBusinessTabTitle = businessTabs.activeTitle;
+  const currentPageKey = pageKey();
+  let learnedTabTitle = false;
+  if (activeBusinessTabTitle) {
+    for (const skill of all) {
+      for (const source of skill.sources) {
+        const shouldRepairTabTitle = businessTabs.activeTitleConfirmed && source.businessTabTitle !== activeBusinessTabTitle;
+        if (source.pageKey === currentPageKey && (!source.businessTabTitle || shouldRepairTabTitle)) {
+          source.businessTabTitle = activeBusinessTabTitle;
+          source.businessTabTitleConfirmed = businessTabs.activeTitleConfirmed;
+          learnedTabTitle = true;
+        }
+      }
+      skill.source = skill.sources[0] || null;
+    }
+  }
+  if (learnedTabTitle) await writeSkills(all);
   STATE.skillPageNames = pageNamesData[PAGE_NAMES_STORAGE_KEY] && typeof pageNamesData[PAGE_NAMES_STORAGE_KEY] === "object"
     ? pageNamesData[PAGE_NAMES_STORAGE_KEY]
     : {};
   STATE.skillCatalog = all;
-  STATE.skills = all.filter((skill) => skill.pageKey === pageKey());
-  STATE.skillSourceStatuses = Object.fromEntries(STATE.skills.map((skill) => [skill.id, { status: "checking" }]));
+  STATE.skills = all.filter((skill) => skill.pageKey === currentPageKey || skill.sources.some((source) => source.pageKey === currentPageKey))
+    .map((skill) => ({
+      ...skill,
+      // 横条渲染只能看到当前顶层页面的数据源，不能拿其他页面的相似表格兜底。
+      pageSources: skill.sources.filter((source) => source.pageKey === currentPageKey || (!source.pageKey && skill.pageKey === currentPageKey))
+    }));
+  STATE.skillSourceStatuses = Object.fromEntries(STATE.skills.map((skill) => [
+    skill.id,
+    Object.fromEntries(skill.sources.map((source) => [source.id, { status: "checking" }]))
+  ]));
   renderCallback();
   scheduleSkillBars(STATE.skills);
   chrome.runtime.sendMessage({
     type: "BROADCAST_TO_TAB",
     payload: { message: { type: "SYNC_SKILL_BARS", skills: STATE.skills } }
   }).catch(() => void 0);
-  await Promise.all(STATE.skills.map((skill) => validateSkillSource(skill)));
+  await Promise.all(STATE.skills.map((skill) => validateSkillSource(skill, validationRunId)));
 }
 
 function createSkillDraft() {
-  STATE.skillDraft = { id: "", name: "", sourceName: "", source: null, analysisMethod: emptyAnalysisMethod() };
+  STATE.skillDraft = { id: "", name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
+  STATE.activePanelTab = "skills";
+  STATE.open = true;
+  chrome.storage.sync.set({ lastPanelTab: "skills" }).catch(() => void 0);
   renderCallback();
 }
 
@@ -853,23 +1178,22 @@ function cancelSkillDraft() {
   renderCallback();
 }
 
-async function selectSkillTable() {
-  if (!STATE.skillDraft) createSkillDraft();
+async function selectSkillTable(sourceId = "") {
+  if (!STATE.skillDraft) STATE.skillDraft = { id: "", name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
   const sessionId = uid();
   STATE.skillPicking = true;
   STATE.skillPickSession = sessionId;
+  STATE.skillPickSourceId = sourceId;
   STATE.open = false;
   renderCallback();
   await chrome.runtime.sendMessage({
-    type: "BROADCAST_TO_TAB",
-    payload: { message: { type: "START_SKILL_TABLE_PICK", sessionId } }
+    type: "START_SKILL_SOURCE_PICK",
+    sessionId
   });
 }
 
 async function startSkillCreation() {
-  STATE.skillDraft = { id: "", name: "", sourceName: "", source: null, analysisMethod: emptyAnalysisMethod() };
-  STATE.activePanelTab = "skills";
-  chrome.storage.sync.set({ lastPanelTab: "skills" }).catch(() => void 0);
+  createSkillDraft();
   await selectSkillTable();
 }
 
@@ -907,9 +1231,23 @@ function startSkillTablePickInFrame(sessionId) {
     if (table) table.style.outline = "3px solid #2563eb";
   };
   const onDown = (event) => {
-    if (event.button !== 0 || !hovered) return;
+    if (event.button !== 0) return;
+    const clickedTable = hovered || resolveTableFromTarget(event.target);
+    if (!clickedTable) {
+      const target = event.target instanceof Element ? event.target : null;
+      const drawer = target?.closest?.(".ant-drawer,.ant-modal,.arco-drawer,.arco-modal,[role='dialog'],[class*='drawer' i],[class*='modal' i]");
+      console.info("[web2ai.skill-pick] unresolved click", JSON.stringify({
+        frame: IS_TOP_FRAME ? "top" : "child",
+        frameUrl: pageKey(location.href),
+        target: target ? `${target.tagName.toLowerCase()}#${target.id || ""}.${String(target.className || "").trim().split(/\s+/).filter(Boolean).slice(0, 5).join(".")}` : "none",
+        inDrawer: Boolean(drawer),
+        drawer: drawer ? `${drawer.tagName.toLowerCase()}#${drawer.id || ""}.${String(drawer.className || "").trim().split(/\s+/).filter(Boolean).slice(0, 5).join(".")}` : "none",
+        candidateCount: tableCandidates().length
+      }));
+      return;
+    }
     event.preventDefault(); event.stopImmediatePropagation();
-    sendResult({ source: describeTable(hovered, event.target instanceof Element ? event.target : hoveredTarget) });
+    sendResult({ source: describeTable(clickedTable, event.target instanceof Element ? event.target : hoveredTarget) });
   };
   const onKey = (event) => {
     if (event.key !== "Escape") return;
@@ -939,37 +1277,108 @@ function acceptSkillTablePickResult(payload) {
   if (payload.cancelled) {
     showToast("已取消选择数据源");
   } else if (payload.source) {
-    STATE.skillDraft ||= { id: "", name: "", sourceName: "", source: null, analysisMethod: emptyAnalysisMethod() };
-    STATE.skillDraft.source = { ...payload.source, frameId: payload.frameId || 0, frameUrl: payload.frameUrl || payload.source.frameUrl };
-    if (!STATE.skillDraft.sourceName) STATE.skillDraft.sourceName = payload.source.pageTitle || "页面数据源";
+    STATE.skillDraft ||= { id: "", name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
+    const selectedSource = {
+      ...payload.source,
+      id: STATE.skillPickSourceId || uid(),
+      frameId: payload.frameId || 0,
+      frameUrl: payload.frameUrl || payload.source.frameUrl,
+      pageKey: payload.pageKey || payload.source.pageKey,
+      pageUrl: payload.pageUrl || payload.source.pageUrl
+    };
+    if (!compactOneLine(selectedSource.displayName || "")) {
+      selectedSource.displayName = autoSourceDisplayName(selectedSource, STATE.skillDraft.sources.length);
+      selectedSource.displayNameOrigin = "auto";
+    }
+    const source = normalizeSkillSource(selectedSource, STATE.skillDraft.sources.length);
+    // “添加数据源”和用户主动“重新选择”走同一套快照逻辑：名称、页面
+    // 展示信息和表头都以本次明确选择为准。日常读取与校验仍不会自动改名。
+    if (!source.displayNameCustomized) {
+      const baseName = source.displayName;
+      const sameNameCount = STATE.skillDraft.sources.filter((item) => (
+        item.id !== STATE.skillPickSourceId &&
+        (item.displayName === baseName || item.displayName?.startsWith(`${baseName}（`))
+      )).length;
+      if (sameNameCount) source.displayName = `${baseName}（${sameNameCount + 1}）`;
+    }
+    const duplicateIndex = STATE.skillDraft.sources.findIndex((item) => (
+      item.id !== STATE.skillPickSourceId && item.pageKey === source.pageKey &&
+      item.frameUrl === source.frameUrl && item.selector === source.selector &&
+      Number(item.tableIndex) === Number(source.tableIndex)
+    ));
+    if (duplicateIndex >= 0) {
+      console.info("[web2ai.skill-pick] duplicate source", JSON.stringify({
+        existingSourceId: STATE.skillDraft.sources[duplicateIndex].id,
+        selectedSourceId: source.id,
+        pageKey: source.pageKey,
+        frameUrl: source.frameUrl,
+        selector: source.selector,
+        tableIndex: source.tableIndex
+      }));
+      showToast("该数据源已经添加");
+    } else if (STATE.skillPickSourceId) {
+      const index = STATE.skillDraft.sources.findIndex((item) => item.id === STATE.skillPickSourceId);
+      if (index >= 0) STATE.skillDraft.sources[index] = source;
+    } else {
+      STATE.skillDraft.sources.push(source);
+    }
   }
+  STATE.skillPickSourceId = "";
+  renderCallback();
+}
+
+function removeSkillDraftSource(sourceId) {
+  if (!STATE.skillDraft) return;
+  STATE.skillDraft.sources = STATE.skillDraft.sources.filter((source) => source.id !== sourceId);
   renderCallback();
 }
 
 async function saveSkillDraft() {
   const draft = STATE.skillDraft;
-  if (!draft?.source) return showToast("请先选择数据源");
+  if (!draft?.sources?.length) return showToast("请至少选择一个数据源");
   if (!String(draft.name).trim()) return showToast("请填写技能名称");
   const all = await readSkills();
   const now = Date.now();
   const existing = all.find((skill) => skill.id === draft.id);
+  const primarySource = normalizeSkillSource(draft.sources[0]);
   const skill = {
     id: draft.id || uid(),
-    version: 1,
+    version: 3,
     name: String(draft.name).trim(),
-    pageKey: pageKey(),
-    pageUrl: location.href,
-    pageTitle: document.title,
-    sourceName: String(draft.sourceName || draft.source?.pageTitle || document.title || "页面数据源").trim(),
-    source: draft.source,
+    // 创建/修改期间可能跨多个页面选表，技能主归属始终跟随第一个数据源。
+    pageKey: primarySource.pageKey || existing?.pageKey || pageKey(),
+    pageUrl: primarySource.pageUrl || existing?.pageUrl || location.href,
+    pageTitle: primarySource.pageTitle || existing?.pageTitle || document.title,
+    sourceName: primarySource.displayName,
+    sources: draft.sources.map(normalizeSkillSource),
+    source: primarySource,
     analysisMethod: normalizeAnalysisMethod(draft.analysisMethod),
     createdAt: existing?.createdAt || now,
     updatedAt: now
   };
   const index = all.findIndex((item) => item.id === skill.id);
   if (index >= 0) all[index] = skill; else all.unshift(skill);
+  console.info("[web2ai.skill] saved skill", JSON.stringify({
+    skillId: skill.id,
+    skillName: skill.name,
+    primaryPageKey: skill.pageKey,
+    sourceCount: skill.sources.length,
+    sources: skill.sources.map((source) => ({
+      sourceId: source.id,
+      pageKey: source.pageKey,
+      frameId: source.frameId,
+      frameUrl: source.frameUrl,
+      selector: source.selector,
+      tableIndex: source.tableIndex,
+      headerCount: source.headers?.length || 0
+    }))
+  }));
   await writeSkills(all);
   STATE.skillDraft = null;
+  STATE.open = true;
+  STATE.activePanelTab = "skills";
+  await loadSkills();
+  await chrome.runtime.sendMessage({ type: "REFRESH_SKILLS_ALL_TABS" }).catch(() => void 0);
   showToast(existing ? "技能已修改" : "技能已保存");
 }
 
@@ -984,16 +1393,35 @@ async function saveSkillAnalysisMethod(id, description) {
   return skill;
 }
 
+async function updateSkillSourceHeaders(skillId, sourceId, headers) {
+  const normalizedHeaders = Array.isArray(headers) ? headers.map((header) => compactOneLine(header)).filter(Boolean) : [];
+  if (!normalizedHeaders.length) throw new Error("未识别到新的数据源字段");
+  const all = await readSkills();
+  const skill = all.find((item) => item.id === skillId);
+  const source = skill?.sources?.find((item) => item.id === sourceId);
+  if (!skill || !source) throw new Error("未找到需要更新的数据源");
+  source.headers = normalizedHeaders;
+  source.capturedAt = Date.now();
+  skill.source = skill.sources[0] || null;
+  skill.updatedAt = Date.now();
+  await writeSkills(all);
+  await loadSkills();
+  return source;
+}
+
 function rebindSkill(id) {
-  const skill = STATE.skills.find((item) => item.id === id);
+  const skill = STATE.skillCatalog.find((item) => item.id === id);
   if (!skill) return;
   STATE.skillDraft = {
     id: skill.id,
     name: skill.name,
-    sourceName: skill.sourceName,
-    source: skill.source,
-    analysisMethod: normalizeAnalysisMethod(skill.analysisMethod)
+    sources: skillSources(skill),
+    analysisMethod: normalizeAnalysisMethod(skill.analysisMethod),
+    createdAt: skill.createdAt || 0
   };
+  STATE.activePanelTab = "skills";
+  STATE.open = true;
+  chrome.storage.sync.set({ lastPanelTab: "skills" }).catch(() => void 0);
   renderCallback();
 }
 
@@ -1060,27 +1488,46 @@ async function renameCurrentSkillPage() {
   showToast("页面名称已修改");
 }
 
-async function validateSkillSource(skill) {
-  try {
-    const response = await chrome.runtime.sendMessage({ type: "VALIDATE_SKILL_SOURCE", source: skill.source });
-    STATE.skillSourceStatuses[skill.id] = response?.data || { status: "missing" };
-    if (!response?.data?.found) {
+async function validateSkillSource(skill, validationRunId = skillValidationRunId) {
+  const statuses = {};
+  await Promise.all(skill.sources.map(async (source) => {
+    if (source.pageKey !== pageKey()) {
+      statuses[source.id] = { status: "deferred", found: false };
+      return;
+    }
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "VALIDATE_SKILL_SOURCE", source });
+      statuses[source.id] = response?.data || { status: "missing" };
+      if (!response?.data?.found) {
       console.info("[web2ai.skill] validation result", JSON.stringify({
         skillId: skill.id,
         skillName: skill.name,
+        sourceId: source.id,
         status: response?.data?.status || "missing",
-        sourceFrameUrl: pageKey(skill.source?.frameUrl || ""),
+        sourceFrameUrl: pageKey(source.frameUrl || ""),
         probes: response?.data?.probes || []
       }));
+      }
+    } catch {
+      statuses[source.id] = { status: "missing" };
     }
-  } catch {
-    STATE.skillSourceStatuses[skill.id] = { status: "missing" };
-  }
+  }));
+  // 页面切换会同时产生多轮异步校验；旧页面较晚返回时不能覆盖新页面状态。
+  if (validationRunId !== skillValidationRunId || !STATE.skills.some((item) => item.id === skill.id)) return;
+  STATE.skillSourceStatuses[skill.id] = statuses;
   renderCallback();
 }
 
 function initSkills(onRender) {
   renderCallback = onRender || renderCallback;
+  if (IS_TOP_FRAME && !businessTabClickListenerInstalled) {
+    businessTabClickListenerInstalled = true;
+    document.addEventListener("click", (event) => {
+      const tab = event.target instanceof Element ? event.target.closest('[class*="realTab"]') : null;
+      if (!tab || !String(tab.className || "").split(/\s+/).some((name) => name.endsWith("-realTab"))) return;
+      pendingBusinessTabTitle = compactOneLine(tab.textContent || "");
+    }, true);
+  }
   if (IS_TOP_FRAME && !pageWatchTimer) {
     observedPageKey = pageKey();
     // SPA 的 pushState/replaceState 不会重新执行 content script，也没有统一事件。
@@ -1088,8 +1535,13 @@ function initSkills(onRender) {
     pageWatchTimer = setInterval(() => {
       const currentPageKey = pageKey();
       if (currentPageKey === observedPageKey) return;
+      if (currentPageKey !== observedPageKey) {
+        confirmedBusinessTabTitle = pendingBusinessTabTitle || "";
+        pendingBusinessTabTitle = "";
+      }
       observedPageKey = currentPageKey;
-      STATE.skillDraft = null;
+      // 查看模式跟随业务路由刷新；新建/修改模式必须保留草稿，
+      // 页面切换只用于选择跨页面数据源，不能中断正在进行的编辑。
       STATE.skillSourceStatuses = {};
       loadSkills().catch(() => void 0);
     }, 400);
@@ -1101,8 +1553,9 @@ const reloadSkills = loadSkills;
 export {
   initSkills, reloadSkills, createSkillDraft, cancelSkillDraft, selectSkillTable, startSkillCreation,
   startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult,
-  saveSkillDraft, rebindSkill, deleteSkill, deleteAllSkills, resolveStoredSource, switchToSkillPage,
+  saveSkillDraft, rebindSkill, removeSkillDraftSource, deleteSkill, deleteAllSkills, resolveStoredSource, switchToSkillPage,
   renameCurrentSkillPage, buildAnalysisPrompt,
   extractStoredSourceData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource,
-  saveSkillAnalysisMethod, scheduleSkillBars
+  saveSkillAnalysisMethod, updateSkillSourceHeaders, scheduleSkillBars,
+  downloadSkillsExport, previewSkillsImport, applySkillsImport, getBusinessPageTabs
 };
