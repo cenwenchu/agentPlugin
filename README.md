@@ -183,7 +183,7 @@ npm run test:e2e  # 启动有界面 Google Chrome，并加载临时扩展副本
 
 ### 技能采集排障
 
-所有 AI/技能/采集诊断日志默认关闭，分别由 `background.js` 的 `DIAGNOSTIC_LOGS` 和内容脚本 `state.js` 的 `DEBUG` 统一控制。排障日志只允许包含 frame、DOM 特征、页码、滚动尺寸、行数和消息长度，不得输出业务单元格、完整提示词或 API Key；排障后必须恢复关闭。
+所有 AI/技能/采集诊断日志默认关闭，分别由 `background.js` 的 `DIAGNOSTIC_LOGS` 和内容脚本 `state.js` 的 `DEBUG` 统一控制。技能采集诊断包含分页切换、滚动容器识别、`scrollIntoView` 回退采集、滚动步数与恢复第一页/表格顶部等元数据；日志只允许包含 frame、DOM 特征、页码、滚动尺寸、行数和消息长度，不得输出业务单元格、完整提示词或 API Key；排障后必须恢复关闭。
 
 ## 表格行为说明
 

@@ -39,10 +39,10 @@ let confirmedBusinessTabTitle = "";
 let pendingBusinessTabTitle = "";
 let businessTabClickListenerInstalled = false;
 const activeCollections = new Map();
-// 临时开启采集诊断，用于排查“分页 + 虚拟滚动 + 行回收”的真实站点。
-// 只输出 DOM/滚动尺寸和行数，不输出单元格内容；问题定位后恢复为 DEBUG。
+// 技能采集诊断默认跟随内容脚本 DEBUG。日志只输出 frame、DOM 特征、
+// 页码、滚动尺寸和行数，不输出业务单元格内容。
 const SKILL_DIAGNOSTICS = DEBUG;
-const SKILL_COLLECTION_DIAGNOSTICS = true;
+const SKILL_COLLECTION_DIAGNOSTICS = DEBUG;
 const SKILL_SOURCE_VALIDATE_RETRY_DELAYS_MS = [400, 900, 1600, 2400];
 
 function readBusinessPageTabs() {
@@ -524,8 +524,8 @@ function tableHasVirtualLayoutEvidence(table) {
 function safeScrollIntoView(target, block = "start") {
   if (!(target instanceof Element)) return false;
   try {
-    // Use the browser's built-in cross-frame scroll chaining; this is essential when the
-    // child frame auto-expands and the real scroll container is in an ancestor document.
+    // 当前 frame 内没有可操作的滚动容器时，依赖浏览器原生的 scroll 链式传播：
+    // iframe 自动增高、真实 viewport 在祖先文档时，也能把表格滚到可视区域。
     target.scrollIntoView({ block, inline: "nearest" });
     return true;
   } catch {
@@ -544,9 +544,8 @@ async function resolvePageScrollCollection(source, initialTable, page) {
   let table = initialTable;
   let scroller = findStoredSourceVerticalScroller(table);
   let mode = scroller ? classifyVerticalCollection(scroller, table) : "none";
-  // Some virtualized tables are driven by ancestor document scrolling (e.g. iframe auto height,
-  // or custom wheel handlers) and expose no scrollHeight range in the current frame.
-  // In that case, fall back to a conservative scrollIntoView-based collector.
+  // 有些虚拟表格的真实滚动由祖先文档承载，当前 frame 看不到 scrollTop/scrollHeight。
+  // 这类场景不能误判成普通表格直接翻页，而是改用 scrollIntoView 的保守采集模式。
   if (!scroller && tableHasVirtualLayoutEvidence(table)) mode = "into-view";
   // 分页切换完成不等于虚拟列表布局已完成。每一页都允许占位高度、
   // overflow 容器和首批行再经历几个渲染周期，否则后续页会被误判为
@@ -629,8 +628,8 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
       });
     }
   } else if (table && tableHasVirtualLayoutEvidence(table)) {
-    // No native scroll container was detected in this frame. Ensure the viewport is aligned to
-    // the table start before reading rows; otherwise the virtual list may render from the middle.
+    // 当前 frame 没有原生滚动容器时，也要先把视口对齐到表格顶部；否则首屏可能从
+    // 中间开始渲染，顶部已回收的记录永远不会进入本页采集结果。
     const beforeDigest = getTableContentDigest(table);
     const beforeRows = getTableRowTexts(table);
     safeScrollIntoView(table, "start");
@@ -695,6 +694,8 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
         const renderedRowEls = Array.from(table?.querySelectorAll?.(
           "tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"
         ) || []).filter((row) => !isHeaderRow(row));
+        // 选择当前最后一个可见数据行作为锚点，驱动外层 viewport 继续向下；这样在
+        // 当前 frame 无法直接控制 scrollTop 时，仍能逐步触发虚拟列表补渲染后续行。
         const anchor = renderedRowEls.filter((row) => isVisibleCollectionElement(row)).at(-1) || renderedRowEls.at(-1) || table;
         const beforeDigest = getTableContentDigest(table);
         const beforeRows = getTableRowTexts(table);

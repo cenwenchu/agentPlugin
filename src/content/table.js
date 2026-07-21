@@ -1725,6 +1725,8 @@ function clickElement(el) {
     void 0;
   }
   try {
+    // 分页器、抽屉按钮等站点控件经常同时监听 pointer/mouse/click。这里必须
+    // 保证“只触发一次激活”，否则一次翻页可能被站点处理两次，出现跳页。
     el.click?.();
     return true;
   } catch {
