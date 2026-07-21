@@ -10,6 +10,7 @@
  *   3. demo HTML 选择器覆盖率 — 验证核心函数能否匹配到目标元素
  *   4. UI 常量替换审计 — 确保 Hardcoded 类名已被常量替换
  *   5. 导出接口完整性检查
+ *   6. 敏感调试产物检查 —— 禁止在 src 中遗留 .log/.txt 业务日志
  */
 
 import fs from "fs";
@@ -99,20 +100,38 @@ function auditDebugLogs(files) {
     const fullPath = path.join(ROOT, file);
     const code = fs.readFileSync(fullPath, "utf-8");
     const bareLogs = [];
+    const unguardedDiagnostics = [];
     const lines = code.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const trimmed = lines[i].trim();
       if (/^\s*console\.log\(/.test(trimmed) && !/^\s*DEBUG\s*&&/.test(trimmed)) {
         bareLogs.push(`L${i + 1}: ${trimmed.substring(0, 80)}`);
       }
+      if (/console\.(?:info|warn)\(\s*["']\[web2ai\.(?:ai\.request|skill)/.test(trimmed)) {
+        const nearbyGuard = lines.slice(Math.max(0, i - 3), i + 1).join(" ");
+        if (!/(?:DEBUG|DIAGNOSTIC_LOGS|SKILL_DIAGNOSTICS|SKILL_COLLECTION_DIAGNOSTICS)\s*(?:&&|\)|\}|return)/.test(nearbyGuard)) {
+          unguardedDiagnostics.push(`L${i + 1}: ${trimmed.substring(0, 80)}`);
+        }
+      }
     }
-    if (bareLogs.length > 0) {
-      console.log(`  ${FAIL} ${file}: ${bareLogs.length} 处未包裹的 console.log`);
-      bareLogs.forEach((l) => console.log(`      ${l}`));
+    if (bareLogs.length > 0 || unguardedDiagnostics.length > 0) {
+      console.log(`  ${FAIL} ${file}: ${bareLogs.length} 处裸 console.log，${unguardedDiagnostics.length} 处未受控诊断日志`);
+      [...bareLogs, ...unguardedDiagnostics].forEach((l) => console.log(`      ${l}`));
       errors++;
     } else {
       console.log(`  ${PASS} ${file}`);
     }
+  }
+}
+
+function auditSensitiveArtifacts() {
+  console.log("\n▶ 敏感调试产物检查");
+  const artifacts = listFilesRecursively(path.join(ROOT, "src"), (file) => /\.(?:log|txt)$/i.test(file));
+  if (artifacts.length) {
+    console.log(`  ${FAIL} src 中不应保留日志/文本调试产物: ${artifacts.join(", ")}`);
+    errors++;
+  } else {
+    console.log(`  ${PASS} 无 .log/.txt 调试产物`);
   }
 }
 
@@ -288,6 +307,7 @@ function main() {
 
   checkSyntax(srcFiles);
   auditDebugLogs(srcFiles);
+  auditSensitiveArtifacts();
   verifyDemoHtml(demoFiles);
   auditUIConstants(["src/content/table.js"]);
   checkExports(srcFiles);

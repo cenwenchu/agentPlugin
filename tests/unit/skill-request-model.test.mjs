@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSkillDataSourcesText, buildSkillRequestPrompt, incompleteSkillDataSources } from "../../src/content/skill-request-model.js";
+import { buildSkillDataSourcesText, buildSkillRequestPrompt, calculateSkillRequestBudget, incompleteSkillDataSources } from "../../src/content/skill-request-model.js";
 
 const source = (name, pageTitle, rows) => ({
   name,
@@ -53,4 +53,23 @@ test("labels uploaded spreadsheets as runtime file sources", () => {
   const prompt = buildSkillRequestPrompt({ method: "汇总", dataSources: [fileSource] });
   assert.match(prompt, /数据源类型：本次运行上传的临时文件/);
   assert.match(prompt, /文件：售后.xlsx；工作表：明细/);
+});
+
+test("derives a larger skill input budget from a larger model context window", () => {
+  const small = calculateSkillRequestBudget({ contextWindow: 8192, maxOutputTokens: 4096, method: "分析" });
+  const large = calculateSkillRequestBudget({ contextWindow: 1_000_000, maxOutputTokens: 4096, method: "分析" });
+  assert.ok(small.maxChars >= 2000);
+  assert.ok(large.maxChars > small.maxChars * 100);
+  assert.ok(large.maxChars < large.availableTokens, "reserve ten percent for conservative token estimation");
+});
+
+test("does not force a large fixed section budget for small-context models", () => {
+  const rows = Array.from({ length: 100 }, (_, index) => [`${index}`, "x".repeat(500)]);
+  const prompt = buildSkillRequestPrompt({
+    method: "分析",
+    dataSources: [source("表一", "页面一", rows), source("表二", "页面二", rows)]
+  }, 4000);
+  assert.match(prompt, /数据源 1：表一/);
+  assert.match(prompt, /数据源 2：表二/);
+  assert.ok(prompt.length < 6000);
 });

@@ -1724,43 +1724,29 @@ function clickElement(el) {
   } catch {
     void 0;
   }
-  const pt = (() => {
-    const r = el.getBoundingClientRect?.();
-    if (!r) return { x: 0, y: 0 };
-    return { x: r.left + Math.min(10, Math.max(1, r.width / 2)), y: r.top + Math.min(10, Math.max(1, r.height / 2)) };
-  })();
-  const common = { bubbles: true, cancelable: true, composed: true, clientX: pt.x, clientY: pt.y };
-  try {
-    if (window.PointerEvent) el.dispatchEvent(new PointerEvent("pointerdown", common));
-  } catch {
-    void 0;
-  }
-  try {
-    el.dispatchEvent(new MouseEvent("mousedown", common));
-  } catch {
-    void 0;
-  }
-  try {
-    if (window.PointerEvent) el.dispatchEvent(new PointerEvent("pointerup", common));
-  } catch {
-    void 0;
-  }
-  try {
-    el.dispatchEvent(new MouseEvent("mouseup", common));
-  } catch {
-    void 0;
-  }
   try {
     el.click?.();
+    return true;
   } catch {
     void 0;
   }
   try {
-    el.dispatchEvent(new MouseEvent("click", common));
+    const r = el.getBoundingClientRect?.();
+    const pt = !r
+      ? { x: 0, y: 0 }
+      : { x: r.left + Math.min(10, Math.max(1, r.width / 2)), y: r.top + Math.min(10, Math.max(1, r.height / 2)) };
+    el.dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      clientX: pt.x,
+      clientY: pt.y
+    }));
+    return true;
   } catch {
     void 0;
   }
-  return true;
+  return false;
 }
 
 function findPaginationNextButton(anchorRowEl) {

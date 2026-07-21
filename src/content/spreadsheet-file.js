@@ -6,6 +6,11 @@
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_DATA_ROWS = 10000;
 const MAX_COLUMNS = 500;
+// XLSX 是 ZIP 容器，压缩文件大小不能代表解压后内存占用。两层上限
+// 同时防止单个异常 XML 和多 entry 累计形成 ZIP bomb。
+const MAX_XLSX_ENTRY_BYTES = 32 * 1024 * 1024;
+const MAX_XLSX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+const MAX_WORKSHEET_CELLS = 1_000_000;
 
 function compact(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -42,6 +47,9 @@ function parseDelimitedText(input, delimiter = "") {
 function normalizeRows(rows) {
   if (!rows.length) return { headers: [], rows: [], rowCount: 0, totalRowCount: 0, truncated: false };
   const width = Math.min(MAX_COLUMNS, Math.max(...rows.map((row) => row.length)));
+  if (rows.length * width > MAX_WORKSHEET_CELLS) {
+    throw new Error(`单个工作表不能超过 ${MAX_WORKSHEET_CELLS.toLocaleString("en-US")} 个单元格`);
+  }
   const rawHeaders = rows[0].slice(0, width);
   const headers = Array.from({ length: width }, (_, index) => compact(rawHeaders[index]) || `列${index + 1}`);
   const allRows = rows.slice(1).filter((row) => row.some((value) => compact(value))).map((row) => (
@@ -81,12 +89,15 @@ async function unzipEntries(buffer) {
   }
   const decoder = new TextDecoder();
   const entries = new Map();
+  let totalUncompressedBytes = 0;
   for (let entryIndex = 0; entryIndex < entryCount; entryIndex++) {
+    if (offset < 0 || offset + 46 > bytes.length) throw new Error("XLSX 压缩目录越界");
     if (view.getUint32(offset, true) !== 0x02014b50) throw new Error("XLSX 压缩目录损坏");
     const flags = view.getUint16(offset + 8, true);
     const compression = view.getUint16(offset + 10, true);
     let compressedSize = view.getUint32(offset + 20, true);
     const uncompressedSize32 = view.getUint32(offset + 24, true);
+    let uncompressedSize = uncompressedSize32;
     const nameLength = view.getUint16(offset + 28, true);
     const extraLength = view.getUint16(offset + 30, true);
     const commentLength = view.getUint16(offset + 32, true);
@@ -101,7 +112,7 @@ async function unzipEntries(buffer) {
         const fieldSize = view.getUint16(extraOffset + 2, true);
         if (fieldId === 0x0001) {
           let cursor = extraOffset + 4;
-          if (uncompressedSize32 === 0xffffffff) cursor += 8;
+          if (uncompressedSize32 === 0xffffffff) { uncompressedSize = Number(view.getBigUint64(cursor, true)); cursor += 8; }
           if (compressedSize === 0xffffffff) { compressedSize = Number(view.getBigUint64(cursor, true)); cursor += 8; }
           if (localOffset === 0xffffffff) localOffset = Number(view.getBigUint64(cursor, true));
           break;
@@ -109,10 +120,17 @@ async function unzipEntries(buffer) {
         extraOffset += 4 + fieldSize;
       }
     }
-    if (!Number.isSafeInteger(compressedSize) || !Number.isSafeInteger(localOffset)) throw new Error(`XLSX 条目过大，无法读取：${name}`);
+    if (![compressedSize, uncompressedSize, localOffset].every(Number.isSafeInteger)) throw new Error(`XLSX 条目过大，无法读取：${name}`);
+    if (uncompressedSize > MAX_XLSX_ENTRY_BYTES) throw new Error(`XLSX 条目解压后过大：${name}`);
+    totalUncompressedBytes += uncompressedSize;
+    if (totalUncompressedBytes > MAX_XLSX_UNCOMPRESSED_BYTES) throw new Error("XLSX 解压后总大小超过限制");
+    if (localOffset < 0 || localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== 0x04034b50) {
+      throw new Error(`XLSX 本地条目损坏：${name}`);
+    }
     const localNameLength = view.getUint16(localOffset + 26, true);
     const localExtraLength = view.getUint16(localOffset + 28, true);
     const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+    if (dataOffset < 0 || dataOffset + compressedSize > bytes.length) throw new Error(`XLSX 条目数据越界：${name}`);
     const compressed = bytes.slice(dataOffset, dataOffset + compressedSize);
     let data;
     if (compression === 0) data = compressed;
@@ -125,6 +143,7 @@ async function unzipEntries(buffer) {
         throw new Error(`XLSX 解压失败（${name}）：${String(error?.message ?? error)}`);
       }
     } else throw new Error(`暂不支持 XLSX 压缩方式 ${compression}`);
+    if (data.byteLength !== uncompressedSize) throw new Error(`XLSX 条目解压大小不一致：${name}`);
     entries.set(name.replace(/^\//, ""), data);
     offset += 46 + nameLength + extraLength + commentLength;
   }
@@ -134,7 +153,9 @@ async function unzipEntries(buffer) {
 function xml(entries, name) {
   const bytes = entries.get(name);
   if (!bytes) return null;
-  return new DOMParser().parseFromString(new TextDecoder().decode(bytes), "application/xml");
+  const document = new DOMParser().parseFromString(new TextDecoder().decode(bytes), "application/xml");
+  if (document.getElementsByTagName("parsererror").length) throw new Error(`XLSX XML 损坏：${name}`);
+  return document;
 }
 
 function columnIndex(cellReference = "") {
@@ -216,4 +237,8 @@ async function parseSpreadsheetFile(file) {
   throw new Error("仅支持 CSV、TSV 和 XLSX 文件");
 }
 
-export { MAX_FILE_BYTES, MAX_DATA_ROWS, parseDelimitedText, parseSpreadsheetFile };
+export {
+  MAX_FILE_BYTES, MAX_DATA_ROWS, MAX_COLUMNS, MAX_WORKSHEET_CELLS,
+  MAX_XLSX_ENTRY_BYTES, MAX_XLSX_UNCOMPRESSED_BYTES,
+  normalizeRows, parseDelimitedText, parseSpreadsheetFile
+};

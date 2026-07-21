@@ -8,7 +8,7 @@
  * 上下文和对话只保存在顶层 content script 内存中，页面刷新后清空。
  */
 
-import { uid, STATE, refs } from './state.js';
+import { DEBUG, uid, STATE, refs } from './state.js';
 import { showToast } from './toast.js';
 
 /**
@@ -120,7 +120,7 @@ async function streamChat({ messages, onChunk, debugLabel = "chat" }) {
     }
     return sum + String(message?.content || "").length;
   }, 0);
-  console.info("[web2ai.ai.request] content stream start", JSON.stringify({
+  DEBUG && console.info("[web2ai.ai.request] content stream start", JSON.stringify({
     label: debugLabel,
     modelId: STATE.activeModelId,
     messageCount: messages.length,
@@ -132,7 +132,7 @@ async function streamChat({ messages, onChunk, debugLabel = "chat" }) {
     onChunk(delta);
   };
   const useCompatibilityMode = async () => {
-    console.warn("[web2ai.ai.request] content compatibility fallback", JSON.stringify({
+    DEBUG && console.warn("[web2ai.ai.request] content compatibility fallback", JSON.stringify({
       label: debugLabel,
       modelId: STATE.activeModelId,
       elapsedMs: Date.now() - startedAt
@@ -148,7 +148,7 @@ async function streamChat({ messages, onChunk, debugLabel = "chat" }) {
     if (!content.trim()) throw new Error("兼容模式请求成功，但模型没有返回内容");
     showToast("当前模型的流式连接不可用，已使用兼容模式完成请求", 4000);
     handleChunk(content);
-    console.info("[web2ai.ai.request] content compatibility end", JSON.stringify({
+    DEBUG && console.info("[web2ai.ai.request] content compatibility end", JSON.stringify({
       label: debugLabel,
       elapsedMs: Date.now() - startedAt,
       responseLength: content.length
@@ -157,7 +157,7 @@ async function streamChat({ messages, onChunk, debugLabel = "chat" }) {
   try {
     await streamChatOnce({ messages, onChunk: handleChunk, debugLabel });
   } catch (error) {
-    console.warn("[web2ai.ai.request] content stream error", JSON.stringify({
+    DEBUG && console.warn("[web2ai.ai.request] content stream error", JSON.stringify({
       label: debugLabel,
       phase: "initial",
       code: error?.code || "",
@@ -176,7 +176,7 @@ async function streamChat({ messages, onChunk, debugLabel = "chat" }) {
     try {
       await streamChatOnce({ messages, onChunk: handleChunk, debugLabel: `${debugLabel}-retry` });
     } catch (retryError) {
-      console.warn("[web2ai.ai.request] content stream error", JSON.stringify({
+      DEBUG && console.warn("[web2ai.ai.request] content stream error", JSON.stringify({
         label: debugLabel,
         phase: "retry",
         code: retryError?.code || "",

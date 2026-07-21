@@ -26,8 +26,9 @@ import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatch
 import { showToast } from './toast.js';
 import { showConfirmDialog, showPromptDialog, showTextDialog } from './dialog.js';
 import { createSkillDraft, cancelSkillDraft, selectSkillTable, saveSkillDraft, rebindSkill, removeSkillDraftSource, deleteSkill, deleteAllSkills, switchToSkillPage, renameCurrentSkillPage, buildAnalysisPrompt, saveSkillAnalysisMethod, updateSkillSourceHeaders, downloadSkillsExport, previewSkillsImport, applySkillsImport } from './skills.js';
-import { buildSkillRequestPrompt, incompleteSkillDataSources } from './skill-request-model.js';
+import { buildSkillRequestPrompt, calculateSkillRequestBudget, incompleteSkillDataSources } from './skill-request-model.js';
 import { parseSpreadsheetFile } from './spreadsheet-file.js';
+import { MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS } from './skill-collection-model.js';
 
 const OVERLAY_CSS = `
     :host { all: initial; }
@@ -231,19 +232,19 @@ async function chooseSkillCollectionPages(source) {
     const knownPages = Number(pagination.data.totalPages) || 0;
     const pageDescription = knownPages > 1 ? `检测到数据源约有 ${knownPages} 页。` : "检测到数据源支持翻页。";
     while (true) {
-      const value = await showPromptDialog(`${pageDescription}\n请输入需要载入的页数（1–10），或输入“全部”。全部最多载入 10 页。`, "1", { confirmText: "开始载入" });
+      const value = await showPromptDialog(`${pageDescription}\n请输入需要载入的页数（1–${MAX_SKILL_COLLECTION_PAGES}），或输入“全部”。全部最多载入 ${MAX_SKILL_COLLECTION_PAGES} 页。`, "1", { confirmText: "开始载入" });
       if (value === null) return null;
       const normalized = normalizeText(value);
       if (normalized === "全部") {
-        collectionMaxPages = Math.min(knownPages || 10, 10);
+        collectionMaxPages = Math.min(knownPages || MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_PAGES);
         break;
       }
       const count = Number.parseInt(normalized, 10);
-      if (Number.isInteger(count) && count >= 1 && count <= 10) {
+      if (Number.isInteger(count) && count >= 1 && count <= MAX_SKILL_COLLECTION_PAGES) {
         collectionMaxPages = knownPages ? Math.min(count, knownPages) : count;
         break;
       }
-      showToast("请输入 1–10 的页数，或输入“全部”");
+      showToast(`请输入 1–${MAX_SKILL_COLLECTION_PAGES} 的页数，或输入“全部”`);
     }
   }
   return collectionMaxPages;
@@ -496,6 +497,15 @@ async function viewSkillSubmittedPrompt(test) {
   if (shouldCopy) await copySkillText(prompt, "提交内容已复制");
 }
 
+/**
+ * 执行技能测试/正式运行的共享主干。
+ *
+ * 不可破坏的三个不变量：
+ * 1. 测试只有在当前全屏会话的全部数据源已完整载入时才复用缓存；执行默认重新采集。
+ * 2. 任一持久化网页数据源失败或被停止，都不得向模型提交部分数据。
+ * 3. 扩展自动打开的 Tab 只能在 item.data 已写入会话后 finalize/关闭。
+ * 运行时上传文件仅属于当前会话，不参与网页重新采集和技能持久化。
+ */
 async function runSkillTest({ reuseData = false } = {}) {
   const test = STATE.skillTest;
   if (!test || test.pending) return;
@@ -545,7 +555,7 @@ async function runSkillTest({ reuseData = false } = {}) {
         }
         item.collectionMaxPages = collectionMaxPages;
         item.collectionId = uid();
-        item.collection = { phase: "locating", pages: 0, rowCount: 0, maxPages: item.collectionMaxPages || 1, maxRows: 1000 };
+        item.collection = { phase: "locating", pages: 0, rowCount: 0, maxPages: item.collectionMaxPages || 1, maxRows: MAX_SKILL_COLLECTION_ROWS };
         test.collectionId = item.collectionId;
         test.collection = item.collection;
         render();
@@ -555,7 +565,7 @@ async function runSkillTest({ reuseData = false } = {}) {
             source: item.source,
             collectionId: item.collectionId,
             maxPages: item.collectionMaxPages || 1,
-            maxRows: 1000
+            maxRows: MAX_SKILL_COLLECTION_ROWS
           });
           if (!loaded?.ok && loaded?.code === "SOURCE_STRUCTURE_CHANGED") {
             const accepted = await showConfirmDialog(
@@ -576,7 +586,7 @@ async function runSkillTest({ reuseData = false } = {}) {
               source: item.source,
               collectionId: item.collectionId,
               maxPages: item.collectionMaxPages || 1,
-              maxRows: 1000
+              maxRows: MAX_SKILL_COLLECTION_ROWS
             });
           }
           if (!loaded?.ok) throw new Error(loaded?.error || "数据源载入失败");
@@ -618,11 +628,17 @@ async function runSkillTest({ reuseData = false } = {}) {
     }
     test.status = "submitting";
     render();
-    const prompt = buildSkillRequestPrompt({ method: test.method, dataSources });
+    const settingsResponse = await sendToBackground({ type: "GET_SETTINGS", modelId: STATE.activeModelId }).catch(() => null);
+    const requestBudget = calculateSkillRequestBudget({
+      contextWindow: settingsResponse?.data?.contextWindow,
+      maxOutputTokens: settingsResponse?.data?.maxOutputTokens,
+      method: test.method
+    });
+    const prompt = buildSkillRequestPrompt({ method: test.method, dataSources }, requestBudget.maxChars);
     // 保存实际发送的文本快照；查看时不能重新组装，否则后续编辑会让
     // 展示内容与本次真实请求不一致。
     test.submittedPrompt = prompt;
-    console.info("[web2ai.ai.request] skill-test prepared", JSON.stringify({
+    DEBUG && console.info("[web2ai.ai.request] skill-test prepared", JSON.stringify({
       modelId: STATE.activeModelId,
       sourceCount: dataSources.length,
       loadedSourceCount: dataSources.filter((item) => item.data).length,
@@ -630,7 +646,8 @@ async function runSkillTest({ reuseData = false } = {}) {
       submittedRowCount: dataSources.reduce((sum, item) => sum + (item.data?.rowCount || 0), 0),
       reusedData: !shouldLoadData,
       analysisMethodLength: normalizeText(test.method).length,
-      promptLength: prompt.length
+      promptLength: prompt.length,
+      requestBudgetChars: requestBudget.maxChars
     }));
     test.status = "analyzing";
     test.conversationMessages = [{ role: "user", content: prompt }];
@@ -1489,7 +1506,7 @@ function render() {
           el("div", { class: "skillTestMeta" }, [
             loaded
               ? `共 ${sourceItems.length} 个数据源，已载入 ${sourceItems.filter((item) => item.data).length} 个，失败 ${sourceItems.filter((item) => item.error).length} 个${test.mode === "test" ? "；本次测试会话将复用已载入数据" : ""}`
-              : `共 ${sourceItems.length} 个数据源。开始测试后将依次采集，每个最多 10 页或 1000 行。`
+              : `共 ${sourceItems.length} 个数据源。开始测试后将依次采集，每个最多 ${MAX_SKILL_COLLECTION_PAGES} 页或 ${MAX_SKILL_COLLECTION_ROWS} 行。`
           ]),
           sourceTabs,
           runtimeSourceActions,
@@ -2014,6 +2031,13 @@ function render() {
     const sourceStatusLabel = (detail = {}) => (
       statusLabels[detail.status || "checking"] || detail.status || "校验中"
     );
+    const collectSkillUnavailableSources = (skill) => {
+      const sources = skill.sources || [skill.source].filter(Boolean);
+      const sourceStatuses = STATE.skillSourceStatuses[skill.id] || {};
+      return sources
+        .map((source, index) => ({ source, index, detail: sourceStatuses[source.id] || { status: "checking" } }))
+        .filter((item) => item.detail.status === "missing");
+    };
     const cards = STATE.skills.map((skill) => {
       const sources = skill.sources || [skill.source].filter(Boolean);
       const sourceStatuses = STATE.skillSourceStatuses[skill.id] || {};
@@ -2052,6 +2076,14 @@ function render() {
             class: "btn primary",
             disabled: status === "missing" || status === "checking",
             onClick: async () => {
+              const unavailable = collectSkillUnavailableSources(skill);
+              if (unavailable.length) {
+                const names = unavailable
+                  .map((item) => item.source.displayName || `数据源 ${item.index + 1}`)
+                  .join("、");
+                showToast(`当前数据源不可用：${names}。请先点击“修改技能”重新选择数据源后再测试。`, 3500, { position: "center" });
+                return;
+              }
               if (analysisPrompt) {
                 startSkillTest(skill);
                 return;

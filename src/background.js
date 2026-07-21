@@ -10,6 +10,11 @@
 
 import { DEFAULT_MODEL_PROFILE, DEFAULT_SETTINGS } from "./shared.js";
 import { createSseDataParser } from "./sse.js";
+import { MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS } from "./content/skill-collection-model.js";
+
+// 生产默认不记录模型、页面和技能路由元数据。排障时可在本地临时开启，
+// 但日志只能使用 summarizeAiMessages 等脱敏摘要，不得输出消息原文。
+const DIAGNOSTIC_LOGS = false;
 
 /** 跨浏览器标签页的数据源选择会话：sessionId → 发起方信息。 */
 const SKILL_PICK_SESSIONS = new Map();
@@ -182,7 +187,7 @@ async function chatCompletions({ messages, modelId = "", debugLabel = "chat" }) 
   messages = sanitizeAiMessages(messages);
   const settings = await getSettings(modelId);
   const startedAt = Date.now();
-  console.info("[web2ai.ai.request] non-stream start", JSON.stringify({
+  DIAGNOSTIC_LOGS && console.info("[web2ai.ai.request] non-stream start", JSON.stringify({
     label: debugLabel,
     modelId: settings.id,
     model: settings.model,
@@ -215,7 +220,7 @@ async function chatCompletions({ messages, modelId = "", debugLabel = "chat" }) 
 
   const json = await res.json();
   const content = json?.choices?.[0]?.message?.content ?? "";
-  console.info("[web2ai.ai.request] non-stream end", JSON.stringify({
+  DIAGNOSTIC_LOGS && console.info("[web2ai.ai.request] non-stream end", JSON.stringify({
     label: debugLabel,
     modelId: settings.id,
     elapsedMs: Date.now() - startedAt,
@@ -475,7 +480,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         pageKey: normalizedPageKey(selectedPageUrl),
         pageUrl: selectedPageUrl
       };
-      console.info("[web2ai.skill-pick] accepted source", JSON.stringify({
+      DIAGNOSTIC_LOGS && console.info("[web2ai.skill-pick] accepted source", JSON.stringify({
         sessionId,
         frameId: selectedFrameId,
         frameUrl: selectedFrameUrl,
@@ -645,8 +650,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 source: message.source,
                 options: {
                   collectionId,
-                  maxPages: message.maxPages || 10,
-                  maxRows: message.maxRows || 1000,
+                  maxPages: Math.max(1, Math.min(MAX_SKILL_COLLECTION_PAGES, Number(message.maxPages) || 1)),
+                  maxRows: Math.max(1, Math.min(MAX_SKILL_COLLECTION_ROWS, Number(message.maxRows) || MAX_SKILL_COLLECTION_ROWS)),
                   waitForInitialRowsMs: SKILL_AUTO_OPENED_TABS.has(tabId) ? 8000 : 2500
                 }
               });
@@ -937,7 +942,7 @@ chrome.runtime.onConnect.addListener((port) => {
       const debugLabel = String(message.payload?.debugLabel || "chat");
       const startedAt = Date.now();
       let firstChunkAt = 0;
-      console.info("[web2ai.ai.request] stream start", JSON.stringify({
+      DIAGNOSTIC_LOGS && console.info("[web2ai.ai.request] stream start", JSON.stringify({
         requestId,
         label: debugLabel,
         modelId: message.payload?.modelId || "",
@@ -955,7 +960,7 @@ chrome.runtime.onConnect.addListener((port) => {
             port.postMessage({ type: "AI_CHAT_STREAM_CHUNK", requestId, delta });
           }
         });
-        console.info("[web2ai.ai.request] stream end", JSON.stringify({
+        DIAGNOSTIC_LOGS && console.info("[web2ai.ai.request] stream end", JSON.stringify({
           requestId,
           label: debugLabel,
           elapsedMs: Date.now() - startedAt,
@@ -963,7 +968,7 @@ chrome.runtime.onConnect.addListener((port) => {
         }));
         port.postMessage({ type: "AI_CHAT_STREAM_END", requestId });
       } catch (e) {
-        console.warn("[web2ai.ai.request] stream error", JSON.stringify({
+        DIAGNOSTIC_LOGS && console.warn("[web2ai.ai.request] stream error", JSON.stringify({
           requestId,
           label: debugLabel,
           elapsedMs: Date.now() - startedAt,

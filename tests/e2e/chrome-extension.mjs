@@ -107,8 +107,9 @@ const virtualCollectionFixture = `<!doctype html><meta charset="utf-8"><title>Vi
       pageButtons.forEach((button, index) => button.classList.toggle('ant-pagination-item-active', index + 1 === page));
     }
     scroll.addEventListener('scroll', render);
-    pageButtons.forEach((button, index) => button.addEventListener('click', () => { page = index + 1; scroll.scrollTop = 0; render(); }));
-    document.querySelector('.ant-pagination-next button').addEventListener('click', () => { if (page < 2) { page++; scroll.scrollTop = 0; render(); } });
+    pageButtons.forEach((button, index) => button.addEventListener('click', () => { page = index + 1; scroll.scrollTop = 200; render(); }));
+    document.querySelector('.ant-pagination-next button').addEventListener('click', () => { if (page < 2) { page++; scroll.scrollTop = 200; render(); } });
+    scroll.scrollTop = 200;
     render();
   <\/script>`;
 const server = http.createServer((req, res) => {
@@ -678,8 +679,9 @@ try {
   assert.equal(await scrollingFrame.$eval("#scrollbox", (node) => node.scrollTop), 120, "child-frame scroll position must be restored");
   await innerPage.close();
 
-  // A hybrid data source must collect recycled rows within each page before
-  // turning pagination, then restore both page 1 and the internal scroll top.
+  // A hybrid data source may open every page in the middle with earlier rows
+  // already recycled. The collector must reset each page before its first read,
+  // scroll through all recycled rows, then restore page 1 and the scroll top.
   const virtualPage = await browser.newPage();
   await virtualPage.goto(`${url}virtual-collection`);
   await virtualPage.waitForSelector("#web2ai_overlay_host");
@@ -695,6 +697,11 @@ try {
   assert.equal(virtualCollection?.ok, true, `virtual collection failed: ${JSON.stringify(virtualCollection)}`);
   assert.equal(virtualCollection.data.collectedPages, 2);
   assert.equal(virtualCollection.data.rowCount, 24, "collector must read all recycled rows before each page turn");
+  assert.deepEqual(
+    virtualCollection.data.rows.filter((row) => row[0] === "1").map((row) => row[1]),
+    ["P1-ORDER-1", "P2-ORDER-1"],
+    "each paginated virtual list must be reset before its first rendered rows are recorded"
+  );
   assert.equal(await virtualPage.$eval("#virtual-scroll", (node) => node.scrollTop), 0, "virtual table must return to the top");
   assert.equal(await virtualPage.$eval(".ant-pagination-item-active", (node) => node.textContent.trim()), "1", "hybrid collection must restore page one");
   await virtualPage.close();

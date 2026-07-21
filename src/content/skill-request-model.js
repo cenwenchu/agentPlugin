@@ -6,6 +6,8 @@
  * 数据源被整体截断；单个数据源过长时会明确标注实际提交行数。
  */
 
+import { calculateContextBudget } from "./token-budget.js";
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -20,10 +22,10 @@ function buildSourceSection(item, index, maxChars) {
   const rows = Array.isArray(data.rows) ? data.rows : [];
   const rowLines = [];
   let rowChars = 0;
-  const rowBudget = Math.max(2000, maxChars - 1200);
+  const rowBudget = Math.max(0, maxChars - 600);
   for (const row of rows) {
     const line = `| ${(Array.isArray(row) ? row : []).map(markdownCell).join(" | ")} |`;
-    if (rowLines.length && rowChars + line.length + 1 > rowBudget) break;
+    if (rowChars + line.length + 1 > rowBudget) break;
     rowLines.push(line);
     rowChars += line.length + 1;
   }
@@ -50,8 +52,22 @@ function incompleteSkillDataSources(dataSources = []) {
 
 function buildSkillDataSourcesText(dataSources = [], maxChars = 300000) {
   if (!dataSources.length) return "";
-  const sectionBudget = Math.max(12000, Math.floor(maxChars / dataSources.length));
+  // 每个数据源至少保留名称、来源和字段元数据。数据行使用剩余预算，
+  // 不能让第一个大表把后续数据源整体挤出请求。
+  const sectionBudget = Math.max(600, Math.floor(maxChars / dataSources.length));
   return dataSources.map((item, index) => buildSourceSection(item, index, sectionBudget)).join("\n\n");
+}
+
+function calculateSkillRequestBudget({ contextWindow, maxOutputTokens, method = "", reserveTokens = 1024 } = {}) {
+  const budget = calculateContextBudget({
+    contextWindow: Math.max(8192, Number(contextWindow) || 64000),
+    maxOutputTokens: Math.max(512, Number(maxOutputTokens) || 4096),
+    messages: [{ role: "user", content: String(method || "") }],
+    reserveTokens
+  });
+  // 技能数据中中文和表格符号较多，按 1 可用 token ≈ 1 字符做保守保护。
+  // 这是客户端预算而非供应商计费 token，并保留给系统包装文本的余量。
+  return { ...budget, maxChars: Math.max(2000, Math.floor(budget.availableTokens * 0.9)) };
 }
 
 function buildSkillRequestPrompt({ method, dataSources }, maxChars = 300000) {
@@ -62,4 +78,4 @@ function buildSkillRequestPrompt({ method, dataSources }, maxChars = 300000) {
   ].join("\n\n");
 }
 
-export { buildSkillDataSourcesText, buildSkillRequestPrompt, incompleteSkillDataSources };
+export { buildSkillDataSourcesText, buildSkillRequestPrompt, calculateSkillRequestBudget, incompleteSkillDataSources };

@@ -5,6 +5,10 @@
  * 下一次滚动位置，便于用 Node 单元测试覆盖边界条件。
  */
 
+/** 测试和执行共用的单数据源采集上限，避免 UI/background/frame 配置漂移。 */
+const MAX_SKILL_COLLECTION_PAGES = 30;
+const MAX_SKILL_COLLECTION_ROWS = 1000;
+
 /**
  * 判断滚动区域是否很可能只渲染了部分数据行。
  * 框架明确包含 virtual 类名时直接命中；否则用滚动总高度与当前 DOM 行
@@ -59,4 +63,12 @@ function nextVirtualScrollTop({ scrollTop = 0, scrollHeight = 0, clientHeight = 
   return Math.min(max, current + distance);
 }
 
-export { classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch };
+export {
+  MAX_SKILL_COLLECTION_PAGES,
+  MAX_SKILL_COLLECTION_ROWS,
+  classifyScrollCollection,
+  isVirtualScrollMetrics,
+  nextVirtualScrollTop,
+  shouldStopAfterNoProgress,
+  skillHeadersMatch
+};

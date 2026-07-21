@@ -1,8 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS,
   classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch
 } from "../../src/content/skill-collection-model.js";
+
+test("shares the 30-page and 1000-row collection limits across layers", () => {
+  assert.equal(MAX_SKILL_COLLECTION_PAGES, 30);
+  assert.equal(MAX_SKILL_COLLECTION_ROWS, 1000);
+});
 
 test("requires the same field count, order and normalized names before collection", () => {
   assert.equal(skillHeadersMatch(["订单号", "SKU 信息"], ["订单号", "SKU信息"]), true);
