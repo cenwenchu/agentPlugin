@@ -14,10 +14,11 @@
 import { DEBUG, IS_TOP_FRAME, STATE, refs, compactOneLine } from './state.js';
 import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableSelectionEnabled, clearAllTableSelectionState } from './table.js';
 import { initHighlightStyle } from './highlight.js';
-import { initOverlay, render, setOpen, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition, startSkillExecution } from './overlay.js';
+import { initOverlay, render, setOpen, clearDraftInput, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition, startSkillExecution } from './overlay.js';
 import { showToast } from './toast.js';
-import { addContextSnippet, removeContextByRef } from './context.js';
+import { addContextSnippet, initContextDependencies, removeContextByRef } from './context.js';
 import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars, getBusinessPageTabs } from './skills.js';
+import { applySkillWorkspaceCollectionProgress } from './skill-workspace-controller.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
 try {
@@ -339,18 +340,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
   if (message?.type === "SKILL_COLLECTION_PROGRESS") {
-    if (IS_TOP_FRAME && STATE.skillTest) {
-      const item = STATE.skillTest.dataSources?.find((candidate) => candidate.collectionId === message.collectionId);
-      if (!item && STATE.skillTest.collectionId !== message.collectionId) {
-        sendResponse({ ok: true });
-        return;
-      }
-      if (item) item.collection = message.progress || null;
-      STATE.skillTest.collection = message.progress || null;
-      STATE.open = true;
-      refs.suppressPanelCloseUntil = Date.now() + 1000;
-      render();
-    }
+    if (IS_TOP_FRAME) applySkillWorkspaceCollectionProgress(message.collectionId, message.progress);
     sendResponse({ ok: true });
     return;
   }
@@ -448,6 +438,15 @@ function isExtensionUiPointerEvent(event) {
   });
 }
 
+document.addEventListener("web2ai:keep-panel-open", (event) => {
+  if (!IS_TOP_FRAME) return;
+  const durationMs = Math.max(300, Number(event.detail?.durationMs) || 1000);
+  refs.suppressPanelCloseUntil = Date.now() + durationMs;
+  if (refs.panelCloseTimer) clearTimeout(refs.panelCloseTimer);
+  refs.panelCloseTimer = null;
+  if (STATE.open) render();
+});
+
 // 只有完成一次明确的页面点击才收起 Chat；pointerleave/mousemove 不改变展开状态。
 document.addEventListener("click", (event) => {
   const extensionUi = isExtensionUiPointerEvent(event);
@@ -479,7 +478,11 @@ document.addEventListener("click", (event) => {
   } catch {}
 }, true);
 
-initTableListeners();
+initContextDependencies({
+  highlightRow, removePinnedRowOverlay, syncRowCheckboxState,
+  updateBatchBar, clearAllTableSelectionState, render, clearDraftInput
+});
+initTableListeners({ render });
 initHighlightStyle();
 initOverlay();
 initSkills(render);

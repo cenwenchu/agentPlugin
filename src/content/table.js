@@ -1,13 +1,12 @@
 /**
- * @fileoverview 表格交互核心。
+ * @fileoverview 表格选择与交互编排入口。
  *
  * 职责：
  * - 检测鼠标悬停的表格行（tr / role="row" / div 表格）
  * - 鼠标停稳后显示行级“问AI”操作，选中后在第一列显示 ✓
- * - 行数据提取（通用 getRowCells，支持多种表格结构）
- * - 表头自动识别与匹配（thead / th / columnheader / scope）
+ * - 复用 table-row-dom.js 的行语义和 table-header-resolver.js 的表头识别
  * - 批量选择（全选当前页、跨页选择）
- * - 跨页翻页自动化（支持 Ant Design / Arco Design 分页器自动翻页）
+ * - 编排 table-pagination-dom.js 提供的分页器定位和页面变化检测
  * - 行高亮、选中 pinned overlay
  *
  * 通用设计：不依赖特定 UI 框架，通过标准 HTML 语义和 ARIA 属性识别表格。
@@ -17,23 +16,24 @@ import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, refs, clamp, normalizeText, 
 import { el, getCssSelector, getOverlayBoundsForElement, findRowElementFromEventTarget, isVisibleElement } from './dom.js';
 import { addContextSnippet, removeContextByRef, extractTableRowText } from './context.js';
 import { showToast } from './toast.js';
-import { render } from './overlay.js';
 import { createContextRef, isContextRef } from './context-ref.js';
 import { getBusinessRowKey, getRenderedRowIdentity, getRowContentFingerprint, resolveTableAdapter } from './table-adapters.js';
+import {
+  getRowCells, getCellCount, isHeaderRow, hasHeaderCells, isTableFooterOrSummaryRow
+} from './table-row-dom.js';
+import { findHeaderRowAbove } from './table-header-resolver.js';
+import {
+  DRAWER_MODAL_SELECTORS, ANT_PAGINATION_DISABLED, ARCO_PAGINATION_DISABLED,
+  getTableRootForRow, getTableRowCount, dumpAllTables, waitForTableChange,
+  findLiveTableByIndex, getTableRowTexts, getTableContentDigest, waitForTableDataReady,
+  clickElement, findPaginationNextButton, pickFirstRowInRoot, findLiveTableAfterPageTurn
+} from './table-pagination-dom.js';
 
 // ========== UI 框架类名常量（避免硬编码） ==========
 
-/** Ant Design / Arco Design 抽屉和弹窗容器选择器 */
-const DRAWER_MODAL_SELECTORS = ".ant-drawer-body, .ant-modal-body, .arco-drawer-body, .arco-modal-body";
-
-/** Ant Design 分页禁用 class */
-const ANT_PAGINATION_DISABLED = "ant-pagination-disabled";
-
-/** Arco Design 分页禁用 class */
-const ARCO_PAGINATION_DISABLED = "arco-pagination-item-disabled";
-
 /** 同 URL 的多个 iframe 也必须拥有不同的表格命名空间。 */
 const FRAME_TABLE_SCOPE = uid();
+let renderTableUi = () => void 0;
 
 // ========== 通用表格辅助函数 ==========
 
@@ -46,112 +46,6 @@ function recordTableDiagnostic(event, detail = {}) {
   const entry = { at: Date.now(), event, ...detail };
   refs.tableDiagnostics.push(entry);
   if (refs.tableDiagnostics.length > 120) refs.tableDiagnostics.splice(0, refs.tableDiagnostics.length - 120);
-}
-
-/**
- * 从任意行元素中提取单元格列表（通用实现）。
- * 支持：<tr>、[role="row"]、div-based 表格、以及各种非标准表格结构。
- */
-function getRowCells(rowEl) {
-  if (!rowEl) return [];
-  const tag = rowEl.tagName?.toLowerCase();
-
-  // 1. 标准 HTML 表格 <tr>
-  if (tag === "tr") {
-    return Array.from(rowEl.querySelectorAll("th,td"));
-  }
-
-  // 2. role=row 的 ARIA 表格
-  const role = rowEl.getAttribute?.("role") || "";
-  if (role === "row") {
-    const cells = rowEl.querySelectorAll(
-      '[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]'
-    );
-    if (cells.length) return Array.from(cells);
-  }
-
-  // 3. 找带表格语义属性的子元素（如 scope、headers 等 WCAG 标注）
-  const semanticCells = rowEl.querySelectorAll(
-    'th,td,[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"],[scope]'
-  );
-  if (semanticCells.length) return Array.from(semanticCells);
-
-  // 4. 兜底：取直接子元素中非 script/style/template 的作为单元格
-  const directChildren = Array.from(rowEl.children).filter(c => {
-    const t = c.tagName?.toLowerCase();
-    return t !== "script" && t !== "style" && t !== "template" && t !== "noscript";
-  });
-  return directChildren;
-}
-
-/** 获取任意行元素的单元格数 */
-function getCellCount(rowEl) {
-  return getRowCells(rowEl).length;
-}
-
-/**
- * 判断行元素是否为表头行（通用实现）。
- * 检查 th、role=columnheader/rowheader、scope=col/row 等标准表头标记。
- */
-function isHeaderRow(rowEl) {
-  if (!rowEl) return false;
-  // 标准 th
-  if (rowEl.querySelector("th")) return true;
-  // role-based 表头
-  if (rowEl.querySelector('[role="columnheader"],[role="rowheader"]')) return true;
-  // WCAG 标准：scope 属性标记的表头
-  if (rowEl.querySelector('td[scope="col"],td[scope="row"],th[scope="col"],th[scope="row"]')) return true;
-  return false;
-}
-
-/**
- * 带诊断的 isVisibleElement — 同时输出失败原因到 console
- */
-function isVisibleElementDiag(el, label) {
-  if (!el || el.nodeType !== 1) {
-    label && DEBUG && console.log(`[web2ai] isVisible DIAG: ${label}: el is null or not element`);
-    return false;
-  }
-  const style = window.getComputedStyle(el);
-  if (style.display === "none") {
-    DEBUG && console.log(`[web2ai] isVisible DIAG: ${label || el.tagName}: display=none`);
-    return false;
-  }
-  if (style.visibility === "hidden") {
-    DEBUG && console.log(`[web2ai] isVisible DIAG: ${label || el.tagName}: visibility=hidden`);
-    return false;
-  }
-  if (Number(style.opacity || "1") === 0) {
-    DEBUG && console.log(`[web2ai] isVisible DIAG: ${label || el.tagName}: opacity=0`);
-    return false;
-  }
-  const rect = el.getBoundingClientRect?.();
-  if (!rect || rect.width < 2 || rect.height < 2) {
-    DEBUG && console.log(`[web2ai] isVisible DIAG: ${label || el.tagName}: rect w=${rect?.width} h=${rect?.height} (too small)`);
-    return false;
-  }
-  return true;
-}
-
-/**
- * 检查行元素是否包含表头单元格（通用实现）。
- */
-function hasHeaderCells(row) {
-  if (!row) return false;
-  // th 元素
-  if (row.querySelector("th")) return true;
-  // role-based
-  if (row.querySelector('[role="columnheader"], [role="rowheader"]')) return true;
-  // WCAG scope 属性
-  if (row.querySelector('[scope="col"], [scope="row"]')) return true;
-  return false;
-}
-
-function isTableFooterOrSummaryRow(rowEl) {
-  return Boolean(rowEl?.closest?.(
-    "tfoot, .art-table-footer, .ant-table-summary, .ant-table-footer, " +
-    ".arco-table-footer, .arco-table-summary, [role='rowgroup'][aria-label*='summary' i]"
-  ));
 }
 
 function getStableTableRoot(rowEl) {
@@ -517,7 +411,7 @@ function addRowElToContext(rowEl, { silent } = {}) {
     rowEl.classList.add("web2ai-row-added");
     setTimeout(() => rowEl.classList.remove("web2ai-row-added"), 800);
     DEBUG && console.log(`[web2ai] auto-open check: STATE.open=${STATE.open}, silent=${!!silent}`);
-    if (!STATE.open) { STATE.open = true; render(); DEBUG && console.log(`[web2ai] auto-open: set STATE.open=true, called render`); }
+    if (!STATE.open) { STATE.open = true; renderTableUi(); DEBUG && console.log(`[web2ai] auto-open: set STATE.open=true, called render`); }
   }
 
   return 1;
@@ -1341,7 +1235,7 @@ function selectAllRowsInSameGroup(opts = {}) {
   DEBUG && console.log(`[web2ai] selectAllRowsInSameGroup added ${added}/${rows.length} totalTime=${elapsed.toFixed(1)}ms`);
   if (added) {
     if (IS_TOP_FRAME) {
-      render();
+      renderTableUi();
     } else {
       try {
         chrome.runtime.sendMessage({
@@ -1364,7 +1258,7 @@ function selectAllRowsInSameGroup(opts = {}) {
   if (keepPanelOpen) {
     if (IS_TOP_FRAME) {
       STATE.open = true;
-      render();
+      renderTableUi();
     } else {
       try {
         chrome.runtime.sendMessage({
@@ -1405,7 +1299,7 @@ function clearAllRowsInSameGroup(opts = {}) {
     refs.batchContainer = null;
   }
   if (IS_TOP_FRAME) {
-    render();
+    renderTableUi();
   }
   updateBatchBar();
   if (!opts?.silent) showToast(`已取消 ${refs_list.length} 行`);
@@ -1523,336 +1417,6 @@ function clearSelectedRowRefsInRoot(root) {
   for (const rowEl of rows) {
     refs.selectedRowRef.delete(rowEl);
   }
-}
-
-function getTableRootForRow(rowEl) {
-  if (!rowEl) return null;
-  // 通用：沿 DOM 树向上找最近的有表格语义的容器
-  const candidates = [
-    rowEl.closest("table"),
-    rowEl.closest("tbody"),
-    rowEl.closest("thead"),
-    rowEl.closest("tfoot"),
-    rowEl.closest('[role="grid"]'),
-    rowEl.closest('[role="table"]'),
-    rowEl.closest('[role="treegrid"]'),
-    rowEl.closest('[role="rowgroup"]'),
-  ].filter(Boolean);
-  // 返回最近的（最内层的）
-  let best = null;
-  for (const c of candidates) {
-    if (!best || c.contains(best)) best = c;
-  }
-  return best || rowEl.parentElement || rowEl;
-}
-
-function getTableRowCount(root) {
-  if (!root) return 0;
-  const rows = root.querySelectorAll?.("tbody tr, tr, thead tr, tfoot tr, [role='rowgroup'] [role='row'], [role='row']") || [];
-  let count = 0;
-  for (const r of rows) {
-    if (!r.isConnected) continue;
-    const cells = getRowCells(r);
-    if (cells.length) count++;
-  }
-  return count;
-}
-
-function dumpAllTables(label) {
-  const allTables = document.querySelectorAll("table");
-  DEBUG && console.log(`[web2ai] ${label}: total tables in document: ${allTables.length}`);
-  allTables.forEach((tbl, idx) => {
-    const visible = isVisibleElement(tbl);
-    const rect = tbl.getBoundingClientRect();
-    const rows = tbl.querySelectorAll("tbody tr, tr");
-    const rowTexts = Array.from(rows)
-      .filter(r => (r.querySelectorAll?.("td,th") || []).length > 0)
-      .map((r, i) => {
-        const raw = compactOneLine(r.innerText || r.textContent || "").slice(0, 50);
-        return `[${i}] ${raw}`;
-      });
-    DEBUG && console.log(`[web2ai]   table[${idx}]: tag=${tbl.tagName} connected=${tbl.isConnected} visible=${visible} rect=${JSON.stringify({w:Math.round(rect.width),h:Math.round(rect.height)})} rows=${rowTexts.length}`);
-    rowTexts.forEach(t => DEBUG && console.log(`[web2ai]     ${t}`));
-  });
-}
-
-function waitForTableChange(root, prevDigest, timeoutMs = 8000, prevRowTexts, tableIndex) {
-  return new Promise((resolve) => {
-    const start = Date.now();
-    dumpAllTables("waitForTableChange BEFORE");
-    const prevTexts = prevRowTexts || getTableRowTexts(root);
-    let settled = false;
-    const observerTarget = refs.batchContainer?.isConnected ? refs.batchContainer : document.body;
-    const finish = (changed) => {
-      if (settled) return;
-      settled = true;
-      observer.disconnect();
-      clearInterval(fallbackTimer);
-      clearTimeout(timeoutTimer);
-      if (changed) dumpAllTables("waitForTableChange CHANGED");
-      resolve(changed);
-    };
-    const check = () => {
-      if (settled) return;
-      const elapsed = Date.now() - start;
-      const liveRoot = (root && root.isConnected) ? root : findLiveTableByIndex(root, tableIndex);
-      const currentRowTexts = getTableRowTexts(liveRoot);
-      const rows = currentRowTexts.length;
-      const contentChanged = prevTexts.length > 0 && currentRowTexts.length > 0 && (
-        prevTexts.length !== currentRowTexts.length ||
-        !prevTexts.every((t, i) => t === currentRowTexts[i])
-      );
-      DEBUG && console.log(`[web2ai] waitForTableChange check: root connected=${root?.isConnected} liveRoot=${liveRoot === root ? "original" : "recovered"} rows=${rows} contentChanged=${contentChanged} elapsed=${elapsed}ms`);
-      if (contentChanged) finish(true);
-    };
-    const observer = new MutationObserver(() => check());
-    observer.observe(observerTarget, { childList: true, subtree: true, characterData: true });
-    // Some frameworks mutate canvas/internal state without useful records; keep a low-frequency fallback.
-    const fallbackTimer = setInterval(check, 1000);
-    const timeoutTimer = setTimeout(() => {
-      dumpAllTables("waitForTableChange TIMEOUT");
-      finish(false);
-    }, timeoutMs);
-    check();
-  });
-}
-
-function findLiveTableByIndex(fallbackRoot, tableIndex) {
-  if (tableIndex !== undefined && tableIndex >= 0) {
-    const tables = document.querySelectorAll("table");
-    const target = tables[tableIndex];
-    if (target && target.isConnected && getTableRowCount(target) > 0) {
-      return target;
-    }
-  }
-
-  if (refs.batchContainer && refs.batchContainer.isConnected && tableIndex !== undefined && tableIndex >= 0) {
-    const tablesInContainer = refs.batchContainer.querySelectorAll("table");
-    const target = tablesInContainer[tableIndex];
-    if (target && target.isConnected && getTableRowCount(target) > 0) {
-      return target;
-    }
-  }
-
-  if (refs.batchContainer && refs.batchContainer.isConnected) {
-    let bestTable = null;
-    let bestScore = -1;
-    for (const tbl of refs.batchContainer.querySelectorAll("table")) {
-      if (!tbl.isConnected) continue;
-      if (!isVisibleElement(tbl)) continue;
-      const rows = getTableRowCount(tbl);
-      if (rows > bestScore) {
-        bestScore = rows;
-        bestTable = tbl;
-      }
-    }
-    if (bestTable) return bestTable;
-  }
-
-  return fallbackRoot;
-}
-
-function getTableRowTexts(root) {
-  if (!root) return [];
-  const rows = root.querySelectorAll?.("tbody tr, tr, [role='rowgroup'] [role='row'], [role='row']") || [];
-  const texts = [];
-  for (const r of rows) {
-    const cells = r.querySelectorAll?.("td,th,[role='cell'],[role='gridcell']") || [];
-    if (!cells.length) continue;
-    const raw = compactOneLine(r.innerText || r.textContent || "");
-    const stripped = raw.replace(/^\d+\s*[✓✗]?\s*\|?\s*/, "").replace(/\s+/g, "").slice(0, 30);
-    if (!stripped) continue;
-    texts.push(stripped);
-  }
-  return texts;
-}
-
-function getTableContentDigest(root) {
-  if (!root) return "";
-  const texts = getTableRowTexts(root);
-  const count = texts.length;
-  const parts = texts.slice(0, 3);
-  return `${count}|${parts.join("||")}`;
-}
-
-function waitForTableDataReady(root, prevDigest, timeoutMs = 12000, tableIndex) {
-  return new Promise((resolve) => {
-    const start = Date.now();
-    let lastRows = -1;
-    let stableCount = 0;
-    const minWait = 2000;
-    let minWaitDone = false;
-
-    const timer = setInterval(() => {
-      const elapsed = Date.now() - start;
-
-      const liveRoot = (root && root.isConnected) ? root : findLiveTableByIndex(root, tableIndex);
-      const rows = getTableRowCount(liveRoot);
-
-      DEBUG && console.log(`[web2ai] waitForTableDataReady rows=${rows} stableCount=${stableCount} elapsed=${elapsed}ms root connected=${root?.isConnected} liveRoot=${liveRoot === root ? "original" : "recovered"}`);
-
-      if (rows > 0 && rows === lastRows) {
-        stableCount++;
-        if (stableCount >= 3 && minWaitDone) {
-          clearInterval(timer);
-          DEBUG && console.log(`[web2ai] waitForTableDataReady resolved: ${rows} rows stable`);
-          resolve(rows);
-        }
-      } else {
-        stableCount = 0;
-      }
-      lastRows = rows;
-      if (elapsed >= minWait) minWaitDone = true;
-      if (elapsed > timeoutMs) {
-        clearInterval(timer);
-        DEBUG && console.log(`[web2ai] waitForTableDataReady TIMEOUT - returning ${rows} rows`);
-        resolve(rows);
-      }
-    }, 400);
-  });
-}
-
-function clickElement(el) {
-  if (!el) return false;
-  try {
-    el.scrollIntoView?.({ block: "center", inline: "center" });
-  } catch {
-    void 0;
-  }
-  try {
-    el.focus?.();
-  } catch {
-    void 0;
-  }
-  try {
-    // 分页器、抽屉按钮等站点控件经常同时监听 pointer/mouse/click。这里必须
-    // 保证“只触发一次激活”，否则一次翻页可能被站点处理两次，出现跳页。
-    el.click?.();
-    return true;
-  } catch {
-    void 0;
-  }
-  try {
-    const r = el.getBoundingClientRect?.();
-    const pt = !r
-      ? { x: 0, y: 0 }
-      : { x: r.left + Math.min(10, Math.max(1, r.width / 2)), y: r.top + Math.min(10, Math.max(1, r.height / 2)) };
-    el.dispatchEvent(new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      clientX: pt.x,
-      clientY: pt.y
-    }));
-    return true;
-  } catch {
-    void 0;
-  }
-  return false;
-}
-
-function findPaginationNextButton(anchorRowEl) {
-  const start = anchorRowEl?.closest?.("table") || anchorRowEl?.closest?.("tbody") || anchorRowEl;
-  const drawerContainer =
-    anchorRowEl?.closest?.(DRAWER_MODAL_SELECTORS) ||
-    anchorRowEl?.closest?.('[class*="drawer"i] [class*="body"i]') ||
-    anchorRowEl?.closest?.('[class*="modal"i] [class*="body"i]');
-  let p = start;
-  for (let i = 0; i < 7 && p; i++) {
-    const ant =
-      p.querySelector?.(`.ant-pagination-next:not(.${ANT_PAGINATION_DISABLED}) button`) ||
-      p.querySelector?.(`.ant-pagination-next:not(.${ANT_PAGINATION_DISABLED}) a`) ||
-      p.querySelector?.(`.ant-pagination-next:not(.${ANT_PAGINATION_DISABLED}) .ant-pagination-item-link`) ||
-      p.querySelector?.(`.ant-pagination-next button:not([disabled])`) ||
-      p.querySelector?.(`.ant-pagination-next a`);
-    if (ant && (!drawerContainer || drawerContainer.contains(ant))) return ant;
-    const arco =
-      p.querySelector?.(`.arco-pagination-item-next:not(.${ARCO_PAGINATION_DISABLED}) button`) ||
-      p.querySelector?.(`.arco-pagination-item-next:not(.${ARCO_PAGINATION_DISABLED}) a`) ||
-      p.querySelector?.(`.arco-pagination-next:not(.${ARCO_PAGINATION_DISABLED}) button`);
-    if (arco && (!drawerContainer || drawerContainer.contains(arco))) return arco;
-    const ariaNext =
-      p.querySelector?.(
-        "button[aria-label*='下一页']:not([disabled]):not([aria-disabled='true']),a[aria-label*='下一页']"
-      ) ||
-      p.querySelector?.(
-        "button[aria-label*='next']:not([disabled]):not([aria-disabled='true']),a[aria-label*='next']"
-      );
-    if (ariaNext && (!drawerContainer || drawerContainer.contains(ariaNext))) return ariaNext;
-    const nav = p.querySelector?.("[class*='pagination'],[role='navigation']");
-    if (nav) {
-      const btns = Array.from(nav.querySelectorAll("button,a")).filter((x) => x && isVisibleElement(x));
-      const pick = btns.find((b) => {
-        const t = compactOneLine(b.innerText || b.textContent || "");
-        if (!t) return false;
-        return t === "下一页" || t === "Next" || t === "›" || t === ">";
-      });
-      if (pick && (!drawerContainer || drawerContainer.contains(pick))) return pick;
-    }
-    p = p.parentElement;
-  }
-
-  const scope = drawerContainer || document;
-  const all = Array.from(scope.querySelectorAll("button,a,[role='button']")).filter(
-    (x) => x && isVisibleElement(x)
-  );
-  const byText =
-    all.find((b) => compactOneLine(b.innerText || b.textContent || "") === "下一页") ||
-    all.find((b) => compactOneLine(b.innerText || b.textContent || "") === "Next");
-  if (byText) return byText;
-  const byAria = all.find((b) => {
-    const aria = compactOneLine(b.getAttribute?.("aria-label") || "");
-    const title = compactOneLine(b.getAttribute?.("title") || "");
-    return (
-      aria.includes("下一页") ||
-      title.includes("下一页") ||
-      aria.toLowerCase().includes("next") ||
-      title.toLowerCase().includes("next")
-    );
-  });
-  if (byAria) return byAria;
-
-  const iconNext = all.find((b) => {
-    if (b.classList.contains(ANT_PAGINATION_DISABLED)) return false;
-    const icon = b.querySelector?.(".anticon-right, .anticon-next, svg[data-icon='right']");
-    if (!icon) return false;
-    const parent = b.closest?.(".ant-pagination-next, .ant-pagination-item-next");
-    return !!parent;
-  });
-  if (iconNext) return iconNext;
-
-  const anyNext = all.find((b) => {
-    if (b.classList.contains(ANT_PAGINATION_DISABLED)) return false;
-    const parent = b.closest?.(".ant-pagination-next, .ant-pagination-item-next");
-    return !!parent;
-  });
-  if (anyNext) return anyNext;
-
-  const iconBtn = all.find((b) => {
-    if (b.classList.contains(ANT_PAGINATION_DISABLED)) return false;
-    if (b.getAttribute("aria-disabled") === "true") return false;
-    const icon = b.querySelector?.(".anticon-right, svg[data-icon='right']");
-    return !!icon;
-  });
-  return iconBtn || null;
-}
-
-function pickFirstRowInRoot(root) {
-  if (!root) return null;
-  const tr = root.querySelector?.("tbody tr") || root.querySelector?.("tr");
-  if (tr) return tr;
-  const roleRow = root.querySelector?.('[role="rowgroup"] [role="row"]') || root.querySelector?.('[role="row"]');
-  return roleRow || null;
-}
-
-function findLiveTableAfterPageTurn(root, tableIndex) {
-  if (!root) return root;
-  if (root.isConnected && getTableRowCount(root) > 0) return root;
-  const recovered = findLiveTableByIndex(root, tableIndex);
-  if (recovered !== root) {
-    DEBUG && console.log(`[web2ai] findLiveTableAfterPageTurn recovered via tableIndex=${tableIndex}`);
-  }
-  return recovered;
 }
 
 async function startMultiPageSelect() {
@@ -2005,7 +1569,8 @@ function getRowSelectedAnchorCell(rowEl) {
   return null;
 }
 
-function initTableListeners() {
+function initTableListeners({ render } = {}) {
+  if (typeof render === "function") renderTableUi = render;
   let _showRowFabTimer = null;
   let _hideRowFabTimer = null;
   const cancelRowFabShow = () => {
@@ -2144,179 +1709,6 @@ function clearAllTableSelectionState() {
   syncRowCheckboxState(false);
   hideTableRowFab();
   if (refs.batchBar) refs.batchBar.style.display = "none";
-}
-
-/**
- * 向上追溯查找行对应的表头行（通用版本）。
- * 
- * 策略：
- *   1. 同一 table 内查找（thead 或前面含 th 的 tr）
- *   2. 沿 DOM 树逐级向上，在每级的父容器中扫描所有兄弟元素
- *   3. 优先选择 DOM 顺序中"在前面"的元素
- *   4. 最后在离行最近的 body/dialog 区域内做兜底搜索
- * 
- * @param {Element} rowEl - 数据行元素
- * @returns {Element|null} 找到的表头行元素，或 null
- */
-function findHeaderRowAbove(rowEl) {
-  if (!rowEl) { DEBUG && console.log("[web2ai] findHeaderRowAbove: rowEl is null"); return null; }
-
-  DEBUG && console.log("[web2ai] findHeaderRowAbove START: rowEl.tagName=" + rowEl.tagName
-    + " className=" + (rowEl.className?.slice?.(0, 60) || "")
-  );
-
-  // === Step 1: 同表内查找 ===
-  if (rowEl.tagName === "TR") {
-    const table = rowEl.closest("table");
-    if (table) {
-      DEBUG && console.log("[web2ai] findHeaderRowAbove step1: table.rows=" + table.rows.length);
-      const theadRow = table.querySelector("thead tr");
-      if (theadRow && hasHeaderCells(theadRow)) {
-        DEBUG && console.log("[web2ai] findHeaderRowAbove FOUND via step1-thead, cells=" + theadRow.querySelectorAll("th,td").length);
-        return theadRow;
-      }
-      // 在前面 tr 中找含 th 的行
-      const allRows = table.querySelectorAll("tr");
-      let checked = 0;
-      for (const r of allRows) {
-        if (r === rowEl) break;
-        checked++;
-        if (hasHeaderCells(r)) {
-          DEBUG && console.log("[web2ai] findHeaderRowAbove FOUND via step1-tr, index=" + (checked - 1));
-          return r;
-        }
-      }
-      DEBUG && console.log("[web2ai] findHeaderRowAbove step1: checked " + checked + " preceding trs, none had th");
-    } else {
-      DEBUG && console.log("[web2ai] findHeaderRowAbove step1: row is TR but no closest table");
-    }
-  }
-
-  // === Step 2: 逐级向上扫描祖先的兄弟节点 ===
-  let current = rowEl;
-  let depth = 0;
-  while (current && current !== document.body && current !== document.documentElement) {
-    const parent = current.parentElement;
-    if (!parent) { current = current.parentElement; continue; }
-
-    const children = parent.children;
-    if (children.length > 1) {
-      if (depth < 5) {
-        DEBUG && console.log(`[web2ai] step2-depth${depth}: parent=<${parent.tagName}${parent.className ? '.'+parent.className.slice(0,30):''}> children=${children.length}`);
-        for (let i = 0; i < Math.min(children.length, 8); i++) {
-          const c = children[i];
-          const marker = c === current ? " **CURRENT**" : "";
-          DEBUG && console.log(`  [${i}] <${c.tagName}${c.className ? '.'+c.className.slice(0,30):''}>${marker}`);
-        }
-      }
-      const found = scanChildrenForHeader(children, current, rowEl);
-      if (found) return found;
-    }
-    current = parent;
-    depth++;
-  }
-
-  // === Step 3: 兜底 — 在 row 所在的"区域"内搜索 ===
-  const region = rowEl.closest("body, dialog, [role='dialog'], [role='tabpanel'], [role='region']");
-  if (region) {
-    const found = findHeaderRowInElement(region, rowEl);
-    if (found) {
-      DEBUG && console.log("[web2ai] findHeaderRowAbove FOUND via step3-region: " + (region.tagName) + (region.id ? "#" + region.id : ""));
-      return found;
-    }
-  }
-
-  DEBUG && console.log("[web2ai] findHeaderRowAbove RESULT: NOT FOUND");
-  return null;
-}
-
-/**
- * 在兄弟元素列表中查找表头行。
- * 优先选 DOM 顺序中"在 currentEl 前面"的元素。
- */
-function scanChildrenForHeader(children, currentEl, rowEl) {
-  let bestBefore = null;
-  let bestAfter = null;
-
-  for (const child of children) {
-    if (child === currentEl) continue;
-    const headerRow = findHeaderRowInElement(child);
-    if (headerRow) {
-      // 判断 child 在 currentEl 之前还是之后
-      if (child.compareDocumentPosition(currentEl) & Node.DOCUMENT_POSITION_FOLLOWING) {
-        // child 在 currentEl 前面
-        bestBefore = headerRow;
-        DEBUG && console.log(`[web2ai] scanChildren: found BEFORE in <${child.tagName}${child.className ? '.'+child.className.slice(0,30):''}>, header=<${headerRow.tagName}${headerRow.className ? '.'+headerRow.className.slice(0,30):''}>`);
-        break; // 找到前面的就立即返回
-      } else {
-        // child 在 currentEl 后面
-        if (!bestAfter) {
-          bestAfter = headerRow;
-          DEBUG && console.log(`[web2ai] scanChildren: found AFTER in <${child.tagName}${child.className ? '.'+child.className.slice(0,30):''}>, header=<${headerRow.tagName}${headerRow.className ? '.'+headerRow.className.slice(0,30):''}>`);
-        }
-      }
-    } else if (child.children?.length) {
-      // 诊断：children > 0 但没有找到 header，输出一下
-      DEBUG && console.log(`[web2ai] scanChildren: no header in sibling <${child.tagName}${child.className ? '.'+child.className.slice(0,30):''}> (children=${child.children.length})`);
-    }
-  }
-
-  if (bestBefore) {
-    DEBUG && console.log("[web2ai] findHeaderRowAbove FOUND via scanChildren-before: "
-      + bestBefore.tagName + " cells=" + (bestBefore.querySelectorAll?.("th,td")?.length || "?"));
-    return bestBefore;
-  }
-  if (bestAfter) {
-    DEBUG && console.log("[web2ai] findHeaderRowAbove FOUND via scanChildren-after: "
-      + bestAfter.tagName + " cells=" + (bestAfter.querySelectorAll?.("th,td")?.length || "?"));
-    return bestAfter;
-  }
-  return null;
-}
-
-/**
- * 在一个容器元素中查找表头行（通用实现）。
- * 检测 th、role=columnheader、scope=col/row 等标准表头标记。
- * @param {Element} container - 容器元素
- * @param {Element} afterEl - 可选，只查找此元素之前的行（用于同表内顺序查找）
- */
-function findHeaderRowInElement(container, afterEl) {
-  if (!container || !isVisibleElement(container)) {
-    // 诊断：输出为什么不可见
-    if (container) DEBUG && isVisibleElementDiag(container, `findHeaderRowInElement: <${container.tagName}${container.className ? '.'+container.className.slice(0,30):''}>`);
-    return null;
-  }
-
-  // 优先找 thead
-  const theadRow = container.querySelector?.("thead tr");
-  if (theadRow && hasHeaderCells(theadRow)) return theadRow;
-
-  // 找所有含表头标记的 tr
-  const trs = container.querySelectorAll?.("tr") || [];
-  for (const tr of trs) {
-    if (afterEl && tr === afterEl) break;
-    if (hasHeaderCells(tr)) return tr;
-  }
-
-  // role-based 表格：找有 columnheader 或 scope 的 row
-  const roleContainer = container.querySelector?.('[role="table"], [role="grid"], [role="treegrid"]') || container;
-  const rows = roleContainer.querySelectorAll?.('[role="row"]') || [];
-  for (const row of rows) {
-    if (afterEl && row === afterEl) break;
-    if (hasHeaderCells(row)) return row;
-  }
-
-  // 通用兜底：找容器内任何带了表头标记的子元素
-  const anyHeader = container.querySelector?.(
-    '[scope="col"], [scope="row"], [role="columnheader"], [role="rowheader"]'
-  );
-  if (anyHeader) {
-    // 向上追溯到行级元素
-    const rowLike = anyHeader.closest?.("tr") || anyHeader.closest?.('[role="row"]');
-    if (rowLike) return rowLike;
-  }
-
-  return null;
 }
 
 function dumpRowCellDetail(rowEl) {

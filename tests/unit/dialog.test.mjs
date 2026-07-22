@@ -28,6 +28,8 @@ test("drag-selecting from a prompt input onto the mask does not close the dialog
 test("a complete pointer click on the mask still cancels the dialog", async () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   globalThis.document = dom.window.document;
+  let keepOpenRequested = false;
+  document.addEventListener("web2ai:keep-panel-open", () => { keepOpenRequested = true; }, { once: true });
   const result = showPromptDialog("设置翻页数量", "全部");
   const host = document.querySelector("[data-web2ai-ui='dialog']");
   const mask = host.shadowRoot.querySelector(".mask");
@@ -36,6 +38,7 @@ test("a complete pointer click on the mask still cancels the dialog", async () =
   dispatchPointer(mask, "pointerup");
   assert.equal(await result, null);
   assert.equal(host.isConnected, false);
+  assert.equal(keepOpenRequested, true);
   dom.window.close();
   delete globalThis.document;
 });

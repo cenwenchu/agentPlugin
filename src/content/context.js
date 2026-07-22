@@ -19,10 +19,26 @@
 import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, Z_INDEX, uid, normalizeText, truncateText, compactOneLine, refs } from './state.js';
 import { el, getCssSelector, isVisibleElement, getElementLabel } from './dom.js';
 import { showToast } from './toast.js';
-import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, getRowCells, hasHeaderCells, clearAllTableSelectionState } from './table.js';
-import { render, clearDraftInput } from './overlay.js';
+import { getRowCells, hasHeaderCells } from './table-row-dom.js';
 import { buildContextBlockFromContexts, getTableContextIdentity, groupTableContexts } from './context-model.js';
 import { createContextRef } from './context-ref.js';
+
+const contextDependencies = {
+  highlightRow: () => void 0,
+  removePinnedRowOverlay: () => void 0,
+  syncRowCheckboxState: () => void 0,
+  updateBatchBar: () => void 0,
+  clearAllTableSelectionState: () => void 0,
+  render: () => void 0,
+  clearDraftInput: () => void 0
+};
+
+/** 注入表格和 Overlay 动作，避免三个有状态模块形成循环依赖。 */
+function initContextDependencies(actions = {}) {
+  for (const name of Object.keys(contextDependencies)) {
+    if (typeof actions[name] === "function") contextDependencies[name] = actions[name];
+  }
+}
 
 // 安全版 chrome.runtime.sendMessage — 扩展上下文失效时静默忽略
 function safeSend(msg) {
@@ -94,7 +110,7 @@ function addContextSnippet(snippet) {
   if (elapsed > 5) DEBUG && console.log(`[web2ai] addContextSnippet done: ${elapsed.toFixed(1)}ms silent=${snippet.silent} kind=${snippet?.kind}`);
   if (!snippet.silent) {
     DEBUG && console.log(`[web2ai] addContextSnippet calling render() (silent=${snippet.silent})`);
-    render();
+    contextDependencies.render();
   } else {
     DEBUG && console.log(`[web2ai] addContextSnippet skip render() (silent=${snippet.silent})`);
   }
@@ -104,13 +120,13 @@ function removeContextByRef(ref, opts = {}) {
   if (!ref) return;
   const rowEl = refs.refToRowEl.get(ref);
   if (rowEl) {
-    removePinnedRowOverlay(rowEl);
-    highlightRow(rowEl, false);
+    contextDependencies.removePinnedRowOverlay(rowEl);
+    contextDependencies.highlightRow(rowEl, false);
     refs.selectedRowRef.delete(rowEl);
     refs.refToRowEl.delete(ref);
   }
-  syncRowCheckboxState(false);
-  updateBatchBar();
+  contextDependencies.syncRowCheckboxState(false);
+  contextDependencies.updateBatchBar();
   if (!IS_TOP_FRAME) {
     safeSend({
       type: "FORWARD_TO_TOP",
@@ -135,15 +151,15 @@ function removeContext(id, opts = {}) {
         type: "BROADCAST_TO_TAB",
         payload: { message: { type: "UNSELECT_ROW_BY_REF", ref: ctx.ref } }
       });
-      syncRowCheckboxState(false);
+      contextDependencies.syncRowCheckboxState(false);
       let rowEl = refs.refToRowEl.get(ctx.ref);
       if (!rowEl && ctx.anchorSelector) {
         try { rowEl = document.querySelector(ctx.anchorSelector); } catch {}
       }
       DEBUG && console.log(`[web2ai] removeContext header rowEl=`, rowEl?.tagName, rowEl?.isConnected);
       if (rowEl) {
-        removePinnedRowOverlay(rowEl);
-        highlightRow(rowEl, false);
+        contextDependencies.removePinnedRowOverlay(rowEl);
+        contextDependencies.highlightRow(rowEl, false);
         refs.selectedRowRef.delete(rowEl);
         refs.refToRowEl.delete(ctx.ref);
       }
@@ -188,8 +204,8 @@ function removeContext(id, opts = {}) {
       removeFromTableGroups(ctx.ref);
     }
     DEBUG && console.log(`[web2ai] removeContext state after: contexts=${STATE.contexts.length} tableGroups=${STATE.tableGroups.length}`, STATE.tableGroups.map(g => `[${g.header?.ref||"-"} rows=${g.rows.length}]`).join(", "));
-    updateBatchBar();
-    if (!opts?.silent) render();
+    contextDependencies.updateBatchBar();
+    if (!opts?.silent) contextDependencies.render();
   } catch (e) {
     console.warn("[web2ai] removeContext error:", e);
   }
@@ -211,8 +227,8 @@ function removeFromTableGroups(ref) {
           STATE.contexts = STATE.contexts.filter(c => c.ref !== g.header.ref);
           const headerRowEl = refs.refToRowEl.get(g.header.ref);
           if (headerRowEl) {
-            removePinnedRowOverlay(headerRowEl);
-            highlightRow(headerRowEl, false);
+            contextDependencies.removePinnedRowOverlay(headerRowEl);
+            contextDependencies.highlightRow(headerRowEl, false);
             refs.selectedRowRef.delete(headerRowEl);
           }
           refs.refToRowEl.delete(g.header.ref);
@@ -236,22 +252,22 @@ function clearContext() {
   STATE.tableGroups = [];
   STATE.onboarding = null;
   // 先同步清理当前 frame，再广播到 iframe；避免等待异步消息期间被滚动恢复逻辑重新绑定。
-  clearAllTableSelectionState();
+  contextDependencies.clearAllTableSelectionState();
   // 广播到其他 frames（iframe 等），由各 frame 自行清理 refToRowEl/refToCheckbox
   safeSend({ type: "BROADCAST_TO_TAB", payload: { message: { type: "CLEAR_ROW_UI" } } });
-  render();
+  contextDependencies.render();
 }
 
 function clearChat() {
   STATE.messages = [];
-  render();
+  contextDependencies.render();
 }
 
 function clearAll() {
   if (STATE.pending) return;
   clearContext();
   clearChat();
-  clearDraftInput();
+  contextDependencies.clearDraftInput();
 }
 
 function buildContextBlock(contexts, compact = false) {
@@ -615,6 +631,7 @@ async function analyzeCurrentPage() {
 }
 
 export {
+  initContextDependencies,
   addContextSnippet,
   removeContextByRef,
   removeContext,

@@ -2,12 +2,25 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS,
-  classifyCollectionCompletion, classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch
+  classifyCollectionCompletion, classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop,
+  parseSkillCollectionPageInput, shouldStopAfterNoProgress, skillHeadersMatch
 } from "../../src/content/skill-collection-model.js";
 
 test("shares the 30-page and 1000-row collection limits across layers", () => {
   assert.equal(MAX_SKILL_COLLECTION_PAGES, 30);
   assert.equal(MAX_SKILL_COLLECTION_ROWS, 1000);
+});
+
+test("uses zero as all pages while preserving the legacy all-pages text", () => {
+  assert.equal(parseSkillCollectionPageInput("0", 12), 12);
+  assert.equal(parseSkillCollectionPageInput("0", 50), MAX_SKILL_COLLECTION_PAGES);
+  assert.equal(parseSkillCollectionPageInput("全部", 8), 8);
+  assert.equal(parseSkillCollectionPageInput("5", 3), 3);
+  assert.equal(parseSkillCollectionPageInput("5"), 5);
+  assert.equal(parseSkillCollectionPageInput("-1"), null);
+  assert.equal(parseSkillCollectionPageInput("1.5"), null);
+  assert.equal(parseSkillCollectionPageInput("31"), null);
+  assert.equal(parseSkillCollectionPageInput("abc"), null);
 });
 
 test("requires the same field count, order and normalized names before collection", () => {

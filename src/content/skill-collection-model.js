@@ -1,13 +1,32 @@
 /**
  * @fileoverview 技能数据采集的纯计算规则。
  *
- * DOM 定位和滚动副作用保留在 skills.js；本模块只判断虚拟化特征并计算
- * 下一次滚动位置，便于用 Node 单元测试覆盖边界条件。
+ * DOM 定位和滚动副作用保留在 skill-source-dom.js / skill-collector.js；
+ * 本模块只处理页数输入、完成语义和虚拟滚动计算，便于用 Node 单元测试
+ * 覆盖边界条件。
  */
 
 /** 测试和执行共用的单数据源采集上限，避免 UI/background/frame 配置漂移。 */
 const MAX_SKILL_COLLECTION_PAGES = 30;
 const MAX_SKILL_COLLECTION_ROWS = 1000;
+
+/**
+ * 将页数输入转换为实际采集上限。0 是“全部”的数字快捷方式；继续接受
+ * 历史版本的“全部”文本。全部和指定页数都受产品上限及已知总页数约束。
+ * 返回 null 表示输入无效，由调用方保留对话框并提示用户重新输入。
+ */
+function parseSkillCollectionPageInput(value, knownPages = 0) {
+  const normalized = String(value ?? "").trim();
+  const known = Number.isInteger(Number(knownPages)) && Number(knownPages) > 0
+    ? Number(knownPages)
+    : 0;
+  if (normalized === "0" || normalized === "全部") {
+    return Math.min(known || MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_PAGES);
+  }
+  const count = Number(normalized);
+  if (!Number.isInteger(count) || count < 1 || count > MAX_SKILL_COLLECTION_PAGES) return null;
+  return known ? Math.min(count, known) : count;
+}
 
 /**
  * 将采集器的停止原因转换为“本次请求是否可安全提交”的稳定语义。
@@ -95,6 +114,7 @@ export {
   classifyScrollCollection,
   isVirtualScrollMetrics,
   nextVirtualScrollTop,
+  parseSkillCollectionPageInput,
   shouldStopAfterNoProgress,
   skillHeadersMatch
 };

@@ -623,13 +623,73 @@ try {
   const uploadedPreview = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTestPanel")?.textContent || "");
   assert.match(uploadedPreview, /runtime-orders.csv/);
   assert.match(uploadedPreview, /共 2 条/, "uploaded CSV must be parsed and previewed as a runtime source");
+
+  // A pagination prompt is extension UI. Cancelling it must abort only this run,
+  // keep the full-screen workspace visible, and leave the source retryable.
+  await page.$eval("#orders", (table) => {
+    const pagination = document.createElement("ul");
+    pagination.id = "e2e-cancel-pagination";
+    pagination.className = "ant-pagination";
+    pagination.innerHTML = '<li class="ant-pagination-next"><button aria-label="下一页">下一页</button></li>';
+    table.parentElement.appendChild(pagination);
+  });
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".skillTestPanel button")).find((button) => button.textContent?.trim() === "开始测试")?.click();
   });
+  await page.waitForFunction(() => document.querySelector("[data-web2ai-ui='dialog']")?.shadowRoot?.querySelector(".message")?.textContent?.includes("输入 0 表示全部"));
+  const collectionResultStatus = await page.$eval("#web2ai_overlay_host", (host) => {
+    const node = host.shadowRoot.querySelector(".skillResultStatus");
+    return node ? { text: node.textContent, fontSize: getComputedStyle(node).fontSize } : null;
+  });
+  assert.deepEqual(
+    collectionResultStatus,
+    { text: "正在采集数据...", fontSize: "14px" },
+    "the result panel must visibly distinguish data collection from model analysis"
+  );
+  await page.$eval("[data-web2ai-ui='dialog']", (host) => host.shadowRoot.querySelector(".cancel")?.click());
   await page.waitForFunction(() => {
     const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
-    return shadow?.querySelectorAll(".skillDataSourceTab.complete").length === 4 && !shadow.querySelector(".skillTestHead button")?.disabled;
-  }, { timeout: 30000 });
+    return !document.querySelector("[data-web2ai-ui='dialog']") &&
+      shadow?.querySelector(".skillTestError")?.textContent?.includes("已取消数据源载入") &&
+      !shadow.querySelector(".skillTestHead button")?.disabled;
+  });
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden")),
+    false,
+    "cancelling page-count selection must keep the skill workspace visible"
+  );
+  await page.$eval("#e2e-cancel-pagination", (pagination) => pagination.remove());
+
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillTestPanel button")).find((button) => button.textContent?.trim() === "开始测试")?.click();
+  });
+  try {
+    await page.waitForFunction(() => {
+      const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+      return shadow?.querySelectorAll(".skillDataSourceTab.complete").length === 4 && !shadow.querySelector(".skillTestHead button")?.disabled;
+    }, { timeout: 30000 });
+  } catch (error) {
+    const workspace = await page.$eval("#web2ai_overlay_host", (host) => ({
+      tabs: Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => ({
+        className: tab.className,
+        text: tab.textContent || ""
+      })),
+      error: host.shadowRoot.querySelector(".skillTestError")?.textContent || "",
+      preview: host.shadowRoot.querySelector(".skillDataPreviewStatus")?.textContent || ""
+    }));
+    workspace.sources = [];
+    for (let index = 0; index < workspace.tabs.length; index++) {
+      await page.$eval("#web2ai_overlay_host", (host, sourceIndex) => {
+        host.shadowRoot.querySelectorAll(".skillDataSourceTab")[sourceIndex]?.click();
+      }, index);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      workspace.sources.push(await page.$eval("#web2ai_overlay_host", (host) => ({
+        status: host.shadowRoot.querySelector(".skillDataPreviewStatus")?.textContent || "",
+        error: host.shadowRoot.querySelector(".skillTestError")?.textContent || ""
+      })));
+    }
+    throw new Error(`skill test did not complete all sources: ${JSON.stringify(workspace)}`, { cause: error });
+  }
   assert.ok(aiRequestCount > 0, "the completed skill test must reach the local model fixture");
   const testedSources = await page.$eval("#web2ai_overlay_host", (host) =>
     Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => tab.textContent || "")
@@ -646,6 +706,11 @@ try {
   assert.match(submittedSnapshot, /\| 线上 \| 12 \|  \|/, "submitted-content viewer must show the exact runtime CSV row");
   await page.$eval("[data-web2ai-ui='dialog']", (host) => host.shadowRoot.querySelector(".cancel")?.click());
   await page.waitForFunction(() => !document.querySelector("[data-web2ai-ui='dialog']"));
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden")),
+    false,
+    "cancelling an extension dialog must keep the skill workspace visible"
+  );
   const savedTestMethod = "识别异常订单、解释原因，并按风险级别输出";
   const saveButtonState = await page.$eval("#web2ai_overlay_host", (host, methodText) => {
     const textarea = host.shadowRoot.querySelector(".skillTestMethod");

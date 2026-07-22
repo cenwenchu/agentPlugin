@@ -40,6 +40,11 @@ function showDialog({ title = "提示", message, inputValue = null, textValue = 
       if (finished) return;
       finished = true;
       const value = input?.value ?? "";
+      // 对话框属于扩展 UI。尤其点击遮罩取消时，节点移除后浏览器可能把随后
+      // 的 click 落到业务页面；先通知内容入口取消关闭计时器，避免误收起 Chat。
+      document.dispatchEvent(new document.defaultView.CustomEvent("web2ai:keep-panel-open", {
+        detail: { durationMs: 1200 }
+      }));
       host.remove();
       resolve(inputValue === null ? confirmed : (confirmed ? value : null));
     };
