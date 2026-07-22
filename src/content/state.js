@@ -27,6 +27,7 @@ const IS_TOP_FRAME = window.top === window;
  * @property {boolean} suppressAutoSuggest - 是否禁用自动建议
  * @property {boolean} maximized - 面板是否最大化
  * @property {boolean} launcherVisible - 页面上的 Chat 启动图标是否可见
+ * @property {boolean} tableAskAiEnabled - 表格行悬停时是否显示“问AI”入口
  * @property {"chat"|"skills"} activePanelTab - 浮层当前功能页
  * @property {Array} skills - 当前页面绑定的技能
  * @property {Object|null} skillDraft - 正在编辑的技能数据源
@@ -46,6 +47,7 @@ const STATE = {
   suppressAutoSuggest: false,
   maximized: false,
   launcherVisible: true,
+  tableAskAiEnabled: true,
   modelOptions: [],
   activeModelId: "",
   activePanelTab: "chat",

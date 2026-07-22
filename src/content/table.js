@@ -648,7 +648,7 @@ function ensureInlineRowFab() {
 }
 
 function showInlineRowFab(rowEl) {
-  if (!STATE.launcherVisible) {
+  if (!STATE.launcherVisible || !STATE.tableAskAiEnabled) {
     hideInlineRowFab();
     return;
   }
@@ -830,6 +830,10 @@ function getRowAnchorRect(rowEl) {
 }
 
 function showTableRowFabAt(rect, rowEl, pointer) {
+  if (!STATE.launcherVisible || !STATE.tableAskAiEnabled) {
+    hideTableRowFab();
+    return;
+  }
   if (isTableFooterOrSummaryRow(rowEl)) {
     hideTableRowFab();
     return;
@@ -1602,7 +1606,7 @@ function initTableListeners({ render } = {}) {
       const pointer = { target: e.target, x: e.clientX, y: e.clientY, path: e.composedPath?.() };
       _showRowFabTimer = setTimeout(() => {
         _showRowFabTimer = null;
-        if (!STATE.launcherVisible) {
+        if (!STATE.launcherVisible || !STATE.tableAskAiEnabled) {
           cancelRowFabHide();
           hideTableRowFab();
           hideInlineRowFab();
@@ -1668,6 +1672,15 @@ function setTableSelectionEnabled(enabled) {
   }
   restoreRenderedSelectionState();
   updateBatchBar();
+}
+
+/** 只控制新行的“问AI”悬停入口；已有选中标记和批量栏保持原状。 */
+function setTableAskAiEnabled(enabled) {
+  STATE.tableAskAiEnabled = Boolean(enabled);
+  if (!STATE.tableAskAiEnabled) {
+    hideTableRowFab();
+    hideInlineRowFab();
+  }
 }
 
 /**
@@ -1757,6 +1770,7 @@ export {
   pickRowTargetFromPoint,
   ensureBatchBar,
   updateBatchBar,
+  setTableAskAiEnabled,
   setTableSelectionEnabled,
   clearAllTableSelectionState,
   getRowGroupRows,

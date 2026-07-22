@@ -228,6 +228,26 @@ try {
     }
   });
   await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".wrap")?.classList.contains("hidden"));
+
+  // The Chat-level switch suppresses only new Ask AI hover actions. Chat,
+  // existing context and the launcher remain available, and the setting is
+  // synchronized to every frame through storage.sync.
+  await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector("#web2ai_table_ask_toggle")?.click());
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector("#web2ai_table_ask_toggle")?.checked === false);
+  await page.hover("#orders tbody tr");
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  assert.equal(
+    await page.$eval("#web2ai_table_row_ask_ai", (button) => button.parentElement?.style.display === "none"),
+    true,
+    "disabling the Chat switch must hide the page Ask AI action"
+  );
+  assert.equal(
+    await worker.evaluate(async () => (await chrome.storage.sync.get(["tableAskAiEnabled"])).tableAskAiEnabled),
+    false,
+    "the Ask AI switch must persist across frames and page reloads"
+  );
+  await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector("#web2ai_table_ask_toggle")?.click());
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector("#web2ai_table_ask_toggle")?.checked === true);
   await page.hover("#page-click-target");
   await new Promise((resolve) => setTimeout(resolve, 100));
   const stayedOpenAfterHover = await page.$eval("#web2ai_overlay_host", (host) => !host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden"));

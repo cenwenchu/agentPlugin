@@ -134,6 +134,8 @@ token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，
 
 `STATE.launcherVisible` 是页面运行时镜像，`launcherHidden` 是跨 frame 的持久化事实。所有修改持久化值的路径都必须同步更新当前 frame，避免等待异步 `storage.onChanged` 才更新 UI。
 
+`tableAskAiEnabled` 是独立于启动器总开关的行级入口开关，保存在 `storage.sync` 并由所有 frame 镜像到 `STATE.tableAskAiEnabled`。Chat Tab 修改时当前 frame 立即隐藏悬停入口，其余 frame 通过 `storage.onChanged` 同步。关闭它只阻止新的“问AI”浮层出现，不删除已有上下文、不隐藏已选行标记和批量栏，也不影响截图、普通 Chat 或技能执行；关闭启动器仍是覆盖所有页面表格选择 UI 的总开关。
+
 上下文不再写入 `storage.session`，因此没有固定 50 条存储上限，也不存在恢复后的 DOM 对应关系失效问题。发送量仍受 token 预算控制；大量数据的 UI 性能应通过折叠或虚拟列表解决，而不是静默淘汰上下文。
 
 ## 6. 跨页表格

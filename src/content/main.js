@@ -12,7 +12,7 @@
  */
 
 import { DEBUG, IS_TOP_FRAME, STATE, refs, compactOneLine } from './state.js';
-import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableSelectionEnabled, clearAllTableSelectionState } from './table.js';
+import { initTableListeners, highlightRow, removePinnedRowOverlay, syncRowCheckboxState, hideTableRowFab, updateBatchBar, setTableAskAiEnabled, setTableSelectionEnabled, clearAllTableSelectionState } from './table.js';
 import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen, clearDraftInput, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition, startSkillExecution } from './overlay.js';
 import { showToast } from './toast.js';
@@ -373,11 +373,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // ========== 监听 storage 变更 ==========
 
 chrome.storage.sync
-  .get(["panelMaximized", "launcherHidden", "lastPanelTab"])
+  .get(["panelMaximized", "launcherHidden", "lastPanelTab", "tableAskAiEnabled"])
   .then((data) => {
     if (typeof data?.panelMaximized === "boolean") STATE.maximized = data.panelMaximized;
     if (data?.lastPanelTab === "chat" || data?.lastPanelTab === "skills") STATE.activePanelTab = data.lastPanelTab;
     STATE.launcherVisible = data?.launcherHidden !== true;
+    setTableAskAiEnabled(data?.tableAskAiEnabled !== false);
     setTableSelectionEnabled(STATE.launcherVisible);
     render();
   })
@@ -392,6 +393,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.launcherHidden) {
     STATE.launcherVisible = changes.launcherHidden.newValue !== true;
     setTableSelectionEnabled(STATE.launcherVisible);
+  }
+  if (changes.tableAskAiEnabled) {
+    // 删除同步键时回到默认开启，避免当前 frame 一直保留旧的关闭状态。
+    setTableAskAiEnabled(changes.tableAskAiEnabled.newValue !== false);
   }
   if (changes.lastPanelTab && (changes.lastPanelTab.newValue === "chat" || changes.lastPanelTab.newValue === "skills")) {
     STATE.activePanelTab = changes.lastPanelTab.newValue;

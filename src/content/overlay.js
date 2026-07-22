@@ -22,7 +22,7 @@ import { addContextSnippet, removeContext, clearContext, clearAll, buildContextB
 import { calculateContextBudget, estimateTokens, selectContextsWithinTokenBudget } from './token-budget.js';
 import { tableGroupToCsv, tableGroupToMarkdown } from './table-export.js';
 import { buildOnboardingPrompt, createFallbackOnboarding, parseOnboardingResponse } from './onboarding.js';
-import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab, setTableSelectionEnabled } from './table.js';
+import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab, setTableAskAiEnabled, setTableSelectionEnabled } from './table.js';
 import { showToast } from './toast.js';
 import { showConfirmDialog, showPromptDialog } from './dialog.js';
 import { createSkillDraft, cancelSkillDraft, selectSkillTable, saveSkillDraft, rebindSkill, removeSkillDraftSource, deleteSkill, deleteAllSkills, switchToSkillPage, renameCurrentSkillPage, buildAnalysisPrompt, downloadSkillsExport, previewSkillsImport, applySkillsImport } from './skills.js';
@@ -38,6 +38,11 @@ const OVERLAY_CSS = `
     .wrap.max { left: 0; right: 0; width: 100vw; }
     .card { height: 100%; display: flex; flex-direction: column; background: rgba(255,255,255,0.98); border-left: 1px solid rgba(0,0,0,0.12); overflow: hidden; box-shadow: 0 12px 36px rgba(0,0,0,0.22); backdrop-filter: blur(10px); }
     .workspace { flex: 1; min-height: 0; display: flex; }
+    .tableAskToggle { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; color: #475569; font-size: 11px; font-weight: 650; cursor: pointer; user-select: none; }
+    .tableAskToggle input { width: 30px; height: 16px; margin: 0; appearance: none; border: 1px solid #cbd5e1; border-radius: 999px; background: #e2e8f0; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+    .tableAskToggle input::before { content: ""; display: block; width: 12px; height: 12px; margin: 1px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.28); transition: transform .15s ease; }
+    .tableAskToggle input:checked { border-color: #2563eb; background: #2563eb; }
+    .tableAskToggle input:checked::before { transform: translateX(14px); }
     .sideTabs { width: 48px; flex: 0 0 48px; padding: 10px 6px; display: flex; flex-direction: column; gap: 7px; background: #f8fafc; border-right: 1px solid rgba(0,0,0,.08); }
     .sideTab { min-height: 44px; padding: 5px 2px; border: 0; border-radius: 9px; background: transparent; color: #64748b; font-size: 11px; cursor: pointer; }
     .sideTab.active { background: #dbeafe; color: #1d4ed8; font-weight: 650; }
@@ -904,6 +909,26 @@ function render() {
   const contextSection = el("div", { class: "section contextSec" }, [
     el("div", { class: "sectionHead" }, [
       el("div", { class: "sectionTitle" }, [`上下文（${tableCount} 个表格，共 ${rowCount} 条；${screenshotCount} 张截图）`]),
+      el("label", {
+        class: "tableAskToggle",
+        title: "关闭后，页面表格行上不再显示“问AI”入口"
+      }, [
+        el("span", {}, ["页面问AI"]),
+        el("input", {
+          id: "web2ai_table_ask_toggle",
+          type: "checkbox",
+          role: "switch",
+          checked: STATE.tableAskAiEnabled ? true : null,
+          "aria-label": "显示页面问AI入口",
+          "aria-checked": STATE.tableAskAiEnabled ? "true" : "false",
+          onChange: (event) => {
+            const enabled = Boolean(event.target.checked);
+            setTableAskAiEnabled(enabled);
+            chrome.storage.sync.set({ tableAskAiEnabled: enabled }).catch(() => void 0);
+            render();
+          }
+        })
+      ]),
       el("button", {
         class: "btn danger",
         disabled: STATE.pending || STATE.contexts.length === 0 ? true : null,
