@@ -20,7 +20,7 @@ const {
   getRowCells, hasHeaderCells, isHeaderRow, isTableFooterOrSummaryRow
 } = await import("../../src/content/table-row-dom.js");
 const { findHeaderRowAbove } = await import("../../src/content/table-header-resolver.js");
-const { findPaginationNextButton } = await import("../../src/content/table-pagination-dom.js");
+const { findPaginationNextButton, waitForTableDataReady } = await import("../../src/content/table-pagination-dom.js");
 const {
   alignedRowCellTexts, extractHeaders, extractStoredSourceData, tableCandidates
 } = await import("../../src/content/skill-source-dom.js");
@@ -76,6 +76,53 @@ test("pagination lookup stays scoped to the row container and skips disabled Ant
   `);
   try {
     assert.equal(findPaginationNextButton(document.querySelector("#row"))?.id, "next");
+  } finally {
+    cleanup();
+  }
+});
+
+test("fast table readiness waits for content stability instead of a fixed two-second delay", async () => {
+  const cleanup = installDom(`
+    <table id="orders"><tbody><tr><td>A-1</td><td>载入中</td></tr></tbody></table>
+  `);
+  try {
+    const table = document.querySelector("#orders");
+    const startedAt = Date.now();
+    setTimeout(() => { table.querySelector("td:last-child").textContent = "已完成"; }, 25);
+    const rows = await waitForTableDataReady(table, "", 1000, 0, {
+      minWaitMs: 20,
+      pollIntervalMs: 20,
+      stableSamples: 2,
+      compareContent: true
+    });
+    assert.equal(rows, 1);
+    assert.equal(table.querySelector("td:last-child").textContent, "已完成");
+    assert.ok(Date.now() - startedAt < 500, "fast content should not inherit the legacy two-second floor");
+  } finally {
+    cleanup();
+  }
+});
+
+test("fast table readiness does not resolve while the table reports loading", async () => {
+  const cleanup = installDom(`
+    <section id="wrapper" aria-busy="true">
+      <table id="orders"><tbody><tr><td>A-1</td></tr></tbody></table>
+    </section>
+  `);
+  try {
+    const table = document.querySelector("#orders");
+    const wrapper = document.querySelector("#wrapper");
+    setTimeout(() => wrapper.removeAttribute("aria-busy"), 70);
+    const startedAt = Date.now();
+    const rows = await waitForTableDataReady(table, "", 1000, 0, {
+      minWaitMs: 20,
+      pollIntervalMs: 20,
+      stableSamples: 2,
+      compareContent: true,
+      waitForLoading: true
+    });
+    assert.equal(rows, 1);
+    assert.ok(Date.now() - startedAt >= 70, "loading state must delay readiness");
   } finally {
     cleanup();
   }

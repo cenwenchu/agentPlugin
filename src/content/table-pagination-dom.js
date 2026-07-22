@@ -162,25 +162,49 @@ function getTableContentDigest(root) {
   return `${count}|${parts.join("||")}`;
 }
 
-function waitForTableDataReady(root, prevDigest, timeoutMs = 12000, tableIndex) {
+/**
+ * 等待翻页或虚拟滚动后的表格进入稳定状态。
+ *
+ * 默认参数保留 table.js 原有的保守等待；技能采集器可传入更短的轮询周期，
+ * 并启用整页可见内容摘要比较。快速页面无需固定等待两秒，慢页面仍会在
+ * 内容持续变化或 loading 未结束时继续等待到稳定或硬超时。
+ */
+function waitForTableDataReady(root, prevDigest, timeoutMs = 12000, tableIndex, options = {}) {
   return new Promise((resolve) => {
     const start = Date.now();
     let lastRows = -1;
+    let lastContentDigest = "";
     let stableCount = 0;
-    const minWait = 2000;
-    let minWaitDone = false;
+    const minWaitMs = Math.max(0, Number(options.minWaitMs ?? 2000) || 0);
+    const pollIntervalMs = Math.max(20, Number(options.pollIntervalMs ?? 400) || 400);
+    const stableSamples = Math.max(1, Number(options.stableSamples ?? 3) || 3);
+    const compareContent = Boolean(options.compareContent);
+    const waitForLoading = Boolean(options.waitForLoading);
+    const loadingSelector = ".ant-spin-spinning,.arco-spin-loading,[aria-busy='true']";
+
+    const tableIsLoading = (liveRoot) => {
+      if (!waitForLoading || !liveRoot) return false;
+      let scope = liveRoot;
+      for (let depth = 0; scope && depth < 4; depth++, scope = scope.parentElement) {
+        if (scope.matches?.(loadingSelector) || scope.querySelector?.(loadingSelector)) return true;
+      }
+      return false;
+    };
 
     const timer = setInterval(() => {
       const elapsed = Date.now() - start;
 
       const liveRoot = (root && root.isConnected) ? root : findLiveTableByIndex(root, tableIndex);
       const rows = getTableRowCount(liveRoot);
+      const contentDigest = compareContent ? getTableRowTexts(liveRoot).join("\u241e") : "";
+      const loading = tableIsLoading(liveRoot);
 
-      DEBUG && console.log(`[web2ai] waitForTableDataReady rows=${rows} stableCount=${stableCount} elapsed=${elapsed}ms root connected=${root?.isConnected} liveRoot=${liveRoot === root ? "original" : "recovered"}`);
+      DEBUG && console.log(`[web2ai] waitForTableDataReady rows=${rows} stableCount=${stableCount} loading=${loading} elapsed=${elapsed}ms root connected=${root?.isConnected} liveRoot=${liveRoot === root ? "original" : "recovered"}`);
 
-      if (rows > 0 && rows === lastRows) {
+      const contentStable = !compareContent || contentDigest === lastContentDigest;
+      if (!loading && rows > 0 && rows === lastRows && contentStable) {
         stableCount++;
-        if (stableCount >= 3 && minWaitDone) {
+        if (stableCount >= stableSamples && elapsed >= minWaitMs) {
           clearInterval(timer);
           DEBUG && console.log(`[web2ai] waitForTableDataReady resolved: ${rows} rows stable`);
           resolve(rows);
@@ -189,13 +213,13 @@ function waitForTableDataReady(root, prevDigest, timeoutMs = 12000, tableIndex) 
         stableCount = 0;
       }
       lastRows = rows;
-      if (elapsed >= minWait) minWaitDone = true;
-      if (elapsed > timeoutMs) {
+      lastContentDigest = contentDigest;
+      if (elapsed >= timeoutMs) {
         clearInterval(timer);
         DEBUG && console.log(`[web2ai] waitForTableDataReady TIMEOUT - returning ${rows} rows`);
         resolve(rows);
       }
-    }, 400);
+    }, pollIntervalMs);
   });
 }
 

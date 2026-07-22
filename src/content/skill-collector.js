@@ -22,6 +22,23 @@ import {
 const activeCollections = new Map();
 const SKILL_COLLECTION_DIAGNOSTICS = DEBUG;
 
+// 普通跨页选择继续使用 table-pagination-dom 的保守默认值。技能采集已经先
+// 校验数据源身份，可按内容摘要自适应结束等待，避免每次滚动/翻页固定停两秒。
+const SKILL_VIRTUAL_READY_OPTIONS = Object.freeze({
+  minWaitMs: 120,
+  pollIntervalMs: 80,
+  stableSamples: 2,
+  compareContent: true,
+  waitForLoading: true
+});
+const SKILL_PAGE_READY_OPTIONS = Object.freeze({
+  minWaitMs: 300,
+  pollIntervalMs: 100,
+  stableSamples: 3,
+  compareContent: true,
+  waitForLoading: true
+});
+
 function emitCollectionProgress(collectionId, progress) {
   chrome.runtime.sendMessage({ type: "SKILL_COLLECTION_PROGRESS", collectionId, progress }).catch(() => void 0);
 }
@@ -207,10 +224,15 @@ function safeScrollIntoView(target, block = "start") {
 }
 
 async function waitForVirtualRows(source, beforeTable, beforeDigest, beforeRows) {
-  await new Promise((resolve) => setTimeout(resolve, 140));
+  await new Promise((resolve) => setTimeout(resolve, 60));
   const tableIndex = beforeTable?.tagName === "TABLE" ? Array.from(document.querySelectorAll("table")).indexOf(beforeTable) : -1;
   const changed = await waitForTableChange(beforeTable, beforeDigest, 2400, beforeRows, tableIndex);
-  if (changed) await waitForTableDataReady(findLiveTableAfterPageTurn(beforeTable, tableIndex), beforeDigest, 3000, tableIndex);
+  if (changed) {
+    await waitForTableDataReady(
+      findLiveTableAfterPageTurn(beforeTable, tableIndex), beforeDigest, 3000, tableIndex,
+      SKILL_VIRTUAL_READY_OPTIONS
+    );
+  }
 }
 
 async function resolvePageScrollCollection(source, initialTable, page) {
@@ -528,10 +550,13 @@ async function clickPaginationAndWait(source, target) {
   const beforeDigest = getTableContentDigest(table);
   const tableIndex = table?.tagName === "TABLE" ? Array.from(document.querySelectorAll("table")).indexOf(table) : -1;
   if (!clickElement(target)) return false;
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await new Promise((resolve) => setTimeout(resolve, 80));
   const changed = await waitForTableChange(table, beforeDigest, 6000, beforeRows, tableIndex);
   if (!changed) return false;
-  await waitForTableDataReady(findLiveTableAfterPageTurn(table, tableIndex), beforeDigest, 6000, tableIndex);
+  await waitForTableDataReady(
+    findLiveTableAfterPageTurn(table, tableIndex), beforeDigest, 6000, tableIndex,
+    SKILL_PAGE_READY_OPTIONS
+  );
   return true;
 }
 
@@ -644,7 +669,7 @@ async function collectStoredSourceData(source, options = {}) {
       emitCollectionProgress(collectionId, { phase: "turning", page, pages, rowCount: rows.length, maxPages, maxRows });
       if (!clickElement(next)) { reason = "next-click-failed"; break; }
       pageTurned = true;
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 80));
       if (control.stopped) { reason = "stopped"; break; }
       const changed = await waitForTableChange(table, beforeDigest, 8000, beforeRows, tableIndex);
       if (!changed) {
@@ -652,7 +677,10 @@ async function collectStoredSourceData(source, options = {}) {
         reason = "page-timeout";
         break;
       }
-      const ready = await waitForTableDataReady(findLiveTableAfterPageTurn(table, tableIndex), beforeDigest, 8000, tableIndex);
+      const ready = await waitForTableDataReady(
+        findLiveTableAfterPageTurn(table, tableIndex), beforeDigest, 8000, tableIndex,
+        SKILL_PAGE_READY_OPTIONS
+      );
       const turnedTable = findStoredSourceTable(source);
       logSkillCollection("page turn", {
         collectionId, page, success: ready, reason: ready ? "" : "table-not-ready",
