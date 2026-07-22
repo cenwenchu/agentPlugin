@@ -6,11 +6,14 @@
  * 2. AI API 请求代理（非流式 + 流式 SSE）
  * 3. 长连接管理（流式 AI 对话的 Port 通信）
  * 4. 设置分层：普通配置存 sync，API Key 存 local
+ * 5. 技能写入串行化：在保留原 storage schema 的前提下避免跨页面覆盖
  */
 
 import { DEFAULT_MODEL_PROFILE, DEFAULT_SETTINGS } from "./shared.js";
 import { createSseDataParser } from "./sse.js";
 import { MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS } from "./content/skill-collection-model.js";
+import { applySkillMutation } from "./content/skill-storage-model.js";
+import { buildFramePathHint, selectSourceFrames } from "./content/skill-source-model.js";
 
 // 生产默认不记录模型、页面和技能路由元数据。排障时可在本地临时开启，
 // 但日志只能使用 summarizeAiMessages 等脱敏摘要，不得输出消息原文。
@@ -22,6 +25,27 @@ const SKILL_PICK_SESSIONS = new Map();
 const SKILL_COLLECTION_ROUTES = new Map();
 /** 仅记录由扩展为采集自动创建的标签页；用户原有标签页永不自动关闭。 */
 const SKILL_AUTO_OPENED_TABS = new Set();
+const SKILL_STORAGE_KEY = "web2aiSkills";
+const SKILL_PAGE_NAMES_STORAGE_KEY = "web2aiSkillPageNames";
+/** background 内的单一写队列，避免多个页面的 read-modify-write 相互覆盖。 */
+let skillMutationQueue = Promise.resolve();
+
+function enqueueSkillMutation(mutation) {
+  const run = skillMutationQueue.then(async () => {
+    const stored = await chrome.storage.local.get([SKILL_STORAGE_KEY, SKILL_PAGE_NAMES_STORAGE_KEY]);
+    const next = applySkillMutation({
+      skills: stored[SKILL_STORAGE_KEY],
+      pageNames: stored[SKILL_PAGE_NAMES_STORAGE_KEY]
+    }, mutation);
+    await chrome.storage.local.set({
+      [SKILL_STORAGE_KEY]: next.skills,
+      [SKILL_PAGE_NAMES_STORAGE_KEY]: next.pageNames
+    });
+    return next.result;
+  });
+  skillMutationQueue = run.catch(() => void 0);
+  return run;
+}
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   SKILL_AUTO_OPENED_TABS.delete(tabId);
@@ -421,6 +445,19 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message?.type === "MUTATE_SKILLS") {
+      try {
+        const data = await enqueueSkillMutation(message.mutation || {});
+        sendResponse({ ok: true, data });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          code: error?.code || "SKILL_MUTATION_FAILED",
+          error: String(error?.message ?? error)
+        });
+      }
+      return;
+    }
     // 非流式 AI 请求
     if (message?.type === "AI_CHAT") {
       const data = await chatCompletions(message.payload);
@@ -480,6 +517,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         pageKey: normalizedPageKey(selectedPageUrl),
         pageUrl: selectedPageUrl
       };
+      const selectedFrames = await chrome.webNavigation.getAllFrames({ tabId: sender.tab.id }).catch(() => []);
+      payload.source.framePathHint = buildFramePathHint(selectedFrames, selectedFrameId, normalizedPageKey);
       DIAGNOSTIC_LOGS && console.info("[web2ai.skill-pick] accepted source", JSON.stringify({
         sessionId,
         frameId: selectedFrameId,
@@ -573,7 +612,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       let stableFoundCount = 0;
       for (let attempt = 0; attempt < 12; attempt++) {
         const frames = await chrome.webNavigation.getAllFrames({ tabId: sender.tab.id });
-        const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
+        const frameSelection = selectSourceFrames(frames, message.source, normalizedPageKey);
+        if (frameSelection.ambiguous) {
+          best = { status: "ambiguous", found: false, ambiguous: true, targetFramePresent: true };
+          break;
+        }
+        const ordered = frameSelection.frames;
         const frameResults = await Promise.all(ordered.map(async (frame) => {
           try {
             const response = await sendToFrame(sender.tab.id, frame.frameId, { type: "CHECK_SKILL_SOURCE", source: message.source });
@@ -628,19 +672,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
       const ownerTabId = sender.tab.id;
       const collectionId = String(message.collectionId || "");
-      const preferredFrameUrl = normalizedPageKey(message.source?.frameUrl || "");
       const sourcePageKey = normalizedPageKey(message.source?.pageKey || message.source?.pageUrl || "");
       const tryCollectFromTab = async (tabId, attempts = 1) => {
         SKILL_COLLECTION_ROUTES.set(collectionId, { ownerTabId, sourceTabId: tabId });
         for (let attempt = 0; attempt < attempts; attempt++) {
           const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
-          const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
+          const frameSelection = selectSourceFrames(frames, message.source, normalizedPageKey);
+          if (frameSelection.ambiguous) return { ambiguous: true };
+          const ordered = frameSelection.frames;
           for (const frame of ordered) {
             try {
               const validation = await sendToFrame(tabId, frame.frameId, {
                 type: "CHECK_SKILL_SOURCE",
                 source: message.source
               });
+              if (validation?.data?.status === "ambiguous") return { ambiguous: true };
               if (!validation?.ok || !validation.data?.found) continue;
               if (validation.data.status === "changed") {
                 return { changed: true, headers: validation.data.headers || [] };
@@ -678,7 +724,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // 目标业务 Tab 已关闭时不能拿当前页的相似表格兜底。
       let result = ownerMatchesSource ? await tryCollectFromTab(ownerTabId, 2) : {};
       let openedOrSwitched = false;
-      if (!result.best && !result.changed) {
+      if (!result.best && !result.changed && !result.ambiguous) {
         let sourceUrl = "";
         try {
           const parsed = new URL(message.source?.pageUrl || "");
@@ -710,7 +756,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       const autoOpenedTabId = sourceTabId !== ownerTabId && SKILL_AUTO_OPENED_TABS.has(sourceTabId) ? sourceTabId : 0;
       SKILL_COLLECTION_ROUTES.delete(collectionId);
-      if (result.changed) {
+      if (result.ambiguous) {
+        sendResponse({ ok: false, code: "SOURCE_AMBIGUOUS", error: "数据源存在多个可能位置，请重新选择该数据源", autoOpenedTabId });
+      } else if (result.changed) {
         sendResponse({ ok: false, code: "SOURCE_STRUCTURE_CHANGED", error: "数据源结构已更新", headers: result.headers, autoOpenedTabId });
       } else if (result.best) {
         sendResponse({
@@ -741,13 +789,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "INSPECT_SKILL_SOURCE_PAGINATION") {
       if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
       const ownerTabId = sender.tab.id;
-      const preferredFrameUrl = normalizedPageKey(message.source?.frameUrl || "");
       const sourcePageKey = normalizedPageKey(message.source?.pageKey || message.source?.pageUrl || "");
       const inspectTab = async (tabId, attempts = 1) => {
         let lastFound = null;
         for (let attempt = 0; attempt < attempts; attempt++) {
           const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
-          const ordered = [...frames].sort((a, b) => Number(normalizedPageKey(b.url) === preferredFrameUrl) - Number(normalizedPageKey(a.url) === preferredFrameUrl));
+          const frameSelection = selectSourceFrames(frames, message.source, normalizedPageKey);
+          if (frameSelection.ambiguous) return { found: false, ambiguous: true, status: "ambiguous" };
+          const ordered = frameSelection.frames;
           for (const frame of ordered) {
             try {
               const response = await sendToFrame(tabId, frame.frameId, { type: "INSPECT_SKILL_SOURCE_PAGINATION", source: message.source });

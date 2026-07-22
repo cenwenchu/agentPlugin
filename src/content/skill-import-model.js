@@ -14,11 +14,19 @@ function analysisDescription(method) {
 
 function sourceIdentity(source = {}) {
   return {
+    locatorVersion: Math.max(0, Number(source.locatorVersion) || 0),
     pageKey: String(source.pageKey || "").trim(),
     frameUrl: String(source.frameUrl || "").trim(),
     isTopFrame: Boolean(source.isTopFrame),
     selector: String(source.selector || "").trim(),
+    selectorStrength: String(source.selectorStrength || "").trim(),
     tableIndex: Number.isInteger(source.tableIndex) ? source.tableIndex : null,
+    framePathHint: Array.isArray(source.framePathHint) ? source.framePathHint.map((segment) => ({
+      url: String(segment?.url || "").trim(),
+      sameUrlIndex: Math.max(0, Number(segment?.sameUrlIndex) || 0)
+    })) : [],
+    componentType: String(source.componentType || "").trim(),
+    containerSignature: String(source.containerSignature || "").trim(),
     headers: Array.isArray(source.headers) ? source.headers.map(normalizedHeader) : []
   };
 }

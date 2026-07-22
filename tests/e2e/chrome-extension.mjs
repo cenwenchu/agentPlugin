@@ -112,7 +112,24 @@ const virtualCollectionFixture = `<!doctype html><meta charset="utf-8"><title>Vi
     scroll.scrollTop = 200;
     render();
   <\/script>`;
+let aiRequestCount = 0;
 const server = http.createServer((req, res) => {
+  if (req.method === "POST" && req.url === "/v1/chat/completions") {
+    aiRequestCount++;
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      const payload = JSON.parse(body || "{}");
+      if (payload.stream) {
+        res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8" });
+        res.end('data: {"choices":[{"delta":{"content":"E2E 分析完成"}}]}\n\ndata: [DONE]\n\n');
+      } else {
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ choices: [{ message: { content: "E2E 分析完成" } }] }));
+      }
+    });
+    return;
+  }
   res.setHeader("content-type", "text/html; charset=utf-8");
   res.end(req.url === "/frame" ? frameFixture : req.url === "/inner-scroll" ? innerScrollFixture : req.url === "/inner-frame-host" ? innerFrameHostFixture : req.url === "/virtual-collection" ? virtualCollectionFixture : fixture);
 });
@@ -574,9 +591,22 @@ try {
   assert.match(restoredSkill, /主订单明细/);
   assert.match(restoredSkill, /分析方法：识别异常订单并说明原因，使用列表输出/);
 
-  // Test mode must load every source before it attempts the model request. The
-  // fixture intentionally has no API key, so the model step fails after the
-  // data assertions without depending on an external service.
+  // Test mode must load every source before it attempts the model request.
+  // Point the active test profile at this fixture's local OpenAI-compatible
+  // endpoint so method saving can also be verified after a completed run.
+  await worker.evaluate(async (baseUrl) => {
+    const { settings } = await chrome.storage.sync.get(["settings"]);
+    // A page refresh intentionally resets the content-side selection to the
+    // default profile. Point every configured test profile at the local model
+    // so this assertion does not depend on which valid profile the page kept.
+    const models = settings.models.map((profile) => ({ ...profile, baseUrl, model: "e2e-local" }));
+    const { modelApiKeys = {} } = await chrome.storage.local.get(["modelApiKeys"]);
+    const localKeys = Object.fromEntries(models.map((profile) => [profile.id, "e2e-key"]));
+    await Promise.all([
+      chrome.storage.sync.set({ settings: { ...settings, models } }),
+      chrome.storage.local.set({ modelApiKeys: { ...modelApiKeys, ...localKeys } })
+    ]);
+  }, url);
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".skillCard button")).find((button) => button.textContent?.trim() === "测试技能")?.click();
   });
@@ -600,6 +630,7 @@ try {
     const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
     return shadow?.querySelectorAll(".skillDataSourceTab.complete").length === 4 && !shadow.querySelector(".skillTestHead button")?.disabled;
   }, { timeout: 30000 });
+  assert.ok(aiRequestCount > 0, "the completed skill test must reach the local model fixture");
   const testedSources = await page.$eval("#web2ai_overlay_host", (host) =>
     Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => tab.textContent || "")
   );
@@ -614,7 +645,41 @@ try {
   assert.match(submittedSnapshot, /runtime-orders.csv/);
   assert.match(submittedSnapshot, /\| 线上 \| 12 \|  \|/, "submitted-content viewer must show the exact runtime CSV row");
   await page.$eval("[data-web2ai-ui='dialog']", (host) => host.shadowRoot.querySelector(".cancel")?.click());
+  await page.waitForFunction(() => !document.querySelector("[data-web2ai-ui='dialog']"));
+  const savedTestMethod = "识别异常订单、解释原因，并按风险级别输出";
+  const saveButtonState = await page.$eval("#web2ai_overlay_host", (host, methodText) => {
+    const textarea = host.shadowRoot.querySelector(".skillTestMethod");
+    textarea.value = methodText;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    const saveButton = Array.from(host.shadowRoot.querySelectorAll(".skillActions button"))
+      .find((button) => button.textContent?.trim() === "满意并保存");
+    const state = {
+      found: Boolean(saveButton),
+      disabled: Boolean(saveButton?.disabled),
+      panelText: host.shadowRoot.querySelector(".skillTest")?.textContent || ""
+    };
+    saveButton?.click();
+    return state;
+  }, savedTestMethod);
+  assert.deepEqual(
+    { found: saveButtonState.found, disabled: saveButtonState.disabled },
+    { found: true, disabled: false },
+    `a completed test must enable method saving: ${saveButtonState.panelText}`
+  );
+  // A save starts with an immediate UI lock. Clicking Back during the storage
+  // round-trip must neither leave the workspace nor open an unsaved dialog.
   await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTestHead button")?.click());
+  const saveRaceDialog = await page.$eval("[data-web2ai-ui='dialog']", (host) => host.shadowRoot.querySelector(".message")?.textContent || "").catch(() => null);
+  assert.equal(saveRaceDialog, null, `saving a method must not race with the unsaved-change prompt: ${saveRaceDialog || ""}`);
+  await page.waitForFunction(() => document.querySelector("#web2ai_toast")?.textContent?.includes("分析方法已保存"));
+  await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTestHead button")?.click());
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillTest"));
+  assert.equal(await page.$("[data-web2ai-ui='dialog']"), null, "a persisted method must return without another save prompt");
+  assert.match(
+    await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || ""),
+    /按风险级别输出/,
+    "the method saved from test mode must update the persisted skill card"
+  );
 
   await page.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("订单综合分析"));
   const skillBarText = await page.$eval("[data-web2ai-skill-bar]", (bar) => bar.textContent || "");

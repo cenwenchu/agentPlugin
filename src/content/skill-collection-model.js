@@ -10,6 +10,31 @@ const MAX_SKILL_COLLECTION_PAGES = 30;
 const MAX_SKILL_COLLECTION_ROWS = 1000;
 
 /**
+ * 将采集器的停止原因转换为“本次请求是否可安全提交”的稳定语义。
+ *
+ * 采集器始终保留已经读到的行，供预览、诊断和页面恢复使用；因此 found=true
+ * 只表示数据源曾成功定位，不能代表数据已经完整。用户明确选择的页数上限、
+ * 以及产品约定的行数上限属于有界成功；停止、翻页失败和翻页状态不确定则不
+ * 能自动提交给模型。
+ */
+function classifyCollectionCompletion(reason = "complete") {
+  const normalized = String(reason || "complete");
+  if (["complete", "last-page"].includes(normalized)) {
+    return { completeness: "complete", completeForRequest: true };
+  }
+  if (["page-limit", "row-limit"].includes(normalized)) {
+    return { completeness: "bounded-complete", completeForRequest: true };
+  }
+  if (normalized === "stopped") {
+    return { completeness: "cancelled", completeForRequest: false };
+  }
+  if (normalized === "page-timeout") {
+    return { completeness: "uncertain", completeForRequest: false };
+  }
+  return { completeness: "incomplete", completeForRequest: false };
+}
+
+/**
  * 判断滚动区域是否很可能只渲染了部分数据行。
  * 框架明确包含 virtual 类名时直接命中；否则用滚动总高度与当前 DOM 行
  * 高度之差判断是否存在未渲染的占位空间。
@@ -66,6 +91,7 @@ function nextVirtualScrollTop({ scrollTop = 0, scrollHeight = 0, clientHeight = 
 export {
   MAX_SKILL_COLLECTION_PAGES,
   MAX_SKILL_COLLECTION_ROWS,
+  classifyCollectionCompletion,
   classifyScrollCollection,
   isVirtualScrollMetrics,
   nextVirtualScrollTop,

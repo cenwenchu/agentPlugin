@@ -124,6 +124,7 @@ const OVERLAY_CSS = `
     .skillStatus { font-size: 10px; padding: 2px 7px; border-radius: 999px; }
     .skillStatus.available { color: #166534; background: #dcfce7; }
     .skillStatus.changed { color: #9a3412; background: #ffedd5; }
+    .skillStatus.ambiguous { color: #9a3412; background: #fef3c7; }
     .skillStatus.missing { color: #b91c1c; background: #fee2e2; }
     .skillStatus.checking { color: #475569; background: #e2e8f0; }
     .skillStatus.deferred { color: #475569; background: #f1f5f9; }
@@ -194,6 +195,9 @@ const OVERLAY_CSS = `
     .skillDataSourceTab.complete::after { content: " · 已载入"; color: #15803d; }
     .skillDataSourceTab.loading::after { content: " · 采集中"; color: #dc2626; }
     .skillDataSourceTab.error::after { content: " · 失败"; color: #dc2626; font-weight: 700; }
+    .skillRuntimeSourceActions { align-items: center; margin: 8px 0 12px; }
+    .skillRuntimeSourceActions .btn { flex: 0 0 auto; height: 28px; box-sizing: border-box; padding: 0 10px; line-height: 26px; }
+    .skillRuntimeSourceActions .skillMeta { margin-top: 0; line-height: 1.4; }
     .skillDataPreviewPager { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 4px 2px; color: #64748b; font-size: 10px; }
     .skillDataPreviewPager button { height: 24px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 0 8px; background: #fff; color: #334155; font-size: 10px; cursor: pointer; }
     .skillDataPreviewPager button:disabled { color: #94a3b8; background: #f8fafc; cursor: not-allowed; }
@@ -272,6 +276,7 @@ async function startSkillTest(skill, { mode = "test", autoRun = false } = {}) {
     methodReview: "",
     error: "",
     pending: false,
+    methodSaving: false,
     attempts: 0,
     collectionId: "",
     collection: null,
@@ -591,7 +596,18 @@ async function runSkillTest({ reuseData = false } = {}) {
           }
           if (!loaded?.ok) throw new Error(loaded?.error || "数据源载入失败");
           item.data = loaded.data;
-          item.status = "complete";
+          if (loaded.data?.completeForRequest === false) {
+            const reason = loaded.data.collectionReason || "incomplete";
+            const reasonLabels = {
+              stopped: "用户已停止采集",
+              "page-timeout": "翻页结果无法确认",
+              "next-click-failed": "下一页操作失败"
+            };
+            item.status = "incomplete";
+            item.error = reasonLabels[reason] || `采集未完整结束（${reason}）`;
+          } else {
+            item.status = "complete";
+          }
           if (loaded.requiresFinalize) {
             // item.data 和状态已经写入测试/执行会话；此确认到达后台后，才
             // 允许切回原页面及关闭扩展自动创建的浏览器 Tab。
@@ -747,7 +763,7 @@ function appendSkillMethodReview() {
 
 async function leaveSkillWorkspace() {
   const test = STATE.skillTest;
-  if (!test || test.pending) return;
+  if (!test || test.pending || test.methodSaving) return;
   if (test.mode === "test" && normalizeText(test.method) !== normalizeText(test.savedMethod)) {
     const shouldSave = await showConfirmDialog("分析方法有修改但尚未保存，是否保存后返回？", {
       confirmText: "保存并返回",
@@ -813,15 +829,24 @@ async function continueSkillConversation() {
 
 async function saveSkillTestMethod({ exitAfterSave = false } = {}) {
   const test = STATE.skillTest;
-  if (!test || test.pending || !normalizeText(test.method)) return;
+  const methodToSave = normalizeText(test?.method);
+  if (!test || test.pending || test.methodSaving || !methodToSave) return false;
+  test.methodSaving = true;
+  render();
   try {
-    await saveSkillAnalysisMethod(test.skillId, test.method);
-    test.savedMethod = normalizeText(test.method);
+    await saveSkillAnalysisMethod(test.skillId, methodToSave);
+    // 只把实际写入 storage 的快照标为已保存。保存期间编辑框和返回按钮
+    // 会锁定，避免异步写入时 method 又发生变化而产生错误的“已保存”状态。
+    test.savedMethod = methodToSave;
     showToast("分析方法已保存");
     if (exitAfterSave) STATE.skillTest = null;
-    render();
+    return true;
   } catch (error) {
     showToast(`保存失败：${String(error?.message ?? error)}`);
+    return false;
+  } finally {
+    test.methodSaving = false;
+    render();
   }
 }
 
@@ -1445,7 +1470,7 @@ function render() {
         onClick: () => { test.activeDataSourceIndex = index; render(); }
       }, [`${index + 1}. ${item.name}${countText}`]);
     }));
-    const runtimeSourceActions = el("div", { class: "skillActions" }, [
+    const runtimeSourceActions = el("div", { class: "skillActions skillRuntimeSourceActions" }, [
       el("button", { class: "btn", disabled: test.pending || sourceItems.filter((item) => item.runtimeOnly).length >= 5, onClick: () => uploadSkillRuntimeFiles() }, ["＋ 上传 CSV / Excel"]),
       activeSource.runtimeOnly ? el("button", { class: "btn danger", disabled: test.pending, onClick: () => removeSkillRuntimeSource(test.activeDataSourceIndex) }, ["移除临时数据源"]) : null,
       el("span", { class: "skillMeta" }, ["文件仅用于本次测试，不保存到技能中"])
@@ -1489,7 +1514,7 @@ function render() {
     ]);
     return el("div", { class: "skillTest" }, [
       el("div", { class: "skillTestHead" }, [
-        el("button", { class: "btn skillWorkspaceBack", disabled: test.pending, onClick: () => leaveSkillWorkspace() }, ["← 返回"]),
+        el("button", { class: "btn skillWorkspaceBack", disabled: test.pending || test.methodSaving, onClick: () => leaveSkillWorkspace() }, ["← 返回"]),
         el("div", { class: "skillWorkspaceIdentity" }, [
           el("div", { class: "skillWorkspaceMode" }, ["测试技能"]),
           el("div", { class: "skillTestTitle", title: test.skillName }, [test.skillName])
@@ -1515,7 +1540,7 @@ function render() {
           el("textarea", {
             class: "skillTestMethod",
             rows: clamp(normalizeText(test.method).split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 46)), 0), 2, 8),
-            disabled: test.pending,
+            disabled: test.pending || test.methodSaving,
             onInput: (event) => {
               test.method = event.target.value;
               event.target.rows = clamp(normalizeText(test.method).split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 46)), 0), 2, 8);
@@ -1528,9 +1553,9 @@ function render() {
             el("button", { class: "btn danger", style: test.pending ? {} : { display: "none" }, onClick: () => stopSkillExecution() }, [test.status === "loading" ? "停止采集并分析" : "停止测试"]),
             el("button", {
               class: "btn",
-              disabled: test.pending || !finished || normalizeText(test.method) === normalizeText(test.savedMethod),
+              disabled: test.pending || test.methodSaving || !finished || normalizeText(test.method) === normalizeText(test.savedMethod),
               onClick: () => saveSkillTestMethod()
-            }, ["满意并保存"]),
+            }, [test.methodSaving ? "保存中…" : "满意并保存"]),
             el("button", { class: "btn", disabled: !test.submittedPrompt, onClick: () => viewSkillSubmittedPrompt(test) }, ["查看提交内容"]),
             el("button", { class: "btn", disabled: test.pending || !finished || !normalizeText(test.response), onClick: () => reviewSkillAnalysisMethod() }, [test.methodReview ? "重新优化分析方法" : "优化分析方法"])
           ])
@@ -1579,7 +1604,7 @@ function render() {
         onClick: () => { execution.activeDataSourceIndex = index; render(); }
       }, [`${index + 1}. ${item.name}${countText}`]);
     }));
-    const runtimeSourceActions = el("div", { class: "skillActions" }, [
+    const runtimeSourceActions = el("div", { class: "skillActions skillRuntimeSourceActions" }, [
       el("button", { class: "btn", disabled: execution.pending || sourceItems.filter((item) => item.runtimeOnly).length >= 5, onClick: () => uploadSkillRuntimeFiles() }, ["＋ 上传 CSV / Excel"]),
       activeSource.runtimeOnly ? el("button", { class: "btn danger", disabled: execution.pending, onClick: () => removeSkillRuntimeSource(execution.activeDataSourceIndex) }, ["移除临时数据源"]) : null,
       el("span", { class: "skillMeta" }, ["文件仅用于本次执行，不保存到技能中"])
@@ -2026,6 +2051,7 @@ function render() {
       available: "可用",
       deferred: "执行时校验",
       changed: "数据源已变化",
+      ambiguous: "数据源位置不明确",
       missing: "数据源失效"
     };
     const sourceStatusLabel = (detail = {}) => (
@@ -2036,7 +2062,7 @@ function render() {
       const sourceStatuses = STATE.skillSourceStatuses[skill.id] || {};
       return sources
         .map((source, index) => ({ source, index, detail: sourceStatuses[source.id] || { status: "checking" } }))
-        .filter((item) => item.detail.status === "missing");
+        .filter((item) => ["missing", "ambiguous"].includes(item.detail.status));
     };
     const cards = STATE.skills.map((skill) => {
       const sources = skill.sources || [skill.source].filter(Boolean);
@@ -2045,6 +2071,8 @@ function render() {
       const currentStatuses = statuses.filter((item) => item !== "deferred");
       const status = currentStatuses.includes("missing")
         ? "missing"
+        : currentStatuses.includes("ambiguous")
+          ? "ambiguous"
         : currentStatuses.includes("changed")
           ? "changed"
           : currentStatuses.includes("checking")
@@ -2074,7 +2102,7 @@ function render() {
         el("div", { class: "skillActions" }, [
           el("button", {
             class: "btn primary",
-            disabled: status === "missing" || status === "checking",
+            disabled: status === "missing" || status === "ambiguous" || status === "checking",
             onClick: async () => {
               const unavailable = collectSkillUnavailableSources(skill);
               if (unavailable.length) {

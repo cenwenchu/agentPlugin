@@ -39,7 +39,10 @@ test("shares the request budget so every data source remains present", () => {
 test("reports every source that has not completed loading", () => {
   const complete = source("已完成", "页面", [["A", "", "1"]]);
   const missing = { name: "未完成", source: { pageTitle: "页面二" }, data: null };
-  assert.deepEqual(incompleteSkillDataSources([complete, missing]), [missing]);
+  const partial = source("翻页超时", "页面三", [["B", "", "2"]]);
+  partial.data.completeForRequest = false;
+  partial.data.collectionReason = "page-timeout";
+  assert.deepEqual(incompleteSkillDataSources([complete, missing, partial]), [missing, partial]);
 });
 
 test("labels uploaded spreadsheets as runtime file sources", () => {

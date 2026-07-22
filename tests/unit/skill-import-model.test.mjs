@@ -49,3 +49,18 @@ test("normalizes header layout whitespace but preserves multi-source order", () 
     skillContentFingerprint(skill({ sources: [secondSource, first.sources[0]] }))
   );
 });
+
+test("distinguishes versioned bindings in same-url sibling frames", () => {
+  const first = skill();
+  first.sources = [{
+    ...first.sources[0],
+    locatorVersion: 2,
+    framePathHint: [{ url: "https://example.com/orders", sameUrlIndex: 0 }]
+  }];
+  const second = skill();
+  second.sources = [{
+    ...first.sources[0],
+    framePathHint: [{ url: "https://example.com/orders", sameUrlIndex: 1 }]
+  }];
+  assert.notEqual(skillContentFingerprint(first), skillContentFingerprint(second));
+});

@@ -2,15 +2,17 @@
  * @fileoverview 技能的数据源绑定、持久化、页面挂接与数据采集。
  *
  * 本模块运行在所有 frame：目标 frame 负责定位表格、分页及虚拟滚动采集；
- * top frame 负责技能目录、页面归属和状态汇总。模型调用与全屏交互位于 overlay.js。
+ * top frame 负责技能目录、页面归属和状态汇总。持久化读取仍直接使用 storage，
+ * 写入统一交给 background 串行 mutation；模型调用与全屏交互位于 overlay.js。
  */
 
 import { DEBUG, IS_TOP_FRAME, STATE, compactOneLine, refs, uid } from "./state.js";
 import { getCssSelector, isVisibleElement } from "./dom.js";
 import { showToast } from "./toast.js";
 import { showConfirmDialog, showPromptDialog } from "./dialog.js";
-import { MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS, classifyScrollCollection, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch } from "./skill-collection-model.js";
+import { MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS, classifyCollectionCompletion, classifyScrollCollection, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch } from "./skill-collection-model.js";
 import { skillContentFingerprint } from "./skill-import-model.js";
+import { SOURCE_LOCATOR_VERSION, chooseSourceTableCandidate } from "./skill-source-model.js";
 import {
   clickElement, findHeaderRowAbove, findLiveTableAfterPageTurn, findPaginationNextButton,
   getRowCells, getStableTableRoot, getTableContentDigest, getTableRowTexts, isHeaderRow,
@@ -198,6 +200,31 @@ function inferTableTitle(table) {
   return direct.map(compactOneLine).find((value) => value && value.length <= 40) || "";
 }
 
+function tableComponentType(table) {
+  if (!table) return "unknown";
+  if (table.matches?.(".ant-table-wrapper") || table.closest?.(".ant-table-wrapper")) return "ant";
+  if (table.matches?.(".arco-table") || table.closest?.(".arco-table")) return "arco";
+  if (table.matches?.(".art-table") || table.closest?.(".art-table")) return "art-table";
+  if (table.matches?.("[role='grid'],[role='treegrid'],[role='table']")) return "aria";
+  return table.tagName === "TABLE" ? "native" : "generic";
+}
+
+function tableContainerSignature(table) {
+  if (!table) return "";
+  const stable = [];
+  for (let node = table, depth = 0; node && depth < 4; node = node.parentElement, depth++) {
+    const id = compactOneLine(node.id || "");
+    const testId = compactOneLine(node.getAttribute?.("data-testid") || node.getAttribute?.("data-test-id") || "");
+    const aria = compactOneLine(node.getAttribute?.("aria-label") || "");
+    if (id) stable.push(`id:${id}`);
+    if (testId) stable.push(`test:${testId}`);
+    if (aria) stable.push(`aria:${aria}`);
+  }
+  const title = inferTableTitle(table);
+  if (title) stable.push(`title:${title}`);
+  return stable.slice(0, 5).join("|");
+}
+
 function describeTable(table, preferredTarget = null) {
   const candidates = tableCandidates();
   const headers = extractHeaders(table, preferredTarget);
@@ -216,12 +243,16 @@ function describeTable(table, preferredTarget = null) {
     headers: headers.slice(0, 12)
   });
   return {
+    locatorVersion: SOURCE_LOCATOR_VERSION,
     selector,
+    selectorStrength: selector.includes("#") ? "stable-id" : "positional",
     tableIndex,
     headers,
     headerFingerprint: headers.map(normalizeHeader).join("|"),
     preview: headers.join("、") || "未识别到数据源字段",
     tableTitle,
+    componentType: tableComponentType(table),
+    containerSignature: tableContainerSignature(table),
     // 初次绑定优先记录明确的表格标题；业务 Tab 和字段兜底会在 top frame
     // 收到选择结果后补齐。保存后该名称不再自动重算。
     displayName: tableTitle,
@@ -253,26 +284,58 @@ function sourceMatchesCurrentFrame(source) {
   return !expected || expected === pageKey(location.href);
 }
 
-function resolveStoredSource(source) {
+function locateStoredSource(source) {
   if (!sourceMatchesCurrentFrame(source)) {
-    return { found: false, candidateCount: 0, frameMismatch: true, frameUrl: pageKey(location.href) };
+    return { table: null, status: "missing", frameMismatch: true, candidateCount: 0 };
   }
   const candidates = tableCandidates();
-  let selectorTable = null;
-  let matchMethod = "none";
-  try { selectorTable = source?.selector ? document.querySelector(source.selector) : null; } catch { selectorTable = null; }
-  // 通用 DOM 路径在不同 frame 中可能恰好命中普通 div。只有能够归一化到
-  // 当前 frame 的真实表格组件根节点时才接受，否则继续走序号/表头兜底。
-  if (selectorTable) {
-    const resolved = resolveTableFromTarget(selectorTable);
-    selectorTable = resolved && candidates.includes(resolved) ? resolved : null;
+  const versioned = Number(source?.locatorVersion) >= SOURCE_LOCATOR_VERSION;
+  let selectorTables = [];
+  try {
+    const matches = source?.selector
+      ? (versioned ? Array.from(document.querySelectorAll(source.selector)) : [document.querySelector(source.selector)].filter(Boolean))
+      : [];
+    selectorTables = [...new Set(matches.map(resolveTableFromTarget).filter((table) => table && candidates.includes(table)))];
+  } catch {
+    selectorTables = [];
   }
   const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
-  // 数据源身份必须由保存时的 DOM 定位确定。表头只负责校验变化，不能在
-  // 多个相似表格之间替我们重新选择，否则订单/售后等同构表会互相串绑。
-  const selected = selectorTable || indexedTable || null;
-  matchMethod = selectorTable ? "selector" : indexedTable ? "tableIndex" : "none";
-  if (!selected) return { found: false, candidateCount: candidates.length, frameUrl: pageKey(location.href) };
+  // 新绑定记录了更强的定位语义。selector 本身不唯一，或 selector 与保存序号
+  // 指向不同组件时宁可要求重新绑定，也不能退化成任意选择。旧绑定保持原优先级。
+  const chosen = chooseSourceTableCandidate({
+    locatorVersion: source?.locatorVersion,
+    selectorCandidates: selectorTables,
+    indexedCandidate: indexedTable,
+    selectorStrength: source?.selectorStrength
+  });
+  if (chosen.ambiguous) {
+    return { table: null, status: "ambiguous", ambiguous: true, candidateCount: candidates.length };
+  }
+  const table = chosen.candidate;
+  if (!table) return { table: null, status: "missing", candidateCount: candidates.length };
+  const identityWarnings = [];
+  if (versioned && source.componentType && source.componentType !== tableComponentType(table)) identityWarnings.push("component-type-changed");
+  if (versioned && source.containerSignature && source.containerSignature !== tableContainerSignature(table)) identityWarnings.push("container-signature-changed");
+  return {
+    table,
+    status: "located",
+    matchMethod: chosen.matchMethod,
+    candidateCount: candidates.length,
+    identityWarnings
+  };
+}
+
+function resolveStoredSource(source) {
+  const located = locateStoredSource(source);
+  if (!located.table) return {
+    found: false,
+    status: located.status,
+    ambiguous: located.ambiguous,
+    candidateCount: located.candidateCount,
+    frameMismatch: located.frameMismatch,
+    frameUrl: pageKey(location.href)
+  };
+  const selected = located.table;
   const headers = extractHeaders(selected);
   const similarity = headerSimilarity(source?.headers || [], headers);
   const diagnostic = {
@@ -280,8 +343,8 @@ function resolveStoredSource(source) {
     frameUrl: pageKey(location.href),
     selector: source?.selector || "",
     storedTableIndex: source?.tableIndex,
-    candidateCount: candidates.length,
-    matchMethod,
+    candidateCount: located.candidateCount,
+    matchMethod: located.matchMethod,
     expectedHeaderCount: source?.headers?.length || 0,
     expectedHeaders: (source?.headers || []).slice(0, 80),
     actualHeaderCount: headers.length,
@@ -295,22 +358,15 @@ function resolveStoredSource(source) {
     found: true,
     status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
     headers,
-    similarity
+    similarity,
+    identityWarnings: located.identityWarnings
   };
 }
 
 function extractStoredSourceData(source, limit = 200) {
-  if (!sourceMatchesCurrentFrame(source)) return { found: false, candidateCount: 0, frameMismatch: true };
-  const candidates = tableCandidates();
-  let selectorTable = null;
-  try { selectorTable = source?.selector ? document.querySelector(source.selector) : null; } catch { selectorTable = null; }
-  if (selectorTable) {
-    const resolved = resolveTableFromTarget(selectorTable);
-    selectorTable = resolved && candidates.includes(resolved) ? resolved : null;
-  }
-  const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
-  const selected = selectorTable || indexedTable;
-  if (!selected) return { found: false, candidateCount: candidates.length };
+  const located = locateStoredSource(source);
+  const selected = located.table;
+  if (!selected) return { found: false, status: located.status, ambiguous: located.ambiguous, candidateCount: located.candidateCount };
   const headers = extractHeaders(selected);
   const allRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
     .filter((row) => !isHeaderRow(row))
@@ -337,8 +393,9 @@ function extractStoredSourceData(source, limit = 200) {
 }
 
 function inspectStoredSourcePagination(source) {
-  const table = findStoredSourceTable(source);
-  if (!table) return { found: false, multiPage: false };
+  const located = locateStoredSource(source);
+  const table = located.table;
+  if (!table) return { found: false, status: located.status, ambiguous: located.ambiguous, multiPage: false };
   const anchorRow = table.querySelector?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
   const next = findPaginationNextButton(anchorRow);
   const pagination = next?.closest?.(".ant-pagination,.arco-pagination,[class*='pagination'],[role='navigation']");
@@ -994,9 +1051,11 @@ async function collectStoredSourceData(source, options = {}) {
     }
     emitCollectionProgress(collectionId, { phase: "complete", pages, rowCount: rows.length, maxPages, maxRows, reason });
     logSkillCollection("complete", { collectionId, pages, rowCount: rows.length, uniqueSignatures: seen.size, reason, restoredFirstPage });
+    const completion = classifyCollectionCompletion(reason);
     return {
       found: true, status: "available", headers, rows, rowCount: rows.length,
       totalRowCount: rows.length, collectedPages: pages, collectionReason: reason,
+      ...completion,
       stopped: reason === "stopped", truncated: reason === "row-limit" || reason === "page-limit"
     };
   } finally {
@@ -1016,16 +1075,7 @@ function stopStoredSourceCollection(collectionId) {
 }
 
 function findStoredSourceTable(source) {
-  if (!sourceMatchesCurrentFrame(source)) return null;
-  const candidates = tableCandidates();
-  let selectorTable = null;
-  try { selectorTable = source?.selector ? document.querySelector(source.selector) : null; } catch { selectorTable = null; }
-  if (selectorTable) {
-    const resolved = resolveTableFromTarget(selectorTable);
-    selectorTable = resolved && candidates.includes(resolved) ? resolved : null;
-  }
-  const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
-  return selectorTable || indexedTable;
+  return locateStoredSource(source).table;
 }
 
 function focusStoredSource(source) {
@@ -1173,8 +1223,14 @@ async function readSkills() {
   return stored.map(normalizeStoredSkill);
 }
 
-async function writeSkills(skills) {
-  await chrome.storage.local.set({ [STORAGE_KEY]: skills });
+async function mutateSkills(mutation) {
+  const response = await chrome.runtime.sendMessage({ type: "MUTATE_SKILLS", mutation });
+  if (!response?.ok) {
+    const error = new Error(response?.error || "技能保存失败");
+    error.code = response?.code || "SKILL_MUTATION_FAILED";
+    throw error;
+  }
+  return response.data;
 }
 
 async function downloadSkillsExport() {
@@ -1265,18 +1321,22 @@ async function previewSkillsImport(text) {
 }
 
 async function applySkillsImport(preview) {
-  const existing = await readSkills();
-  const merged = [...existing, ...preview.skills];
-  const pageNamesData = await chrome.storage.local.get([PAGE_NAMES_STORAGE_KEY]);
-  await Promise.all([
-    writeSkills(merged),
-    chrome.storage.local.set({
-      [PAGE_NAMES_STORAGE_KEY]: { ...(pageNamesData[PAGE_NAMES_STORAGE_KEY] || {}), ...(preview.pageNames || {}) }
-    })
-  ]);
+  // 预览和最终确认之间其他页面可能已经导入或修改技能。background 会在
+  // 串行 mutation 中基于最新集合再次去重，避免覆盖或重复写入。
+  const result = await mutateSkills({
+    type: "IMPORT_SKILLS",
+    skills: preview.skills,
+    pageNames: preview.pageNames || {}
+  });
   await loadSkills();
   await chrome.runtime.sendMessage({ type: "REFRESH_SKILLS_ALL_TABS" }).catch(() => void 0);
-  return { total: preview.total, success: preview.success, duplicate: preview.duplicate, failed: preview.failed };
+  const success = Number(result?.added) || 0;
+  return {
+    total: preview.total,
+    success,
+    duplicate: preview.duplicate + Math.max(0, preview.success - success),
+    failed: preview.failed
+  };
 }
 
 function autoSourceDisplayName(source, index = 0) {
@@ -1339,6 +1399,7 @@ function normalizeStoredSkill(skill) {
   return {
     ...skill,
     version: Math.max(3, Number(skill.version) || 1),
+    revision: Math.max(0, Number(skill.revision) || 0),
     pageKey: repairPrimaryPage ? primarySource.pageKey : skill.pageKey,
     pageUrl: repairPrimaryPage ? (primarySource.pageUrl || skill.pageUrl) : skill.pageUrl,
     pageTitle: repairPrimaryPage ? (primarySource.pageTitle || skill.pageTitle) : skill.pageTitle,
@@ -1358,21 +1419,8 @@ async function loadSkills() {
   const businessTabs = readBusinessPageTabs();
   activeBusinessTabTitle = businessTabs.activeTitle;
   const currentPageKey = pageKey();
-  let learnedTabTitle = false;
-  if (activeBusinessTabTitle) {
-    for (const skill of all) {
-      for (const source of skill.sources) {
-        const shouldRepairTabTitle = businessTabs.activeTitleConfirmed && source.businessTabTitle !== activeBusinessTabTitle;
-        if (source.pageKey === currentPageKey && (!source.businessTabTitle || shouldRepairTabTitle)) {
-          source.businessTabTitle = activeBusinessTabTitle;
-          source.businessTabTitleConfirmed = businessTabs.activeTitleConfirmed;
-          learnedTabTitle = true;
-        }
-      }
-      skill.source = skill.sources[0] || null;
-    }
-  }
-  if (learnedTabTitle) await writeSkills(all);
+  // 加载和查看技能必须是只读的。历史数据源缺少业务 Tab 标题时，只能在
+  // validateSkillSource 已经唯一定位成功后，通过目标 source mutation 补齐。
   STATE.skillPageNames = pageNamesData[PAGE_NAMES_STORAGE_KEY] && typeof pageNamesData[PAGE_NAMES_STORAGE_KEY] === "object"
     ? pageNamesData[PAGE_NAMES_STORAGE_KEY]
     : {};
@@ -1397,7 +1445,7 @@ async function loadSkills() {
 }
 
 function createSkillDraft() {
-  STATE.skillDraft = { id: "", name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
+  STATE.skillDraft = { id: "", revision: 0, name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
   STATE.activePanelTab = "skills";
   STATE.open = true;
   chrome.storage.sync.set({ lastPanelTab: "skills" }).catch(() => void 0);
@@ -1410,7 +1458,7 @@ function cancelSkillDraft() {
 }
 
 async function selectSkillTable(sourceId = "") {
-  if (!STATE.skillDraft) STATE.skillDraft = { id: "", name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
+  if (!STATE.skillDraft) STATE.skillDraft = { id: "", revision: 0, name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
   const sessionId = uid();
   STATE.skillPicking = true;
   STATE.skillPickSession = sessionId;
@@ -1508,7 +1556,7 @@ function acceptSkillTablePickResult(payload) {
   if (payload.cancelled) {
     showToast("已取消选择数据源");
   } else if (payload.source) {
-    STATE.skillDraft ||= { id: "", name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
+    STATE.skillDraft ||= { id: "", revision: 0, name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
     const selectedSource = {
       ...payload.source,
       id: STATE.skillPickSourceId || uid(),
@@ -1587,8 +1635,6 @@ async function saveSkillDraft() {
     createdAt: existing?.createdAt || now,
     updatedAt: now
   };
-  const index = all.findIndex((item) => item.id === skill.id);
-  if (index >= 0) all[index] = skill; else all.unshift(skill);
   SKILL_DIAGNOSTICS && console.info("[web2ai.skill] saved skill", JSON.stringify({
     skillId: skill.id,
     skillName: skill.name,
@@ -1604,7 +1650,19 @@ async function saveSkillDraft() {
       headerCount: source.headers?.length || 0
     }))
   }));
-  await writeSkills(all);
+  try {
+    await mutateSkills({
+      type: "UPSERT_SKILL",
+      skill,
+      expectedRevision: Math.max(0, Number(draft.revision) || 0)
+    });
+  } catch (error) {
+    if (error?.code === "SKILL_CONFLICT") {
+      showToast("该技能已在其他页面修改。当前草稿已保留，请重新打开最新技能后再编辑。", 4500, { position: "center" });
+      return;
+    }
+    throw error;
+  }
   STATE.skillDraft = null;
   STATE.open = true;
   STATE.activePanelTab = "skills";
@@ -1614,30 +1672,37 @@ async function saveSkillDraft() {
 }
 
 async function saveSkillAnalysisMethod(id, description) {
-  const all = await readSkills();
-  const skill = all.find((item) => item.id === id);
-  if (!skill) throw new Error("技能不存在或已被删除");
-  skill.analysisMethod = normalizeAnalysisMethod({ description });
-  skill.updatedAt = Date.now();
-  await writeSkills(all);
-  await loadSkills();
+  const current = STATE.skillCatalog.find((item) => item.id === id);
+  const skill = await mutateSkills({
+    type: "UPDATE_ANALYSIS_METHOD",
+    skillId: id,
+    // 若当前页面目录尚未同步到该技能，也用 0 参与比较；不能因缺少本地
+    // revision 就绕过冲突保护并覆盖 background 中的新版本。
+    expectedRevision: current?.revision ?? 0,
+    analysisMethod: normalizeAnalysisMethod({ description })
+  });
+  // mutation 返回时 storage 已经持久化成功。先同步本页 revision 和分析方法，
+  // 不把随后可能持续数秒的数据源校验算进“保存”操作；storage.onChanged 会
+  // 继续触发完整目录刷新和校验。
+  STATE.skillCatalog = STATE.skillCatalog.map((item) => item.id === id ? normalizeStoredSkill(skill) : item);
+  STATE.skills = STATE.skills.map((item) => item.id === id ? { ...item, ...normalizeStoredSkill(skill) } : item);
+  renderCallback();
   return skill;
 }
 
 async function updateSkillSourceHeaders(skillId, sourceId, headers) {
   const normalizedHeaders = Array.isArray(headers) ? headers.map((header) => compactOneLine(header)).filter(Boolean) : [];
   if (!normalizedHeaders.length) throw new Error("未识别到新的数据源字段");
-  const all = await readSkills();
-  const skill = all.find((item) => item.id === skillId);
-  const source = skill?.sources?.find((item) => item.id === sourceId);
-  if (!skill || !source) throw new Error("未找到需要更新的数据源");
-  source.headers = normalizedHeaders;
-  source.capturedAt = Date.now();
-  skill.source = skill.sources[0] || null;
-  skill.updatedAt = Date.now();
-  await writeSkills(all);
+  const current = STATE.skillCatalog.find((item) => item.id === skillId);
+  const skill = await mutateSkills({
+    type: "UPDATE_SOURCE_HEADERS",
+    skillId,
+    sourceId,
+    expectedRevision: current?.revision ?? 0,
+    headers: normalizedHeaders
+  });
   await loadSkills();
-  return source;
+  return skill?.sources?.find((item) => item.id === sourceId);
 }
 
 function rebindSkill(id) {
@@ -1645,6 +1710,7 @@ function rebindSkill(id) {
   if (!skill) return;
   STATE.skillDraft = {
     id: skill.id,
+    revision: skill.revision || 0,
     name: skill.name,
     sources: skillSources(skill),
     analysisMethod: normalizeAnalysisMethod(skill.analysisMethod),
@@ -1657,8 +1723,13 @@ function rebindSkill(id) {
 }
 
 async function deleteSkill(id) {
-  const all = await readSkills();
-  await writeSkills(all.filter((skill) => skill.id !== id));
+  const current = STATE.skillCatalog.find((skill) => skill.id === id);
+  try {
+    await mutateSkills({ type: "DELETE_SKILL", skillId: id, expectedRevision: current?.revision ?? 0 });
+    await loadSkills();
+  } catch (error) {
+    showToast(`删除失败：${String(error?.message ?? error)}`, 3500, { position: "center" });
+  }
 }
 
 async function deleteAllSkills() {
@@ -1670,10 +1741,7 @@ async function deleteAllSkills() {
   STATE.skillCatalog = [];
   STATE.skillSourceStatuses = {};
   STATE.skillPageNames = {};
-  await chrome.storage.local.set({
-    [STORAGE_KEY]: [],
-    [PAGE_NAMES_STORAGE_KEY]: {}
-  });
+  await mutateSkills({ type: "DELETE_ALL_SKILLS" });
   renderCallback();
   showToast("全部技能已删除");
 }
@@ -1712,9 +1780,8 @@ async function renameCurrentSkillPage() {
     showToast("页面名称不能为空");
     return;
   }
-  const names = { ...STATE.skillPageNames, [currentPageKey]: nextName };
-  STATE.skillPageNames = names;
-  await chrome.storage.local.set({ [PAGE_NAMES_STORAGE_KEY]: names });
+  await mutateSkills({ type: "SET_PAGE_NAME", pageKey: currentPageKey, name: nextName });
+  STATE.skillPageNames = { ...STATE.skillPageNames, [currentPageKey]: nextName };
   renderCallback();
   showToast("页面名称已修改");
 }
@@ -1737,6 +1804,22 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
         await new Promise((resolve) => setTimeout(resolve, SKILL_SOURCE_VALIDATE_RETRY_DELAYS_MS[attempt]));
       }
       statuses[source.id] = validated || { status: "missing" };
+      // 兼容旧技能：只有当前 source 已被现有严格定位规则唯一确认，且业务 Tab
+      // 来自明确点击后的确认状态时，才填补缺失标题；绝不覆盖已有绑定。
+      const businessTabs = readBusinessPageTabs();
+      if (statuses[source.id]?.found && !source.businessTabTitle && businessTabs.activeTitleConfirmed && businessTabs.activeTitle) {
+        const updated = await mutateSkills({
+          type: "LEARN_SOURCE_BUSINESS_TAB",
+          skillId: skill.id,
+          sourceId: source.id,
+          title: businessTabs.activeTitle
+        }).catch(() => null);
+        const updatedSource = updated?.sources?.find((item) => item.id === source.id);
+        if (updatedSource?.businessTabTitle) {
+          source.businessTabTitle = updatedSource.businessTabTitle;
+          source.businessTabTitleConfirmed = true;
+        }
+      }
       if (!statuses[source.id]?.found) {
         SKILL_DIAGNOSTICS && console.info("[web2ai.skill] validation result", JSON.stringify({
           skillId: skill.id,

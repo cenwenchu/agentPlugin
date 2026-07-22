@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS,
-  classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch
+  classifyCollectionCompletion, classifyScrollCollection, isVirtualScrollMetrics, nextVirtualScrollTop, shouldStopAfterNoProgress, skillHeadersMatch
 } from "../../src/content/skill-collection-model.js";
 
 test("shares the 30-page and 1000-row collection limits across layers", () => {
@@ -15,6 +15,27 @@ test("requires the same field count, order and normalized names before collectio
   assert.equal(skillHeadersMatch(["订单号", "SKU信息"], ["SKU信息", "订单号"]), false);
   assert.equal(skillHeadersMatch(["订单号", "SKU信息"], ["订单号"]), false);
   assert.equal(skillHeadersMatch(["订单号", "SKU信息"], ["订单号", "商品信息"]), false);
+});
+
+test("separates bounded success from cancelled or uncertain collection results", () => {
+  assert.deepEqual(classifyCollectionCompletion("last-page"), {
+    completeness: "complete", completeForRequest: true
+  });
+  assert.deepEqual(classifyCollectionCompletion("page-limit"), {
+    completeness: "bounded-complete", completeForRequest: true
+  });
+  assert.deepEqual(classifyCollectionCompletion("row-limit"), {
+    completeness: "bounded-complete", completeForRequest: true
+  });
+  assert.deepEqual(classifyCollectionCompletion("stopped"), {
+    completeness: "cancelled", completeForRequest: false
+  });
+  assert.deepEqual(classifyCollectionCompletion("page-timeout"), {
+    completeness: "uncertain", completeForRequest: false
+  });
+  assert.deepEqual(classifyCollectionCompletion("next-click-failed"), {
+    completeness: "incomplete", completeForRequest: false
+  });
 });
 
 test("recognizes explicit framework virtual-scroll class names", () => {

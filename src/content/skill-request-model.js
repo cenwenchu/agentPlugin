@@ -47,7 +47,9 @@ function buildSourceSection(item, index, maxChars) {
 }
 
 function incompleteSkillDataSources(dataSources = []) {
-  return dataSources.filter((item) => !item?.data);
+  // 兼容运行时文件和旧的完整采集结果：只有新采集器明确标记为 false 时
+  // 才视为不完整；不能因为存在部分 rows 就误认为可以提交。
+  return dataSources.filter((item) => !item?.data || item.data.completeForRequest === false);
 }
 
 function buildSkillDataSourcesText(dataSources = [], maxChars = 300000) {
