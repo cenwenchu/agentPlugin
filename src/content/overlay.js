@@ -1544,6 +1544,13 @@ function render() {
             onInput: (event) => {
               test.method = event.target.value;
               event.target.rows = clamp(normalizeText(test.method).split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 46)), 0), 2, 8);
+              // 输入时不重绘整个工作台，否则会替换 textarea 并打断光标；但
+              // 必须立即同步保存按钮，不能让它沿用进入页面时的 disabled 状态。
+              const saveButton = refs.overlayShadow?.getElementById("web2ai_skill_save_test_method");
+              if (saveButton) {
+                saveButton.disabled = test.pending || test.methodSaving || !finished ||
+                  normalizeText(test.method) === normalizeText(test.savedMethod);
+              }
             }
           }, [test.method]),
           el("div", { class: "skillActions" }, [
@@ -1552,6 +1559,7 @@ function render() {
             ]),
             el("button", { class: "btn danger", style: test.pending ? {} : { display: "none" }, onClick: () => stopSkillExecution() }, [test.status === "loading" ? "停止采集并分析" : "停止测试"]),
             el("button", {
+              id: "web2ai_skill_save_test_method",
               class: "btn",
               disabled: test.pending || test.methodSaving || !finished || normalizeText(test.method) === normalizeText(test.savedMethod),
               onClick: () => saveSkillTestMethod()
