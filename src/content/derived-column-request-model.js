@@ -1,5 +1,5 @@
 /**
- * @fileoverview AI自定义列测试预览的请求装配逻辑。
+ * @fileoverview 按列分析测试预览的请求装配逻辑。
  */
 
 import { buildDerivedColumnRowFingerprint } from "./derived-column-fingerprint.js";

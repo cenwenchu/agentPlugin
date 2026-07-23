@@ -1,5 +1,5 @@
 /**
- * @fileoverview 派生列技能的同步指纹构建。
+ * @fileoverview 按列分析技能的同步指纹构建。
  */
 
 import {

@@ -1,5 +1,5 @@
 /**
- * @fileoverview AI自定义列运行期原生插列渲染。
+ * @fileoverview 按列分析运行期原生插列渲染。
  */
 
 import { getRowCells, hasHeaderCells } from "./table-row-dom.js";

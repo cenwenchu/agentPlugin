@@ -1,5 +1,5 @@
 /**
- * @fileoverview 派生列技能的纯数据模型与兼容归一化。
+ * @fileoverview 按列分析技能的纯数据模型与兼容归一化。
  */
 
 const SKILL_TYPE_TABLE_ANALYSIS = "table-analysis";

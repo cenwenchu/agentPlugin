@@ -1,5 +1,5 @@
 /**
- * @fileoverview AI自定义列结果解析与校验。
+ * @fileoverview 按列分析结果解析与校验。
  */
 
 import { normalizeDerivedColumnOutput } from "./derived-column-model.js";

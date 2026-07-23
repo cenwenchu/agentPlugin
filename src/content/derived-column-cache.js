@@ -1,5 +1,8 @@
 /**
- * @fileoverview AI自定义列运行期缓存。
+ * @fileoverview 按列分析运行期缓存。
+ *
+ * 使用页面内存 + chrome.storage.session 双层缓存当前浏览器会话内的结果，
+ * 以 analysisFingerprint + rowFingerprint 为索引，并带 TTL 与容量裁剪。
  */
 
 const DERIVED_CACHE_PREFIX = "web2aiDerivedCache";
@@ -54,6 +57,8 @@ async function readDerivedColumnCacheEntries(
   rowFingerprints = [],
   { ttlMs = DEFAULT_DERIVED_CACHE_TTL_MS } = {}
 ) {
+  // 读取顺序：先查当前页面内存缓存，再回落到 chrome.storage.session；
+  // 过期项或空结论会在读取过程中顺手清理。
   const fingerprints = [...new Set((Array.isArray(rowFingerprints) ? rowFingerprints : []).map((item) => String(item || "").trim()).filter(Boolean))];
   if (!analysisFingerprint || !fingerprints.length || !hasSessionStorage()) return new Map();
   const keys = fingerprints.map((rowFingerprint) => buildDerivedColumnCacheKey(analysisFingerprint, rowFingerprint));

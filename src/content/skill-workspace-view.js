@@ -20,7 +20,14 @@ import {
   runDerivedColumnPreview, saveSkillTestMethod, stopSkillExecution, uploadSkillRuntimeFiles, viewSkillSubmittedPrompt
 } from "./skill-workspace-controller.js";
 
-function renderSkillWorkspace({ analysisModelControl, render: renderOverlay }) {
+function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, render: renderOverlay }) {
+  const renderUsageBox = (lines = []) => el("div", { class: "skillUsageNote" }, [
+    ...lines.flatMap((line, index) => index === 0 ? [line] : [el("br"), line])
+  ]);
+  const renderModelSetupHint = () => modelConfigReady
+    ? null
+    : el("div", { class: "skillTestError", style: { marginBottom: "10px" } }, ["当前模型尚未配置，请先点击右上角“去配置模型”。"]);
+
   function renderSkillTestPanel() {
     const test = STATE.skillTest;
     const sourceItems = test.dataSources || [];
@@ -140,8 +147,9 @@ function renderSkillWorkspace({ analysisModelControl, render: renderOverlay }) {
               ? `共 ${sourceItems.length} 个数据源，已载入 ${sourceItems.filter((item) => item.data).length} 个，失败 ${sourceItems.filter((item) => item.error).length} 个${test.mode === "test" ? "；本次测试会话将复用已载入数据" : ""}`
               : `共 ${sourceItems.length} 个数据源。开始测试后将依次采集，每个最多 ${MAX_SKILL_COLLECTION_PAGES} 页或 ${MAX_SKILL_COLLECTION_ROWS} 行。`
           ]),
-          el("div", { class: "skillUsageNote" }, [
-            "场景说明：整表分析适合让 AI 对整张表做整体总结，例如问题归纳、趋势判断、异常原因分析、经营建议等，更适合先看全局结论。"
+          renderUsageBox([
+            "场景说明：整表分析适合让 AI 对整张表做整体总结，例如问题归纳、趋势判断、异常原因分析、经营建议等，更适合先看全局结论。",
+            `使用说明：开始测试后会依次采集当前绑定的 ${sourceItems.length} 个数据源；每个数据源最多读取 ${MAX_SKILL_COLLECTION_PAGES} 页或 ${MAX_SKILL_COLLECTION_ROWS} 行。满意后可直接保存当前分析方法。`
           ]),
           sourceTabs,
           runtimeSourceActions,
@@ -163,6 +171,7 @@ function renderSkillWorkspace({ analysisModelControl, render: renderOverlay }) {
               }
             }
           }, [test.method]),
+          renderModelSetupHint(),
           el("div", { class: "skillActions" }, [
             el("button", { class: "btn primary", disabled: test.pending, style: test.pending ? { display: "none" } : {}, onClick: () => runSkillTest() }, [
               test.pending ? "执行中…" : test.attempts ? (test.mode === "execute" ? "重新执行" : "再次测试") : (test.mode === "execute" ? "执行技能" : "开始测试")
@@ -314,6 +323,7 @@ function renderSkillWorkspace({ analysisModelControl, render: renderOverlay }) {
           dataPreview,
           el("div", { class: "skillBlockTitle" }, ["分析方法"]),
           el("div", { class: "skillExecutionMethod" }, [execution.method]),
+          renderModelSetupHint(),
           execution.submittedPrompt ? el("div", { class: "skillActions" }, [
             el("button", { class: "btn", onClick: () => viewSkillSubmittedPrompt(execution) }, ["查看提交内容"])
           ]) : null,
@@ -454,10 +464,8 @@ function renderSkillWorkspace({ analysisModelControl, render: renderOverlay }) {
           el("div", { class: "skillTestMeta" }, [
             `当前仅测试 1 个数据源；最多读取前 20 行，并且只提交唯一字段内容。`
           ]),
-          el("div", { class: "skillUsageNote" }, [
-            "场景说明：按列分析适合针对表格中选中的多行生成单独结论，例如风险识别、异常判断、优先级建议、补充标签等，更适合把结果作为新增列贴回表格查看。"
-          ]),
-          el("div", { class: "skillUsageNote" }, [
+          renderUsageBox([
+            "场景说明：按列分析适合针对表格中选中的多行生成单独结论，例如风险识别、异常判断、优先级建议、补充标签等，更适合把结果作为新增列贴回表格查看。",
             "使用说明：测试预览只验证当前页前 20 行的抽数、去重和结果格式，不会开启正式自动执行。满意后请先保存技能；若希望页面刷新时自动分析，再去技能配置中开启“自动执行”。"
           ]),
           el("div", { class: "skillMeta" }, [`分析字段：${(test.selectedColumns || []).map((column) => column.header || column.normalizedHeader).join("、") || "未选择"}`]),
@@ -505,6 +513,7 @@ function renderSkillWorkspace({ analysisModelControl, render: renderOverlay }) {
               ? "当前使用自定义分析方法。"
               : "当前将使用默认分析方法。"
           ]),
+          renderModelSetupHint(),
           el("div", { class: "skillActions" }, [
             el("button", { class: "btn primary", disabled: test.pending, style: test.pending ? { display: "none" } : {}, onClick: () => runDerivedColumnPreview() }, [
               test.attempts ? "再次测试预览" : "开始测试预览"

@@ -1,5 +1,5 @@
 /**
- * @fileoverview AI自定义列运行期控制器。
+ * @fileoverview 按列分析运行期控制器。
  */
 
 import { STATE } from "./state.js";
@@ -48,6 +48,8 @@ import { DEFAULT_MODEL_PROFILE } from "../shared.js";
 
 const DEFAULT_RUNTIME_RESULT_SCHEMA_VERSION = 1;
 const RUNTIME_TABLE_ROW_SELECTOR = "tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr";
+// 运行期日志当前默认开启，便于排查跨 frame、缓存恢复和页面频控问题。
+// 若后续改为统一调试开关控制，应同步更新 README / DESIGN 的日志说明。
 const DERIVED_RUNTIME_DIAGNOSTICS = true;
 const DERIVED_RUNTIME_RECENT_RESULT_TTL_MS = 60 * 1000;
 const DERIVED_RUNTIME_PAGE_WINDOW_MS = 60 * 1000;
@@ -75,6 +77,8 @@ function buildPageRequestGuardKey(modelId = "") {
   return `${currentPage}::${normalizedModelId}`;
 }
 
+// 页面访问频控按 pageKey + modelId 维度累计总额度；
+// 列表内容变化只决定是否重新进入调度判断，不会重置当前窗口内的总请求次数。
 function buildPageRequestListGuardKey(modelId = "", listSignature = "") {
   const baseKey = buildPageRequestGuardKey(modelId);
   const normalizedListSignature = String(listSignature || "").trim();
@@ -671,6 +675,8 @@ async function runDerivedRuntimeSkill(controller) {
           maxRequests: pageGuardMaxRequests
         });
         if (!pageGuard.allowed) {
+          // pageGuardKey 控制当前页面对当前模型的总额度；
+          // pageListGuardKey 仅记录这次被拦截时看到的列表版本，供后续判断列表是否已变化。
           controller.status = "blocked";
           controller.blockedUntil = Number(pageGuard.cooldownUntil || 0);
           controller.blockedReason = String(pageGuard.reason || "");

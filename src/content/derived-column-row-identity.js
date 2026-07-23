@@ -1,5 +1,5 @@
 /**
- * @fileoverview AI自定义列运行期行身份。
+ * @fileoverview 按列分析运行期行身份。
  */
 
 import { getBusinessRowKey, getRenderedRowIdentity } from "./table-adapters.js";

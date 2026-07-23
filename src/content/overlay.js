@@ -201,10 +201,46 @@ const OVERLAY_CSS = `
     .skillReuseTitle { color: #1d4ed8; font-size: 11px; font-weight: 700; }
     .skillReuseHint { margin-top: 4px; color: #64748b; font-size: 10px; line-height: 1.5; }
     .skillReuseList { display: grid; gap: 7px; margin-top: 8px; }
-    .skillReuseItem { padding: 8px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+    .skillReuseItem {
+      padding: 8px;
+      border: 1px solid #dbeafe;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
+      box-shadow: 0 6px 16px rgba(148, 163, 184, 0.08);
+      transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+    }
+    .skillReuseItem:not(.unavailable):hover {
+      border-color: #93c5fd;
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.14);
+      transform: translateY(-1px);
+    }
     .skillReuseItem.unavailable { opacity: 0.68; }
     .skillReuseHead { display: flex; align-items: center; gap: 6px; }
     .skillReuseName { flex: 1; min-width: 0; color: #1e293b; font-size: 11px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .skillReuseAction {
+      height: 30px;
+      padding: 0 14px;
+      border: 1px solid #1d4ed8;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 55%, #1d4ed8 100%);
+      box-shadow: 0 8px 18px rgba(37, 99, 235, 0.24);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .2px;
+      transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+    }
+    .skillReuseAction:hover:not(:disabled) {
+      filter: brightness(1.04);
+      transform: translateY(-1px) scale(1.01);
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.32);
+    }
+    .skillReuseAction:disabled {
+      border-color: #cbd5e1;
+      background: #e2e8f0;
+      box-shadow: none;
+      color: #94a3b8;
+    }
     .skillTextarea { width: 100%; height: 132px; min-height: 100px; box-sizing: border-box; resize: vertical; flex: none; border: 1px solid rgba(0,0,0,.14); border-radius: 8px; padding: 9px 10px; background: #fff; color: #111827; font-size: 12px; line-height: 1.55; }
     .skillMethodState { display: inline-block; margin-top: 6px; padding: 2px 6px; border-radius: 999px; font-size: 10px; }
     .skillMethodState.ready { color: #166534; background: #dcfce7; }
@@ -813,12 +849,22 @@ function render() {
     value: profile.id,
     selected: profile.id === STATE.activeModelId ? true : null
   }, [profile.name || profile.model])));
-  const activeModel = STATE.modelOptions.find((profile) => profile.id === STATE.activeModelId);
-  const analysisModelControl = el("div", { class: "skillAnalysisModel", title: "可切换本次技能使用的模型" }, [
-    el("span", {}, ["当前模型："]),
-    modelSelect,
-    el("span", { class: "skillAnalysisModelHint" }, ["（支持切换）"])
-  ]);
+  const activeModel = STATE.modelOptions.find((profile) => profile.id === STATE.activeModelId) || STATE.modelOptions[0] || null;
+  const modelConfigReady = Boolean(activeModel?.hasApiKey);
+  const analysisModelControl = modelConfigReady
+    ? el("div", { class: "skillAnalysisModel", title: "可切换本次技能使用的模型" }, [
+        el("span", {}, ["当前模型："]),
+        modelSelect,
+        el("span", { class: "skillAnalysisModelHint" }, ["（支持切换）"])
+      ])
+    : el("div", { class: "skillAnalysisModel missing", title: "当前模型尚未完成配置" }, [
+        el("span", {}, [`当前模型：${activeModel?.name || activeModel?.model || "未配置"}`]),
+        el("span", { class: "skillAnalysisModelHint warning" }, [activeModel ? "未配置密钥" : "尚未配置模型"]),
+        el("button", {
+          class: "btn primary skillAnalysisModelAction",
+          onClick: () => openOptionsPage()
+        }, ["去配置模型"])
+      ]);
   const imageCapabilityTip = el("span", {
     title: activeModel?.supportsImages
       ? "当前模型配置允许发送截图"
@@ -1367,7 +1413,7 @@ function render() {
               ]),
               el("div", { class: "skillSourceItemActions" }, [
                 el("button", {
-                  class: "btn",
+                  class: "btn skillReuseAction",
                   disabled: reusable ? null : true,
                   onClick: () => reuseExistingDraftSource(entry)
                 }, [draftType === SKILL_TYPE_DERIVED_COLUMN ? "复用这个数据源" : "复用"])
@@ -1615,7 +1661,7 @@ function render() {
   const mainPane = el("div", { class: "mainPane" }, [header, STATE.activePanelTab === "skills" ? renderSkillsPanel() : body]);
   const card = el("div", { class: "card" }, [
     STATE.skillTest
-      ? renderSkillWorkspace({ analysisModelControl, render })
+      ? renderSkillWorkspace({ analysisModelControl, modelConfigReady, render })
       : el("div", { class: "workspace" }, [sideTabs, mainPane])
   ]);
   wrap.appendChild(card);

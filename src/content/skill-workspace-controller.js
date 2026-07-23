@@ -40,6 +40,20 @@ function initSkillWorkspaceController({ render, scheduleRender } = {}) {
   if (typeof scheduleRender === "function") scheduleWorkspaceRender = scheduleRender;
 }
 
+async function ensureSkillModelConfigured() {
+  const settingsResponse = await sendToBackground({ type: "GET_SETTINGS", modelId: STATE.activeModelId }).catch(() => null);
+  const models = Array.isArray(settingsResponse?.data?.models) ? settingsResponse.data.models : [];
+  if (models.length) STATE.modelOptions = models;
+  const preferredModelId = settingsResponse?.data?.activeModelId || settingsResponse?.data?.defaultModelId || models[0]?.id || STATE.activeModelId;
+  if (preferredModelId) STATE.activeModelId = preferredModelId;
+  const activeModel = models.find((profile) => profile.id === STATE.activeModelId) || models[0] || null;
+  if (activeModel?.id) STATE.activeModelId = activeModel.id;
+  if (activeModel?.hasApiKey) return true;
+  renderWorkspace();
+  showToast(`当前模型${activeModel?.name || activeModel?.model ? `“${activeModel?.name || activeModel?.model}”` : ""}尚未配置，请先点击右上角“去配置模型”`);
+  return false;
+}
+
 function openSkillWorkspace({ skill, method, mode = "test", currentPageKey = "" } = {}) {
   STATE.skillTest = createSkillWorkspaceSession({ skill, method, mode, currentPageKey });
   STATE.open = true;
@@ -111,7 +125,9 @@ async function saveSkillTestMethod({ exitAfterSave = false } = {}) {
   test.methodSaving = true;
   renderWorkspace();
   try {
-    await saveSkillAnalysisMethod(test.skillId, methodToSave);
+    await saveSkillAnalysisMethod(test.skillId, methodToSave, {
+      anchorSource: test.sources?.[0] || test.source || null
+    });
     test.savedMethod = methodToSave;
     showToast("分析方法已保存");
     if (exitAfterSave) STATE.skillTest = null;
@@ -325,6 +341,7 @@ async function viewSkillSubmittedPrompt(test) {
 async function runDerivedColumnPreview() {
   const test = STATE.skillTest;
   if (!test || test.pending || test.mode !== "derived-preview") return;
+  if (!await ensureSkillModelConfigured()) return;
   const sourceItem = test.dataSources?.[0];
   if (!sourceItem?.source) return showToast("请先绑定数据源");
   test.pending = true;
@@ -455,6 +472,7 @@ async function runDerivedColumnPreview() {
 async function runSkillTest({ reuseData = false } = {}) {
   const test = STATE.skillTest;
   if (!test || test.pending) return;
+  if (!await ensureSkillModelConfigured()) return;
   if (!normalizeText(test.method)) return showToast("请填写分析方法");
   const dataSources = test.dataSources || [];
   const hasAllSourceData = skillWorkspaceHasAllSourceData(test);

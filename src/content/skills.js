@@ -148,6 +148,20 @@ function focusStoredSource(source) {
   return { found: true, similarity };
 }
 
+async function anchorSkillSourceBar(source, fallbackPage = {}) {
+  if (!source) return false;
+  const targetPageUrl = String(source.pageUrl || fallbackPage.pageUrl || location.href || "");
+  const targetPageKey = String(source.pageKey || fallbackPage.pageKey || pageKey(targetPageUrl));
+  if (!targetPageKey) return false;
+  const response = await chrome.runtime.sendMessage({
+    type: "SWITCH_TO_SKILL_PAGE",
+    pageKey: targetPageKey,
+    pageUrl: targetPageUrl,
+    source
+  }).catch(() => null);
+  return Boolean(response?.ok);
+}
+
 function renderSkillBars(skills = []) {
   document.querySelectorAll("[data-web2ai-skill-bar]").forEach((node) => node.remove());
   const grouped = new Map();
@@ -368,6 +382,8 @@ function scheduleSkillBars(skills = []) {
   if (skillBarBroadcastTimer) clearInterval(skillBarBroadcastTimer);
   skillBarTimer = null;
   skillBarBroadcastTimer = null;
+  // 技能条重建与按列分析运行期调度共用同一入口：
+  // 前者兜底表格 DOM 替换、晚加载和跨 frame 同步，后者兜底结果列恢复与自动执行。
   renderSkillBars(skills);
   scheduleDerivedColumnRuntime(skills);
   if (skills.length) {
@@ -904,10 +920,11 @@ async function saveSkillDraft() {
   STATE.activePanelTab = "skills";
   await loadSkills();
   await chrome.runtime.sendMessage({ type: "REFRESH_SKILLS_ALL_TABS" }).catch(() => void 0);
+  anchorSkillSourceBar(primarySource, { pageKey: skill.pageKey, pageUrl: skill.pageUrl }).catch(() => void 0);
   showToast(existing ? "技能已修改" : "技能已保存");
 }
 
-async function saveSkillAnalysisMethod(id, description) {
+async function saveSkillAnalysisMethod(id, description, options = {}) {
   const current = STATE.skillCatalog.find((item) => item.id === id);
   const skill = await mutateSkills({
     type: "UPDATE_ANALYSIS_METHOD",
@@ -923,6 +940,8 @@ async function saveSkillAnalysisMethod(id, description) {
   STATE.skillCatalog = STATE.skillCatalog.map((item) => item.id === id ? normalizeStoredSkill(skill) : item);
   STATE.skills = STATE.skills.map((item) => item.id === id ? { ...item, ...normalizeStoredSkill(skill) } : item);
   renderCallback();
+  const anchorSource = options?.anchorSource || skill?.sources?.[0] || skill?.source || null;
+  anchorSkillSourceBar(anchorSource, { pageKey: skill?.pageKey, pageUrl: skill?.pageUrl }).catch(() => void 0);
   return skill;
 }
 

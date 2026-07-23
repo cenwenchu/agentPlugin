@@ -67,7 +67,10 @@ const SKILL_WORKSPACE_CSS = `
     .skillExecutionPanel { min-height: 0; padding: 13px; border: 1px solid rgba(0,0,0,.08); border-radius: 12px; background: #fff; overflow: auto; }
     .skillExecutionMethod { padding: 10px; border: 1px solid #e2e8f0; border-radius: 9px; background: #f8fafc; color: #334155; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
     .skillAnalysisModel { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 5px 7px; border: 1px solid #93c5fd; border-radius: 9px; background: #eff6ff; color: #1e3a8a; font-size: 11px; font-weight: 700; }
+    .skillAnalysisModel.missing { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
     .skillAnalysisModelHint { color: #64748b; font-size: 10px; font-weight: 500; white-space: nowrap; }
+    .skillAnalysisModelHint.warning { color: #b91c1c; font-weight: 700; }
+    .skillAnalysisModelAction { height: 26px; padding: 0 10px; line-height: 24px; }
     .skillResultSection { height: auto; min-height: 0; margin: 0 0 12px; padding: 12px; border: 1px solid #dbe3ee; border-radius: 11px; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
     .skillResultSection.advice { border-left: 4px solid #7c3aed; background: #faf8ff; }
     .skillResultSection h1, .skillResultSection h2, .skillResultSection h3 { margin-top: 0; }
