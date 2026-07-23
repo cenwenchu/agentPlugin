@@ -54,6 +54,9 @@ const STATE = {
   skills: [],
   skillCatalog: [],
   skillPageNames: {},
+  skillsPanelScrollTop: 0,
+  skillCatalogExpanded: false,
+  skillCatalogCanToggle: false,
   skillDraft: null,
   /** 当前全屏技能测试会话；仅保存在页面内存中 */
   skillTest: null,

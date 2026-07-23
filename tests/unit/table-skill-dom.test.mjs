@@ -17,13 +17,16 @@ dom.window.Element.prototype.getBoundingClientRect = () => ({
 });
 
 const {
-  getRowCells, hasHeaderCells, isHeaderRow, isTableFooterOrSummaryRow
+  getBusinessCellTexts, getBusinessRowText, getRowCells, hasHeaderCells, isHeaderRow, isTableFooterOrSummaryRow
 } = await import("../../src/content/table-row-dom.js");
 const { findHeaderRowAbove } = await import("../../src/content/table-header-resolver.js");
-const { findPaginationNextButton, waitForTableDataReady } = await import("../../src/content/table-pagination-dom.js");
 const {
-  alignedRowCellTexts, extractHeaders, extractStoredSourceData, tableCandidates
+  findPaginationNextButton, getTableContentDigest, getTableRowTexts, waitForTableDataReady
+} = await import("../../src/content/table-pagination-dom.js");
+const {
+  alignedRowCellTexts, extractHeaders, extractStoredSourceData, extractStoredSourcePreviewData, tableCandidates
 } = await import("../../src/content/skill-source-dom.js");
+const { extractTableRowText } = await import("../../src/content/context.js");
 
 function installDom(html) {
   document.body.innerHTML = html;
@@ -45,6 +48,32 @@ test("table row DOM helpers preserve HTML and ARIA cell semantics", () => {
     assert.equal(isHeaderRow(document.querySelector("#head")), true);
     assert.equal(hasHeaderCells(document.querySelector("#row")), false);
     assert.equal(isTableFooterOrSummaryRow(document.querySelector("#summary")), true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("business row helpers ignore derived columns and injected plugin UI", () => {
+  const cleanup = installDom(`
+    <table>
+      <tbody>
+        <tr id="row">
+          <td>A-1</td>
+          <td data-web2ai-derived-column="skill_1">AI结论</td>
+          <td>
+            <span>待处理</span>
+            <button data-web2ai-ui="1">问一下</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  `);
+  try {
+    const row = document.querySelector("#row");
+    assert.equal(getRowCells(row).length, 2);
+    assert.deepEqual(getBusinessCellTexts(row, { emptyPlaceholder: "-" }), ["A-1", "待处理"]);
+    assert.equal(getBusinessRowText(row, { separator: " ||| ", emptyPlaceholder: "-" }), "A-1 ||| 待处理");
+    assert.equal(extractTableRowText(row), "A-1 ||| 待处理");
   } finally {
     cleanup();
   }
@@ -103,6 +132,37 @@ test("fast table readiness waits for content stability instead of a fixed two-se
   }
 });
 
+test("table content digest ignores derived-column updates", async () => {
+  const cleanup = installDom(`
+    <table id="orders">
+      <tbody>
+        <tr>
+          <td>A-1</td>
+          <td data-web2ai-derived-column="skill_1">等待分析</td>
+          <td>待处理</td>
+        </tr>
+      </tbody>
+    </table>
+  `);
+  try {
+    const table = document.querySelector("#orders");
+    const beforeRows = getTableRowTexts(table);
+    const beforeDigest = getTableContentDigest(table);
+    table.querySelector("[data-web2ai-derived-column]").textContent = "分析中...";
+    assert.deepEqual(getTableRowTexts(table), beforeRows);
+    assert.equal(getTableContentDigest(table), beforeDigest);
+    const rows = await waitForTableDataReady(table, beforeDigest, 300, 0, {
+      minWaitMs: 20,
+      pollIntervalMs: 20,
+      stableSamples: 2,
+      compareContent: true
+    });
+    assert.equal(rows, 1);
+  } finally {
+    cleanup();
+  }
+});
+
 test("fast table readiness does not resolve while the table reports loading", async () => {
   const cleanup = installDom(`
     <section id="wrapper" aria-busy="true">
@@ -147,6 +207,117 @@ test("skill source DOM keeps component identity and empty cell alignment", () =>
     });
     assert.equal(data.found, true);
     assert.deepEqual(data.rows, [["A-1", "", "待处理"]]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("skill source DOM ignores derived headers and derived row cells", () => {
+  const cleanup = installDom(`
+    <table id="orders">
+      <thead>
+        <tr>
+          <th data-web2ai-derived-column="skill_1">AI结论</th>
+          <th>订单</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td data-web2ai-derived-column="skill_1">高风险</td>
+          <td>A-1</td>
+          <td>待处理</td>
+        </tr>
+      </tbody>
+    </table>
+  `);
+  try {
+    const table = document.querySelector("#orders");
+    assert.deepEqual(extractHeaders(table), ["订单", "状态"]);
+    const data = extractStoredSourceData({
+      selector: "#orders",
+      tableIndex: 0,
+      headers: ["订单", "状态"]
+    });
+    assert.equal(data.found, true);
+    assert.deepEqual(data.rows, [["A-1", "待处理"]]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("skill source preview keeps current-page duplicate rows for derived preview", () => {
+  const cleanup = installDom(`
+    <table id="orders">
+      <thead>
+        <tr>
+          <th>订单号</th>
+          <th>订单金额</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>A-1</td><td>100</td></tr>
+        <tr><td>A-2</td><td>100</td></tr>
+      </tbody>
+    </table>
+  `);
+  try {
+    const data = extractStoredSourcePreviewData({
+      selector: "#orders",
+      tableIndex: 0,
+      headers: ["订单号", "订单金额"]
+    });
+    assert.equal(data.found, true);
+    assert.deepEqual(data.rows, [
+      ["A-1", "100"],
+      ["A-2", "100"]
+    ]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("skill source data ignores fixed summary rows at the bottom", () => {
+  const cleanup = installDom(`
+    <div class="ant-table-wrapper" id="orders-wrapper">
+      <table id="orders">
+        <thead>
+          <tr><th>订单号</th><th>订单金额</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>A-1</td><td>100</td></tr>
+          <tr><td>A-2</td><td>200</td></tr>
+        </tbody>
+      </table>
+      <div class="ant-table-summary">
+        <table>
+          <tbody>
+            <tr><td>合计</td><td>300</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `);
+  try {
+    const source = {
+      selector: "#orders",
+      tableIndex: 0,
+      headers: ["订单号", "订单金额"]
+    };
+    const stored = extractStoredSourceData(source);
+    const preview = extractStoredSourcePreviewData(source);
+    assert.equal(stored.found, true);
+    assert.equal(preview.found, true);
+    assert.deepEqual(stored.rows, [
+      ["A-1", "100"],
+      ["A-2", "200"]
+    ]);
+    assert.deepEqual(preview.rows, [
+      ["A-1", "100"],
+      ["A-2", "200"]
+    ]);
+    assert.equal(stored.totalRowCount, 2);
+    assert.equal(preview.totalRowCount, 2);
   } finally {
     cleanup();
   }

@@ -19,7 +19,7 @@
 import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, CONTEXT_CHAR_LIMIT, CONTEXT_WARN_LIMIT, Z_INDEX, uid, normalizeText, truncateText, compactOneLine, refs } from './state.js';
 import { el, getCssSelector, isVisibleElement, getElementLabel } from './dom.js';
 import { showToast } from './toast.js';
-import { getRowCells, hasHeaderCells } from './table-row-dom.js';
+import { BUSINESS_TEXT_EXCLUDE_SELECTOR, DERIVED_COLUMN_SELECTOR, getBusinessRowText, getRowCells, hasHeaderCells } from './table-row-dom.js';
 import { buildContextBlockFromContexts, getTableContextIdentity, groupTableContexts } from './context-model.js';
 import { createContextRef } from './context-ref.js';
 
@@ -482,24 +482,18 @@ function extractTableHeaders(container) {
 
 function extractTableRowText(rowEl) {
   if (!rowEl) return "";
+  return normalizeText(getBusinessRowText(rowEl, {
+    separator: COL_SEPARATOR,
+    emptyPlaceholder: "-"
+  }));
+}
 
-  const stripInjected = (cell) => {
-    const injectedEls = cell.querySelectorAll("[id^='web2ai_'],[data-web2ai-ui]");
-    for (const el of injectedEls) el.style.display = "none";
-    const t = normalizeText(cell.innerText || cell.textContent || "").replace(/\n/g, " ");
-    for (const el of injectedEls) el.style.display = "";
-    return t || "-";  // 空单元格用 "-" 占位，避免 ||| 连续导致 split 后列数丢失
-  };
-
-  // 使用通用 getRowCells，拿到单元格列表
-  const cells = getRowCells(rowEl);
-  if (cells.length) {
-    const parts = cells.map(stripInjected);
-    return normalizeText(parts.join(COL_SEPARATOR));
-  }
-
-  // 兜底
-  return normalizeText(rowEl.innerText || rowEl.textContent || "");
+function extractBusinessTextFromElement(element) {
+  if (!element) return "";
+  const clone = element.cloneNode?.(true);
+  if (!clone) return normalizeText(element.textContent || "");
+  clone.querySelectorAll?.(BUSINESS_TEXT_EXCLUDE_SELECTOR).forEach((node) => node.remove());
+  return normalizeText(clone.textContent || "");
 }
 
 function extractPageText() {
@@ -511,10 +505,10 @@ function extractPageText() {
   ].filter(Boolean);
 
   const pick = candidates
-    .map((node) => ({ node, len: normalizeText(node.innerText || "").length }))
+    .map((node) => ({ node, len: extractBusinessTextFromElement(node).length }))
     .sort((a, b) => b.len - a.len)[0]?.node;
 
-  const text = normalizeText(pick?.innerText || "");
+  const text = extractBusinessTextFromElement(pick);
   const header = `${document.title}\n${location.href}\n\n`;
   return truncateText(header + text, 12000);
 }
@@ -581,6 +575,7 @@ function buildPageUsageSnapshot() {
       const headerCells = Array.from(table.querySelectorAll(
         "thead th, thead td, [scope='col'], [role='columnheader']"
       ))
+        .filter((cell) => !cell.matches?.(DERIVED_COLUMN_SELECTOR))
         .map((th) => compactOneLine(th.innerText || th.textContent || ""))
         .filter(Boolean);
       const headerLine = headerCells.length ? headerCells.join(" | ") : "(no headers found)";

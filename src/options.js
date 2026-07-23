@@ -31,6 +31,10 @@ function normalizeProfile(profile = {}) {
     maxOutputTokens: Math.min(
       Math.floor(contextWindow / 2),
       Math.max(256, Number(profile.maxOutputTokens) || DEFAULT_MODEL_PROFILE.maxOutputTokens)
+    ),
+    pageRequestLimitPerMinute: Math.min(
+      60,
+      Math.max(1, Number(profile.pageRequestLimitPerMinute) || DEFAULT_MODEL_PROFILE.pageRequestLimitPerMinute)
     )
   };
 }
@@ -44,6 +48,10 @@ function readForm() {
   profile.model = $("model").value.trim();
   profile.name = profile.model || "未命名模型";
   profile.supportsImages = $("supportsImages").checked;
+  profile.pageRequestLimitPerMinute = Math.min(
+    60,
+    Math.max(1, Number($("pageRequestLimitPerMinute").value) || DEFAULT_MODEL_PROFILE.pageRequestLimitPerMinute)
+  );
   if (creating) createApiKey = $("apiKey").value.trim();
   else apiKeys[profile.id] = $("apiKey").value.trim();
 }
@@ -55,6 +63,7 @@ function writeForm() {
   $("model").value = profile.model;
   $("apiKey").value = creating ? createApiKey : (apiKeys[profile.id] || "");
   $("supportsImages").checked = profile.supportsImages === true;
+  $("pageRequestLimitPerMinute").value = String(profile.pageRequestLimitPerMinute || DEFAULT_MODEL_PROFILE.pageRequestLimitPerMinute);
 }
 
 function renderProfileSelect() {

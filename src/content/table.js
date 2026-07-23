@@ -658,6 +658,9 @@ function showInlineRowFab(rowEl) {
     hideInlineRowFab();
     return;
   }
+  // 行节点可能在同一 DOM 上被改写为另一条数据；hover 前先做一次轻量校验，
+  // 避免旧的选中绑定把新行错误地继续渲染成 ✓。
+  reconcileRecycledRow(rowEl);
   // Hover 期间页面可能正在刷新实时指标。内容变化本身不足以证明虚拟行已被
   // 复用；已选中的 DOM 行必须优先保留绑定，避免 ✓ 消失并重新出现“问AI”。
   const selectedRef = refs.selectedRowRef.get(rowEl);
@@ -840,6 +843,8 @@ function showTableRowFabAt(rect, rowEl, pointer) {
   }
   hideInlineRowFab();
   ensureTableRowFab();
+  // Hover 入口需要先识别 DOM 复用，否则旧绑定会把新数据行误判为已选中。
+  reconcileRecycledRow(rowEl);
   // 实时数据页面会在鼠标移动期间更新单元格文本。Hover 不负责判定虚拟节点
   // 复用：已有选中绑定时始终保留 ✓，并且不再显示“问AI”。真正的节点复用
   // 由滚动/重绘后的 restoreRenderedSelectionState 统一校验。

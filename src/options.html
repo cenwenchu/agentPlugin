@@ -43,6 +43,12 @@
           <span>支持图片输入</span>
         </label>
 
+        <label>
+          <span>模型访问频率控制</span>
+          <input id="pageRequestLimitPerMinute" type="number" min="1" max="60" step="1" placeholder="5" />
+          <small class="field-help">默认 `5 次/分钟（单页面）`，用于限制同一页面对当前模型的调用频率。</small>
+        </label>
+
         <div class="row">
           <button id="save">保存</button>
           <button id="test" class="secondary">测试连接</button>

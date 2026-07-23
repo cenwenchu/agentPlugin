@@ -786,6 +786,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse(response || { ok: false, error: "页面切换失败" });
       return;
     }
+    if (message?.type === "EXTRACT_SKILL_SOURCE_PREVIEW_DATA") {
+      if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
+      const ownerTabId = sender.tab.id;
+      const sourcePageKey = normalizedPageKey(message.source?.pageKey || message.source?.pageUrl || "");
+      const extractPreviewFromTab = async (tabId, attempts = 1) => {
+        let lastFound = null;
+        for (let attempt = 0; attempt < attempts; attempt++) {
+          const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
+          const frameSelection = selectSourceFrames(frames, message.source, normalizedPageKey);
+          if (frameSelection.ambiguous) return { found: false, ambiguous: true, status: "ambiguous" };
+          for (const frame of frameSelection.frames) {
+            try {
+              const response = await sendToFrame(tabId, frame.frameId, {
+                type: "EXTRACT_SKILL_SOURCE_PREVIEW_DATA",
+                source: message.source,
+                limit: message.limit || 20
+              });
+              if (response?.ok && response.data?.found) return response.data;
+              if (response?.ok && response.data) lastFound = response.data;
+            } catch { void 0; }
+          }
+          if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        return lastFound;
+      };
+      let ownerMatchesSource = await waitForTabPageKey(ownerTabId, sourcePageKey, 1);
+      if (!ownerMatchesSource && message.source?.businessTabTitle) {
+        const activated = await sendToFrame(ownerTabId, 0, {
+          type: "ACTIVATE_BUSINESS_PAGE_TAB",
+          title: message.source.businessTabTitle
+        }).catch(() => null);
+        if (activated?.ok) ownerMatchesSource = await waitForTabPageKey(ownerTabId, sourcePageKey, 16);
+      }
+      let data = ownerMatchesSource ? await extractPreviewFromTab(ownerTabId, 6) : null;
+      if (!data) {
+        let sourceUrl = "";
+        try {
+          const parsed = new URL(message.source?.pageUrl || "");
+          if (/^https?:$/.test(parsed.protocol)) sourceUrl = parsed.href;
+        } catch { sourceUrl = ""; }
+        if (sourceUrl) {
+          const tabs = await chrome.tabs.query({});
+          let target = tabs.find((tab) => tab.id && tab.id !== ownerTabId && normalizedPageKey(tab.url || "") === sourcePageKey);
+          if (!target?.id) {
+            target = await chrome.tabs.create({ url: sourceUrl, active: true });
+            SKILL_AUTO_OPENED_TABS.add(target.id);
+          } else await chrome.tabs.update(target.id, { active: true });
+          await waitForTabReady(target.id).catch(() => null);
+          data = await extractPreviewFromTab(target.id, 24);
+          await chrome.tabs.update(ownerTabId, { active: true }).catch(() => void 0);
+          if (Number.isInteger(sender.tab.windowId)) await chrome.windows.update(sender.tab.windowId, { focused: true }).catch(() => void 0);
+        }
+      }
+      sendResponse({ ok: true, data: data || { found: false, status: "missing" } });
+      return;
+    }
     if (message?.type === "INSPECT_SKILL_SOURCE_PAGINATION") {
       if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
       const ownerTabId = sender.tab.id;

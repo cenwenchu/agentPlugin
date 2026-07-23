@@ -6,10 +6,12 @@ test("prefills DeepSeek only for the first model", () => {
   const first = createNewModelProfile({ hasProfiles: false, id: "first" });
   assert.equal(first.baseUrl, DEFAULT_MODEL_PROFILE.baseUrl);
   assert.equal(first.model, DEFAULT_MODEL_PROFILE.model);
+  assert.equal(first.pageRequestLimitPerMinute, DEFAULT_MODEL_PROFILE.pageRequestLimitPerMinute);
 
   const additional = createNewModelProfile({ hasProfiles: true, id: "second" });
   assert.equal(additional.baseUrl, "");
   assert.equal(additional.model, "");
+  assert.equal(additional.pageRequestLimitPerMinute, DEFAULT_MODEL_PROFILE.pageRequestLimitPerMinute);
 });
 
 test("requires URL and model before saving a model profile", () => {

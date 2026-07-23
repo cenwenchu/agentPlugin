@@ -112,7 +112,87 @@ const virtualCollectionFixture = `<!doctype html><meta charset="utf-8"><title>Vi
     scroll.scrollTop = 200;
     render();
   <\/script>`;
+const derivedRuntimeFixture = `<!doctype html><meta charset="utf-8"><title>Derived runtime</title>
+  <style>
+    body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:16px}
+    .art-table{margin-top:12px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #d1d5db;padding:8px 10px;text-align:left}
+    th{background:#f8fafc}
+    .toolbar,.pagination{display:flex;gap:8px;align-items:center;margin-top:12px}
+    .derived-page-btn[data-active="1"]{background:#2563eb;color:#fff}
+  </style>
+  <div class="toolbar">
+    <span>当前页：<strong id="derived-current-page">1</strong></span>
+    <button id="derived-rerender">重绘当前页</button>
+  </div>
+  <div class="art-table" id="derived-orders">
+    <table><thead><tr><th>订单号</th><th>金额</th><th>状态</th></tr></thead></table>
+    <table><tbody id="derived-body"></tbody></table>
+  </div>
+  <div class="pagination">
+    <button id="derived-page-1" class="derived-page-btn" data-page="1" data-active="1">1</button>
+    <button id="derived-page-2" class="derived-page-btn" data-page="2" data-active="0">2</button>
+  </div>
+  <script>
+    const pages = {
+      1: [
+        ["D-100", "100", "待处理"],
+        ["D-101", "50", "正常"]
+      ],
+      2: [
+        ["D-200", "999", "高风险"],
+        ["D-201", "20", "正常"]
+      ]
+    };
+    let currentPage = 1;
+    function render() {
+      const body = document.querySelector('#derived-body');
+      body.innerHTML = (pages[currentPage] || []).map((row, index) => (
+        '<tr data-row-key="page-' + currentPage + '-row-' + index + '">' +
+          '<td>' + row[0] + '</td>' +
+          '<td>' + row[1] + '</td>' +
+          '<td>' + row[2] + '</td>' +
+        '</tr>'
+      )).join('');
+      document.querySelector('#derived-current-page').textContent = String(currentPage);
+      document.querySelectorAll('.derived-page-btn').forEach((button) => {
+        button.dataset.active = button.dataset.page === String(currentPage) ? '1' : '0';
+      });
+      window.dispatchEvent(new Event('scroll'));
+      document.dispatchEvent(new Event('scroll'));
+    }
+    document.querySelector('#derived-page-1').onclick = () => { currentPage = 1; render(); };
+    document.querySelector('#derived-page-2').onclick = () => { currentPage = 2; render(); };
+    document.querySelector('#derived-rerender').onclick = () => render();
+    render();
+  <\/script>`;
+function parseDerivedRowsFromMessages(messages = []) {
+  const content = (Array.isArray(messages) ? messages : [])
+    .map((message) => typeof message?.content === "string" ? message.content : "")
+    .join("\n");
+  const marker = "输入数据：\n";
+  const markerIndex = content.lastIndexOf(marker);
+  if (markerIndex < 0) return null;
+  try {
+    const payload = JSON.parse(content.slice(markerIndex + marker.length).trim());
+    return Array.isArray(payload?.rows) ? payload.rows : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildDerivedRuntimeResponse(rows = []) {
+  return JSON.stringify({
+    results: rows.map((row, index) => ({
+      fingerprint: row.fingerprint,
+      conclusion: `E2E结论${index + 1}`
+    }))
+  });
+}
+
 let aiRequestCount = 0;
+let derivedAiRequestCount = 0;
 const server = http.createServer((req, res) => {
   if (req.method === "POST" && req.url === "/v1/chat/completions") {
     aiRequestCount++;
@@ -120,18 +200,29 @@ const server = http.createServer((req, res) => {
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
       const payload = JSON.parse(body || "{}");
+      const derivedRows = parseDerivedRowsFromMessages(payload.messages);
+      const content = derivedRows?.length
+        ? (derivedAiRequestCount++, buildDerivedRuntimeResponse(derivedRows))
+        : "E2E 分析完成";
       if (payload.stream) {
         res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8" });
-        res.end('data: {"choices":[{"delta":{"content":"E2E 分析完成"}}]}\n\ndata: [DONE]\n\n');
+        res.end(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: [DONE]\n\n`);
       } else {
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ choices: [{ message: { content: "E2E 分析完成" } }] }));
+        res.end(JSON.stringify({ choices: [{ message: { content } }] }));
       }
     });
     return;
   }
   res.setHeader("content-type", "text/html; charset=utf-8");
-  res.end(req.url === "/frame" ? frameFixture : req.url === "/inner-scroll" ? innerScrollFixture : req.url === "/inner-frame-host" ? innerFrameHostFixture : req.url === "/virtual-collection" ? virtualCollectionFixture : fixture);
+  res.end(
+    req.url === "/frame" ? frameFixture
+      : req.url === "/inner-scroll" ? innerScrollFixture
+      : req.url === "/inner-frame-host" ? innerFrameHostFixture
+      : req.url === "/virtual-collection" ? virtualCollectionFixture
+      : req.url === "/derived-runtime" ? derivedRuntimeFixture
+      : fixture
+  );
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}/`;
@@ -172,6 +263,118 @@ const reenterRow = async (page, row) => {
     throw new Error(`Dynamic row hover did not expose its Ask AI action: ${JSON.stringify(detail)}`);
   }
 };
+const setDerivedRuntimeSkills = async (worker, { pageUrl, skills, pageRequestLimitPerMinute = 1 }) => {
+  await worker.evaluate(async ({ pageUrl: targetPageUrl, skills: nextSkills, limit }) => {
+    const SKILL_STORAGE_KEY = "web2aiSkills";
+    const SKILL_PAGE_NAMES_STORAGE_KEY = "web2aiSkillPageNames";
+    const { settings } = await chrome.storage.sync.get(["settings"]);
+    const models = (settings?.models || []).map((profile) => ({
+      ...profile,
+      baseUrl: targetPageUrl.replace(/derived-runtime$/, ""),
+      model: "e2e-local",
+      pageRequestLimitPerMinute: limit
+    }));
+    const activeModelId = models[0]?.id || settings?.activeModelId || settings?.defaultModelId || "default";
+    const { modelApiKeys = {} } = await chrome.storage.local.get(["modelApiKeys"]);
+    const localKeys = Object.fromEntries(models.map((profile) => [profile.id, "e2e-key"]));
+    await Promise.all([
+      chrome.storage.sync.set({
+        settings: {
+          ...settings,
+          models,
+          activeModelId,
+          defaultModelId: activeModelId
+        }
+      }),
+      chrome.storage.local.set({
+        [SKILL_STORAGE_KEY]: nextSkills,
+        [SKILL_PAGE_NAMES_STORAGE_KEY]: {},
+        modelApiKeys: { ...modelApiKeys, ...localKeys }
+      }),
+      chrome.storage.session?.clear?.()
+    ]);
+  }, {
+    pageUrl,
+    skills,
+    limit: pageRequestLimitPerMinute
+  });
+};
+
+const makeDerivedSkill = ({
+  id,
+  name,
+  pageUrl,
+  columnName,
+  autoRunEnabled
+}) => ({
+  id,
+  type: "derived-column",
+  name,
+  revision: 1,
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+  analysisMethod: { description: "识别风险并给出简短判断" },
+  sources: [{
+    id: `${id}-source`,
+    pageKey: pageUrl,
+    frameUrl: pageUrl,
+    selector: "#derived-orders",
+    tableIndex: 0,
+    headers: ["订单号", "金额", "状态"]
+  }],
+  selectedColumns: [
+    { header: "金额", occurrence: 1 },
+    { header: "状态", occurrence: 1 }
+  ],
+  output: {
+    columnName,
+    maxChars: 1000
+  },
+  trigger: {
+    autoRunEnabled
+  },
+  execution: {
+    maxRows: 100,
+    maxBatchRows: 20
+  }
+});
+
+const clickDerivedSkillControl = async (page, skillName, control) => {
+  await page.$eval("[data-web2ai-skill-bar]", (bar, { skillName: expectedSkillName, control: expectedControl }) => {
+    const item = Array.from(bar.querySelectorAll("span"))
+      .find((node) => node.textContent?.includes(expectedSkillName) && (
+        node.querySelector('input[type="checkbox"]') || node.querySelector("button")
+      ));
+    if (!item) throw new Error(`skill item not found: ${expectedSkillName}`);
+    if (expectedControl === "toggle") {
+      const input = item.querySelector('input[type="checkbox"]');
+      if (!input) throw new Error(`toggle not found for ${expectedSkillName}`);
+      input.click();
+      return;
+    }
+    const button = Array.from(item.querySelectorAll("button"))
+      .find((node) => node.textContent?.trim() === expectedControl);
+    if (!button) throw new Error(`control ${expectedControl} not found for ${expectedSkillName}`);
+    button.click();
+  }, { skillName, control });
+};
+
+const readDerivedColumnTexts = (page, skillId) => page.$$eval(
+  `#derived-orders tbody tr td[data-web2ai-derived-column="${skillId}"] [data-web2ai-derived-runtime-note]`,
+  (nodes) => nodes.map((node) => node.textContent || "")
+);
+
+const waitForDerivedColumnTexts = (page, skillId, matcherText) => page.waitForFunction(
+  ({ currentSkillId, text }) => {
+    const nodes = Array.from(document.querySelectorAll(
+      `#derived-orders tbody tr td[data-web2ai-derived-column="${currentSkillId}"] [data-web2ai-derived-runtime-note]`
+    ));
+    return nodes.length === 2 && nodes.every((node) => node.textContent?.includes(text));
+  },
+  {},
+  { currentSkillId: skillId, text: matcherText }
+);
+
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: false,
@@ -343,6 +546,11 @@ try {
     Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
   });
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => Boolean(host.shadowRoot.querySelector(".skillList"))),
+    false,
+    "creating a skill must hide the skill catalog below the form to avoid mixing catalog cards with the draft"
+  );
   await page.$eval("#web2ai_overlay_host", (host) => {
     const name = host.shadowRoot.querySelector(".skillInput");
     const method = host.shadowRoot.querySelector(".skillTextarea");
@@ -384,16 +592,40 @@ try {
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "保存")?.click();
   });
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("订单分析"));
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("分析方法已配置"));
-  assert.match(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || ""), /数据源：共 3 个/);
+  await page.waitForFunction(() => {
+    const cards = Array.from(document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillCard") || []);
+    return cards.some((card) => card.textContent?.includes("订单分析"));
+  });
+  await page.waitForFunction(() => {
+    const cards = Array.from(document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillCard") || []);
+    return cards.some((card) => card.textContent?.includes("订单分析") && card.textContent?.includes("分析方法已配置"));
+  });
+  assert.match(await page.$eval("#web2ai_overlay_host", (host) => {
+    const cards = Array.from(host.shadowRoot.querySelectorAll(".skillCard"));
+    return cards.find((card) => card.textContent?.includes("订单分析"))?.textContent || "";
+  }), /数据源：共 3 个/);
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => {
+      const cards = Array.from(host.shadowRoot.querySelectorAll(".skillCard"));
+      return cards.find((card) => card.textContent?.includes("订单分析"))?.querySelector(".skillTypeIcon")?.textContent?.trim() || "";
+    }),
+    "表",
+    "table-analysis skills in the plugin panel must show a leading 表 icon before the skill name"
+  );
   const skillSummary = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillSummary")?.textContent || "");
   assert.match(skillSummary, /全部技能 1 个/);
   assert.match(skillSummary, /其他页面技能：/);
   await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll(".skillCard button")).find((button) => button.textContent?.trim() === "修改技能")?.click();
+    const card = Array.from(host.shadowRoot.querySelectorAll(".skillCard"))
+      .find((node) => node.textContent?.includes("订单分析"));
+    Array.from(card?.querySelectorAll("button") || []).find((button) => button.textContent?.trim() === "修改技能")?.click();
   });
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => Boolean(host.shadowRoot.querySelector(".skillList"))),
+    false,
+    "editing a skill must hide the catalog below the form so users focus on the current draft"
+  );
   assert.equal(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillInput")?.value), "订单分析");
   assert.equal(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillSourceItem").length), 3, "modify mode must load every saved data source");
   assert.match(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillTextarea")?.value || ""), /识别异常订单并说明原因/);
@@ -409,8 +641,14 @@ try {
     firstSourceName.dispatchEvent(new Event("input", { bubbles: true }));
     Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "保存修改")?.click();
   });
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard")?.textContent?.includes("订单综合分析"));
-  const modifiedSkill = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || "");
+  await page.waitForFunction(() => {
+    const cards = Array.from(document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillCard") || []);
+    return cards.some((card) => card.textContent?.includes("订单综合分析"));
+  });
+  const modifiedSkill = await page.$eval("#web2ai_overlay_host", (host) => {
+    const cards = Array.from(host.shadowRoot.querySelectorAll(".skillCard"));
+    return cards.find((card) => card.textContent?.includes("订单综合分析"))?.textContent || "";
+  });
   assert.match(modifiedSkill, /主订单明细/, "modified data-source display names must persist");
   assert.match(modifiedSkill, /使用列表输出/, "modified analysis methods must persist");
   await page.bringToFront();
@@ -419,7 +657,273 @@ try {
   assert.equal(await page.$eval("#web2ai_overlay_host", (host) => Boolean(host.shadowRoot.querySelector(".skillCard"))), false);
   await page.evaluate(() => history.pushState({}, "", "/"));
   await new Promise((resolve) => setTimeout(resolve, 900));
-  assert.match(await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || ""), /订单综合分析/);
+  assert.match(await page.$eval("#web2ai_overlay_host", (host) => {
+    const cards = Array.from(host.shadowRoot.querySelectorAll(".skillCard"));
+    return cards.find((card) => card.textContent?.includes("订单综合分析"))?.textContent || "";
+  }), /订单综合分析/);
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillReuseItem").length),
+    2,
+    "table-analysis drafts should list the current page's reusable data sources individually"
+  );
+  await worker.evaluate(async () => {
+    const SKILL_STORAGE_KEY = "web2aiSkills";
+    const storage = await chrome.storage.local.get([SKILL_STORAGE_KEY]);
+    const skills = Array.isArray(storage[SKILL_STORAGE_KEY]) ? storage[SKILL_STORAGE_KEY] : [];
+    const target = skills.find((skill) => skill?.name === "订单综合分析");
+    if (!target?.sources?.[0]) throw new Error("target skill for legacy-source migration test not found");
+    const legacySource = { ...target.sources[0] };
+    delete legacySource.framePathHint;
+    delete legacySource.locatorVersion;
+    target.sources[0] = legacySource;
+    target.source = legacySource;
+    await chrome.storage.local.set({ [SKILL_STORAGE_KEY]: skills });
+  });
+  await page.reload();
+  await page.waitForSelector("#web2ai_overlay_host");
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    if (host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden")) {
+      document.querySelector("#web2ai_launcher_fab")?.click();
+    }
+  });
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".wrap")?.classList.contains("hidden"));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
+  });
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillReuseItem").length),
+    2,
+    "legacy and locator-v2 bindings that point to the same table must still dedupe into one reusable source"
+  );
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const buttons = Array.from(host.shadowRoot.querySelectorAll(".skillReuseItem .btn"));
+    buttons[0]?.click();
+    buttons[1]?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillSourceItem").length === 2);
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const name = host.shadowRoot.querySelector(".skillInput");
+    const method = host.shadowRoot.querySelector(".skillTextarea");
+    name.value = "订单复用分析";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    method.value = "复用已有数据源进行分析";
+    method.dispatchEvent(new Event("input", { bubbles: true }));
+    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "保存")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.textContent?.includes("订单复用分析"));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillReuseItem").length),
+    2,
+    "duplicate current-page sources reused by another skill must still appear only once in the reuse list"
+  );
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "取消")?.click();
+  });
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+  await worker.evaluate(async (baseUrl) => {
+    const SKILL_STORAGE_KEY = "web2aiSkills";
+    const SKILL_PAGE_NAMES_STORAGE_KEY = "web2aiSkillPageNames";
+    const storage = await chrome.storage.local.get([SKILL_STORAGE_KEY, SKILL_PAGE_NAMES_STORAGE_KEY]);
+    const existingSkills = Array.isArray(storage[SKILL_STORAGE_KEY]) ? storage[SKILL_STORAGE_KEY] : [];
+    const pageNames = storage[SKILL_PAGE_NAMES_STORAGE_KEY] || {};
+    const now = Date.now();
+    const extraSkills = Array.from({ length: 8 }, (_, index) => {
+      const pageUrl = `${baseUrl}catalog-page-${index + 1}`;
+      return {
+        id: `global-catalog-skill-${index + 1}`,
+        type: "table-analysis",
+        name: `全局技能${index + 1}`,
+        revision: 1,
+        createdAt: now + index,
+        updatedAt: now + index,
+        pageKey: pageUrl,
+        pageUrl,
+        pageTitle: `全局技能页面 ${index + 1}`,
+        analysisMethod: { description: `全局分析方法 ${index + 1}` },
+        sources: [{
+          id: `global-catalog-skill-${index + 1}-source`,
+          pageKey: pageUrl,
+          pageUrl,
+          pageTitle: `全局技能页面 ${index + 1}`,
+          frameUrl: pageUrl,
+          selector: "#orders",
+          tableIndex: 0,
+          headers: ["订单号", "订单状态", "金额", "备注"]
+        }]
+      };
+    });
+    await chrome.storage.local.set({
+      [SKILL_STORAGE_KEY]: [...existingSkills, ...extraSkills],
+      [SKILL_PAGE_NAMES_STORAGE_KEY]: {
+        ...pageNames,
+        ...Object.fromEntries(extraSkills.map((skill, index) => [
+          skill.pageKey,
+          `全局技能目录页面 ${index + 1}`
+        ]))
+      }
+    });
+  }, url);
+  await page.reload();
+  await page.waitForSelector("#web2ai_overlay_host");
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    if (host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden")) {
+      document.querySelector("#web2ai_launcher_fab")?.click();
+    }
+  });
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".wrap")?.classList.contains("hidden"));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
+  });
+  await page.waitForFunction(() => {
+    const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+    return shadow?.querySelectorAll(".skillCard").length === 2 && shadow.querySelector(".skillToggleList");
+  });
+  const collapsedGlobalCatalog = await page.$eval("#web2ai_overlay_host", (host) => {
+    const wrap = host.shadowRoot.getElementById("web2ai_skill_pages_wrap");
+    const toggle = host.shadowRoot.querySelector(".skillToggleList");
+    return {
+      currentPageCards: host.shadowRoot.querySelectorAll(".skillCard").length,
+      toggleText: toggle?.textContent?.trim() || "",
+      clientHeight: wrap?.clientHeight || 0,
+      scrollHeight: wrap?.scrollHeight || 0
+    };
+  });
+  assert.equal(
+    collapsedGlobalCatalog.currentPageCards,
+    2,
+    "collapsing the global skill catalog must not hide current-page skill cards"
+  );
+  assert.equal(
+    collapsedGlobalCatalog.toggleText,
+    "展开",
+    "the global skill catalog should default to collapsed when it exceeds two rows"
+  );
+  assert.ok(
+    collapsedGlobalCatalog.scrollHeight > collapsedGlobalCatalog.clientHeight,
+    `the global skill catalog should be height-clamped by default: ${JSON.stringify(collapsedGlobalCatalog)}`
+  );
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillToggleList")).find((button) => button.textContent?.trim() === "展开")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillToggleList")?.textContent?.trim() === "收起");
+  const expandedGlobalCatalog = await page.$eval("#web2ai_overlay_host", (host) => {
+    const wrap = host.shadowRoot.getElementById("web2ai_skill_pages_wrap");
+    return {
+      currentPageCards: host.shadowRoot.querySelectorAll(".skillCard").length,
+      clientHeight: wrap?.clientHeight || 0,
+      scrollHeight: wrap?.scrollHeight || 0
+    };
+  });
+  assert.equal(
+    expandedGlobalCatalog.currentPageCards,
+    2,
+    "expanding the global skill catalog must still keep current-page skill cards intact"
+  );
+  assert.ok(
+    expandedGlobalCatalog.clientHeight >= expandedGlobalCatalog.scrollHeight - 1,
+    `expanding the global skill catalog should reveal the full list: ${JSON.stringify(expandedGlobalCatalog)}`
+  );
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillToggleList")).find((button) => button.textContent?.trim() === "收起")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillToggleList")?.textContent?.trim() === "展开");
+  const recollapsedGlobalCatalog = await page.$eval("#web2ai_overlay_host", (host) => {
+    const wrap = host.shadowRoot.getElementById("web2ai_skill_pages_wrap");
+    return {
+      currentPageCards: host.shadowRoot.querySelectorAll(".skillCard").length,
+      clientHeight: wrap?.clientHeight || 0,
+      scrollHeight: wrap?.scrollHeight || 0
+    };
+  });
+  assert.equal(
+    recollapsedGlobalCatalog.currentPageCards,
+    2,
+    "collapsing the global skill catalog again must not affect current-page skill cards"
+  );
+  assert.ok(
+    recollapsedGlobalCatalog.scrollHeight > recollapsedGlobalCatalog.clientHeight,
+    `collapsing again should restore the two-row global catalog clamp: ${JSON.stringify(recollapsedGlobalCatalog)}`
+  );
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "Chat")?.click();
+  });
+
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
+  });
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    const derivedButton = Array.from(host.shadowRoot.querySelectorAll(".skillForm button"))
+      .find((button) => button.textContent?.trim() === "按列分析");
+    derivedButton?.click();
+  });
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillReuseItem").length),
+    2,
+    "derived-column drafts should also list reusable current-page data sources"
+  );
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    host.shadowRoot.querySelector(".skillReuseItem .btn")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.textContent?.includes("用于分析的字段"));
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => Boolean(host.shadowRoot.querySelector(".skillForm .skillTypeIcon"))),
+    false,
+    "draft forms must not reuse card-only type icons"
+  );
+  assert.equal(
+    await page.$eval("#web2ai_overlay_host", (host) => {
+      const field = Array.from(host.shadowRoot.querySelectorAll(".skillField"))
+        .find((node) => node.textContent?.includes("新增列名称"));
+      return field?.querySelector(".skillInput")?.value || "";
+    }),
+    "智能分析结论",
+    "derived-column drafts must default the output column name to 智能分析结论"
+  );
+  const scrollState = await page.$eval("#web2ai_overlay_host", (host) => {
+    const panel = host.shadowRoot.getElementById("web2ai_skills_body");
+    const block = Array.from(host.shadowRoot.querySelectorAll(".skillBlockTitle"))
+      .find((node) => node.textContent?.includes("用于分析的字段"));
+    block?.scrollIntoView({ block: "start" });
+    panel.scrollTop += 120;
+    const inputs = Array.from(block?.parentElement?.querySelectorAll('input[type="checkbox"]') || []);
+    const before = panel.scrollTop;
+    inputs[0]?.click();
+    const afterFirst = host.shadowRoot.getElementById("web2ai_skills_body")?.scrollTop || 0;
+    const refreshedBlock = Array.from(host.shadowRoot.querySelectorAll(".skillBlockTitle"))
+      .find((node) => node.textContent?.includes("用于分析的字段"));
+    const refreshedInputs = Array.from(refreshedBlock?.parentElement?.querySelectorAll('input[type="checkbox"]') || []);
+    refreshedInputs[1]?.click();
+    const afterSecond = host.shadowRoot.getElementById("web2ai_skills_body")?.scrollTop || 0;
+    return { before, afterFirst, afterSecond };
+  });
+  assert.ok(
+    Math.abs(scrollState.afterFirst - scrollState.before) < 24,
+    `selecting the first derived field must keep the skills panel near the current scroll position: ${JSON.stringify(scrollState)}`
+  );
+  assert.ok(
+    Math.abs(scrollState.afterSecond - scrollState.afterFirst) < 24,
+    `selecting more derived fields must not jump the panel back to the top: ${JSON.stringify(scrollState)}`
+  );
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "取消")?.click();
+  });
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "Chat")?.click();
   });
@@ -523,7 +1027,8 @@ try {
   const groupLabel = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".tableGroupLabel")?.textContent || "");
   assert.match(groupLabel, /表格 1/);
 
-  await page.click("#reuse-no-key");
+  await page.$eval("#reuse-no-key", (button) => button.click());
+  await page.waitForFunction(() => document.querySelector("#no-key-row")?.textContent?.includes("No key reused"));
   await reenterRow(page, noKeyRow);
   const noKeyRecycledAskVisible = await page.$eval("#web2ai_table_row_ask_ai", (button) => button.parentElement?.style.display !== "none");
   assert.equal(noKeyRecycledAskVisible, true, "leading-column fingerprint must detect a recycled row without rowKey");
@@ -531,7 +1036,8 @@ try {
   const noKeyReusedLabel = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".tableGroupLabel")?.textContent || "");
   assert.match(noKeyReusedLabel, /4 条/, "the recycled keyless row must be added as a new snapshot");
 
-  await page.click("#reuse");
+  await page.$eval("#reuse", (button) => button.click());
+  await page.waitForFunction(() => document.querySelector("#order-reused")?.textContent?.includes("Reused"));
   const reusedRow = await page.$("#order-reused");
   await reenterRow(page, reusedRow);
   const recycledAskVisible = await page.$eval("#web2ai_table_row_ask_ai", (button) => button.parentElement?.style.display !== "none");
@@ -555,7 +1061,8 @@ try {
   const frameOverlayCount = await frame.$$("#web2ai_overlay_host");
   assert.equal(frameOverlayCount.length, 0, "child frames collect rows without creating a second main overlay");
 
-  await page.click("#replace");
+  await page.$eval("#replace", (button) => button.click());
+  await page.waitForFunction(() => document.querySelector("#order-3")?.textContent?.includes("C"));
   await page.waitForSelector("#order-3");
   const replacementRow = await page.$("#order-3");
   await reenterRow(page, replacementRow);
@@ -605,7 +1112,10 @@ try {
     Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
   });
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard .skillStatus.available"));
-  const restoredSkill = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || "");
+  const restoredSkill = await page.$eval("#web2ai_overlay_host", (host) => {
+    const cards = Array.from(host.shadowRoot.querySelectorAll(".skillCard"));
+    return cards.find((card) => card.textContent?.includes("订单综合分析"))?.textContent || "";
+  });
   assert.match(restoredSkill, /订单综合分析/);
   assert.match(restoredSkill, /数据源：共 3 个/, "same-page and cross-page data sources must survive refresh");
   assert.match(restoredSkill, /主订单明细/);
@@ -628,7 +1138,9 @@ try {
     ]);
   }, url);
   await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll(".skillCard button")).find((button) => button.textContent?.trim() === "测试技能")?.click();
+    const card = Array.from(host.shadowRoot.querySelectorAll(".skillCard"))
+      .find((node) => node.textContent?.includes("订单综合分析"));
+    Array.from(card?.querySelectorAll("button") || []).find((button) => button.textContent?.trim() === "测试技能")?.click();
   });
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillTest"));
   const fileChooserPromise = page.waitForFileChooser();
@@ -761,7 +1273,10 @@ try {
   await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillTest"));
   assert.equal(await page.$("[data-web2ai-ui='dialog']"), null, "a persisted method must return without another save prompt");
   assert.match(
-    await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillCard")?.textContent || ""),
+    await page.$eval("#web2ai_overlay_host", (host) => {
+      const cards = Array.from(host.shadowRoot.querySelectorAll(".skillCard"));
+      return cards.find((card) => card.textContent?.includes("订单综合分析"))?.textContent || "";
+    }),
     /按风险级别输出/,
     "the method saved from test mode must update the persisted skill card"
   );
@@ -769,7 +1284,11 @@ try {
   await page.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("订单综合分析"));
   const skillBarText = await page.$eval("[data-web2ai-skill-bar]", (bar) => bar.textContent || "");
   assert.match(skillBarText, /技能列表：.*订单综合分析.*执行/, "bound skills must appear above their data source");
-  await page.$eval("[data-web2ai-skill-bar] button", (button) => button.click());
+  await page.$eval("[data-web2ai-skill-bar]", (bar) => {
+    const item = Array.from(bar.querySelectorAll("span"))
+      .find((node) => node.textContent?.includes("订单综合分析") && node.querySelector("button"));
+    item?.querySelector("button")?.click();
+  });
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillExecution"));
   const executionTitle = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionTitle")?.textContent || "");
   assert.match(executionTitle, /订单综合分析/);
@@ -856,6 +1375,128 @@ try {
   assert.equal(await virtualPage.$eval(".ant-pagination-item-active", (node) => node.textContent.trim()), "1", "hybrid collection must restore page one");
   await virtualPage.close();
 
+  const derivedRuntimeUrl = `${url}derived-runtime`;
+  await setDerivedRuntimeSkills(worker, {
+    pageUrl: derivedRuntimeUrl,
+    pageRequestLimitPerMinute: 1,
+    skills: [
+      makeDerivedSkill({
+        id: "derived-auto-a",
+        name: "自动风险A",
+        pageUrl: derivedRuntimeUrl,
+        columnName: "风险A",
+        autoRunEnabled: true
+      }),
+      makeDerivedSkill({
+        id: "derived-auto-b",
+        name: "自动风险B",
+        pageUrl: derivedRuntimeUrl,
+        columnName: "风险B",
+        autoRunEnabled: true
+      })
+    ]
+  });
+  const derivedPage = await browser.newPage();
+  await derivedPage.goto(derivedRuntimeUrl);
+  await derivedPage.waitForSelector("#web2ai_overlay_host");
+  await derivedPage.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("自动风险A"));
+  await waitForDerivedColumnTexts(derivedPage, "derived-auto-a", "E2E结论");
+  await waitForDerivedColumnTexts(derivedPage, "derived-auto-b", "当前页面已触发访问保护");
+  assert.deepEqual(
+    await derivedPage.$eval("#derived-orders thead tr", (row) => Array.from(row.children).map((cell) => cell.textContent.trim())),
+    ["订单号", "风险A", "风险B", "金额", "状态"],
+    "derived runtime must insert native result columns before the first selected business column"
+  );
+  const derivedBlockedCheckpoint = derivedAiRequestCount;
+  await derivedPage.$eval("#derived-rerender", (button) => button.click());
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  assert.equal(
+    derivedAiRequestCount,
+    derivedBlockedCheckpoint,
+    "same-page rerender must not trigger new model requests while the blocked list stays unchanged"
+  );
+  await clickDerivedSkillControl(derivedPage, "自动风险B", "更新");
+  await waitForDerivedColumnTexts(derivedPage, "derived-auto-b", "E2E结论");
+  assert.equal(
+    derivedAiRequestCount,
+    derivedBlockedCheckpoint + 1,
+    "manual refresh must bypass the page guard and complete the blocked derived column"
+  );
+  await clickDerivedSkillControl(derivedPage, "自动风险A", "toggle");
+  await derivedPage.waitForFunction(() => {
+    const bar = document.querySelector("[data-web2ai-skill-bar]");
+    const item = Array.from(bar?.querySelectorAll("span") || [])
+      .find((node) => node.textContent?.includes("自动风险A") && node.querySelector('input[type="checkbox"]'));
+    return item?.querySelector('input[type="checkbox"]')?.checked === false;
+  });
+  const beforeListChangeCount = derivedAiRequestCount;
+  await derivedPage.$eval("#derived-page-2", (button) => button.click());
+  await derivedPage.waitForFunction(() => document.querySelector("#derived-current-page")?.textContent?.trim() === "2");
+  await waitForDerivedColumnTexts(derivedPage, "derived-auto-b", "当前页面已触发访问保护");
+  assert.equal(
+    derivedAiRequestCount,
+    beforeListChangeCount,
+    "list changes may unlock auto-run scheduling, but the request must still be blocked by the page-level total budget"
+  );
+  const beforeReturnToFirstPage = derivedAiRequestCount;
+  await derivedPage.$eval("#derived-page-1", (button) => button.click());
+  await derivedPage.waitForFunction(() => document.querySelector("#derived-current-page")?.textContent?.trim() === "1");
+  await waitForDerivedColumnTexts(derivedPage, "derived-auto-b", "E2E结论");
+  assert.deepEqual(
+    await readDerivedColumnTexts(derivedPage, "derived-auto-b"),
+    ["E2E结论1", "E2E结论2"],
+    "returning to a previously analyzed page must restore its cached derived results"
+  );
+  assert.equal(
+    derivedAiRequestCount,
+    beforeReturnToFirstPage,
+    "returning to a previously analyzed page must reuse cached derived results instead of requesting the model again"
+  );
+  await derivedPage.close();
+
+  await setDerivedRuntimeSkills(worker, {
+    pageUrl: derivedRuntimeUrl,
+    pageRequestLimitPerMinute: 5,
+    skills: [
+      makeDerivedSkill({
+        id: "derived-manual-only",
+        name: "手动分析列",
+        pageUrl: derivedRuntimeUrl,
+        columnName: "手动结论",
+        autoRunEnabled: false
+      })
+    ]
+  });
+  const derivedManualPage = await browser.newPage();
+  await derivedManualPage.goto(derivedRuntimeUrl);
+  await derivedManualPage.waitForSelector("#web2ai_overlay_host");
+  await derivedManualPage.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("手动分析列"));
+  assert.equal(
+    await derivedManualPage.$("[data-web2ai-derived-column-header=\"derived-manual-only\"]"),
+    null,
+    "auto-disabled derived skills must not render native result columns before a manual refresh"
+  );
+  const manualBeforeUpdate = derivedAiRequestCount;
+  await clickDerivedSkillControl(derivedManualPage, "手动分析列", "更新");
+  await waitForDerivedColumnTexts(derivedManualPage, "derived-manual-only", "E2E结论");
+  assert.equal(
+    derivedAiRequestCount,
+    manualBeforeUpdate + 1,
+    "manual-only derived skills must still request the model when the user clicks refresh"
+  );
+  await derivedManualPage.$eval("#derived-page-2", (button) => button.click());
+  await derivedManualPage.waitForFunction(() => document.querySelector("#derived-current-page")?.textContent?.trim() === "2");
+  await derivedManualPage.waitForFunction(
+    () => !document.querySelector('[data-web2ai-derived-column-header="derived-manual-only"]') &&
+      !document.querySelector('#derived-orders tbody td[data-web2ai-derived-column="derived-manual-only"]')
+  );
+  assert.deepEqual(
+    await derivedManualPage.$eval("#derived-orders thead tr", (row) => Array.from(row.children).map((cell) => cell.textContent.trim())),
+    ["订单号", "金额", "状态"],
+    "turning pages with auto execution disabled must clear stale derived columns instead of misaligning the table"
+  );
+  await derivedManualPage.close();
+
   // Adding a model is a separate draft flow: it must not appear in the
   // existing-model selector until saved, and cancel must restore edit mode.
   const extensionId = new URL(extensionTarget.url()).host;
@@ -872,7 +1513,7 @@ try {
   assert.equal(await optionsPage.$$eval("#profile option", (options) => options.length), profileCountBeforeAdd);
   await optionsPage.close();
 
-console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, runtime CSV/XLSX sources, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing");
+console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, runtime CSV/XLSX sources, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing, derived runtime auto/manual/page-guard coverage");
 } finally {
   await browser.close();
   server.close();

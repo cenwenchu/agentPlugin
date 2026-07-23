@@ -14,7 +14,8 @@ export const DEFAULT_MODEL_PROFILE = {
   model: "deepseek-v4-flash",
   supportsImages: false,
   contextWindow: 64000,
-  maxOutputTokens: 4096
+  maxOutputTokens: 4096,
+  pageRequestLimitPerMinute: 5
 };
 
 export const DEFAULT_SETTINGS = {

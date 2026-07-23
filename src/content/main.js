@@ -17,7 +17,7 @@ import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen, clearDraftInput, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition, startSkillExecution } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, initContextDependencies, removeContextByRef } from './context.js';
-import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars, getBusinessPageTabs } from './skills.js';
+import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars, getBusinessPageTabs } from './skills.js';
 import { applySkillWorkspaceCollectionProgress } from './skill-workspace-controller.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
@@ -323,6 +323,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "EXTRACT_SKILL_SOURCE_DATA") {
     sendResponse({ ok: true, data: extractStoredSourceData(message.source, message.limit || 200) });
+    return;
+  }
+  if (message?.type === "EXTRACT_SKILL_SOURCE_PREVIEW_DATA") {
+    sendResponse({ ok: true, data: extractStoredSourcePreviewData(message.source, message.limit || 20) });
     return;
   }
   if (message?.type === "INSPECT_SKILL_SOURCE_PAGINATION") {

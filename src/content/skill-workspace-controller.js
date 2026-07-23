@@ -14,6 +14,12 @@ import {
   buildSkillRequestPrompt, calculateSkillRequestBudget, incompleteSkillDataSources
 } from "./skill-request-model.js";
 import {
+  buildDerivedColumnPreviewPrompt,
+  buildDerivedPreviewRows,
+  calculateDerivedColumnPreviewBatchSize
+} from "./derived-column-request-model.js";
+import { parseDerivedColumnResults } from "./derived-column-result-parser.js";
+import {
   MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS, parseSkillCollectionPageInput
 } from "./skill-collection-model.js";
 import {
@@ -101,7 +107,7 @@ function appendSkillMethodReview() {
 async function saveSkillTestMethod({ exitAfterSave = false } = {}) {
   const test = STATE.skillTest;
   const methodToSave = normalizeText(test?.method);
-  if (!test || test.pending || test.methodSaving || !methodToSave) return false;
+  if (!test || test.pending || test.methodSaving || (test.mode !== "derived-preview" && !methodToSave)) return false;
   test.methodSaving = true;
   renderWorkspace();
   try {
@@ -218,6 +224,16 @@ function startSkillExecution(skill) {
   startSkillTest(skill, { mode: "execute", autoRun: false }).catch((error) => showToast(String(error?.message ?? error)));
 }
 
+function startDerivedColumnPreview(skill) {
+  const currentPageKey = `${location.origin}${location.pathname}`;
+  openSkillWorkspace({
+    skill,
+    method: String(skill?.analysisMethod?.description || ""),
+    mode: "derived-preview",
+    currentPageKey
+  });
+}
+
 async function copySkillText(text, successMessage) {
   try {
     await navigator.clipboard.writeText(String(text || ""));
@@ -304,6 +320,127 @@ async function viewSkillSubmittedPrompt(test) {
     cancelText: "关闭"
   });
   if (shouldCopy) await copySkillText(prompt, "提交内容已复制");
+}
+
+async function runDerivedColumnPreview() {
+  const test = STATE.skillTest;
+  if (!test || test.pending || test.mode !== "derived-preview") return;
+  const sourceItem = test.dataSources?.[0];
+  if (!sourceItem?.source) return showToast("请先绑定数据源");
+  test.pending = true;
+  test.status = "loading";
+  test.error = "";
+  test.response = "";
+  test.submittedPrompt = "";
+  test.derivedPreview = {
+    headers: [],
+    rows: [],
+    selectedColumns: [],
+    outputColumnName: "",
+    uniqueRequestCount: 0,
+    totalPreviewCount: 0,
+    failedFingerprints: [],
+    usedDefaultMethod: false
+  };
+  sourceItem.status = "loading";
+  sourceItem.error = "";
+  sourceItem.data = null;
+  renderWorkspace();
+  try {
+    const previewResponse = await sendToBackground({
+      type: "EXTRACT_SKILL_SOURCE_PREVIEW_DATA",
+      source: sourceItem.source,
+      limit: 20
+    }).catch(() => null);
+    const extracted = previewResponse?.data;
+    if (!extracted?.found) throw new Error("未找到当前数据源对应的表格");
+    if (extracted.status === "changed") throw new Error("数据源字段已变化，请重新选择字段");
+    if (!Array.isArray(extracted.rows) || !extracted.rows.length) throw new Error("当前页没有可测试的数据");
+    sourceItem.data = extracted;
+    sourceItem.status = "complete";
+    test.status = "submitting";
+    renderWorkspace();
+
+    const previewModel = buildDerivedPreviewRows({
+      headers: extracted.headers,
+      rows: extracted.rows,
+      selectedColumns: test.selectedColumns,
+      limit: 20
+    });
+    if (previewModel.resolvedSelection.missing.length) {
+      throw new Error("选中的字段在当前表格中不存在，请重新选择字段");
+    }
+    if (!previewModel.uniqueRows.length) throw new Error("没有可用于测试的唯一字段内容");
+
+    const settingsResponse = await sendToBackground({ type: "GET_SETTINGS", modelId: STATE.activeModelId }).catch(() => null);
+    const batchSize = calculateDerivedColumnPreviewBatchSize({
+      rows: previewModel.uniqueRows,
+      method: test.method,
+      output: test.output,
+      contextWindow: settingsResponse?.data?.contextWindow,
+      maxOutputTokens: settingsResponse?.data?.maxOutputTokens
+    });
+    const requestRows = previewModel.uniqueRows.slice(0, batchSize);
+    const request = buildDerivedColumnPreviewPrompt({
+      method: test.method,
+      rows: requestRows,
+      output: test.output,
+      defaultMethodVersion: test.defaultMethodVersion
+    });
+    test.submittedPrompt = request.prompt;
+    test.status = "analyzing";
+    renderWorkspace();
+    const response = await sendToBackground({
+      type: "AI_CHAT",
+      payload: {
+        messages: [{ role: "user", content: request.prompt }],
+        modelId: STATE.activeModelId,
+        debugLabel: "derived-column-preview"
+      }
+    });
+    if (!response?.ok) throw new Error(response?.error || "模型请求失败");
+    const content = String(response.data?.content || "").trim();
+    if (!content) throw new Error("模型没有返回内容");
+    const parsed = parseDerivedColumnResults({
+      text: content,
+      expectedFingerprints: requestRows.map((row) => row.fingerprint),
+      output: test.output
+    });
+    const resultMap = parsed.resultMap;
+    const selectedHeaders = previewModel.resolvedSelection.columns.map((column) => column.displayHeader || column.header);
+    const outputColumnName = test.output?.columnName || "智能分析结论";
+    test.response = content;
+    test.derivedPreview = {
+      headers: [...selectedHeaders, outputColumnName],
+      selectedColumns: previewModel.resolvedSelection.columns,
+      rows: previewModel.previewRows.map((row) => {
+        const matched = resultMap.get(row.fingerprint);
+        const failure = parsed.failures.find((item) => item.fingerprint === row.fingerprint);
+        return {
+          fingerprint: row.fingerprint,
+          selectedValues: row.selectedValues,
+          conclusion: matched?.conclusion || "",
+          status: matched ? "complete" : failure ? "error" : "pending",
+          error: failure?.error || ""
+        };
+      }),
+      outputColumnName,
+      uniqueRequestCount: requestRows.length,
+      totalPreviewCount: previewModel.previewRows.length,
+      failedFingerprints: parsed.failures,
+      usedDefaultMethod: request.usedDefaultMethod
+    };
+    test.status = parsed.failures.length ? "complete" : "complete";
+    test.attempts += 1;
+  } catch (error) {
+    sourceItem.status = "error";
+    sourceItem.error = String(error?.message ?? error);
+    test.error = sourceItem.error;
+    test.status = "error";
+  } finally {
+    test.pending = false;
+    renderWorkspace();
+  }
 }
 
 /**
@@ -533,8 +670,10 @@ export {
   openSkillWorkspace,
   removeSkillRuntimeSource,
   reviewSkillAnalysisMethod,
+  runDerivedColumnPreview,
   runSkillTest,
   saveSkillTestMethod,
+  startDerivedColumnPreview,
   startSkillExecution,
   startSkillTest,
   uploadSkillRuntimeFiles,

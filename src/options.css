@@ -35,6 +35,14 @@ label > span {
   margin: 0 0 6px;
 }
 
+.field-help {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
 input,
 select {
   width: 100%;

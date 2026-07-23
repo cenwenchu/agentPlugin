@@ -3,6 +3,13 @@
  * 技能名称、ID 和时间不代表业务能力；只有数据源绑定与分析方法参与判断。
  */
 
+import {
+  DEFAULT_DERIVED_METHOD_VERSION,
+  normalizeDerivedColumnOutput,
+  normalizeDerivedColumnSelections,
+  skillTypeOf
+} from "./derived-column-model.js";
+
 function normalizedHeader(value) {
   return String(value ?? "").replace(/\s+/g, "").trim().toLowerCase();
 }
@@ -31,7 +38,7 @@ function sourceIdentity(source = {}) {
   };
 }
 
-function skillContentFingerprint(skill = {}) {
+function tableAnalysisFingerprint(skill = {}) {
   const sources = Array.isArray(skill.sources) && skill.sources.length
     ? skill.sources
     : [skill.source].filter(Boolean);
@@ -39,6 +46,35 @@ function skillContentFingerprint(skill = {}) {
     sources: sources.map(sourceIdentity),
     analysisMethod: analysisDescription(skill.analysisMethod)
   });
+}
+
+function derivedColumnFingerprint(skill = {}) {
+  const sources = Array.isArray(skill.sources) && skill.sources.length
+    ? skill.sources
+    : [skill.source].filter(Boolean);
+  const method = analysisDescription(skill.analysisMethod);
+  const output = normalizeDerivedColumnOutput(skill.output);
+  return JSON.stringify({
+    type: "derived-column",
+    sources: sources.map(sourceIdentity),
+    selectedColumns: normalizeDerivedColumnSelections(skill.selectedColumns).map((column) => ({
+      normalizedHeader: column.normalizedHeader,
+      occurrence: column.occurrence
+    })),
+    analysisMethod: method,
+    defaultMethodVersion: method ? null : Math.max(1, Number(skill.defaultMethodVersion) || DEFAULT_DERIVED_METHOD_VERSION),
+    output: {
+      columnName: output.columnName,
+      position: output.position,
+      maxChars: output.maxChars
+    }
+  });
+}
+
+function skillContentFingerprint(skill = {}) {
+  return skillTypeOf(skill) === "derived-column"
+    ? derivedColumnFingerprint(skill)
+    : tableAnalysisFingerprint(skill);
 }
 
 export { skillContentFingerprint };

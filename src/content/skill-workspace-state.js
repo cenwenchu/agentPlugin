@@ -19,11 +19,15 @@ function createSkillWorkspaceSession({ skill = {}, method = "", mode = "test", c
   return {
     skillId: skill.id,
     skillName: skill.name,
+    skillType: skill.type || "table-analysis",
+    selectedColumns: Array.isArray(skill.selectedColumns) ? [...skill.selectedColumns] : [],
+    output: skill.output ? { ...skill.output } : null,
+    defaultMethodVersion: skill.defaultMethodVersion || 1,
     sourceName: skill.sourceName,
     source: skill.source,
     sources,
     returnBusinessTabTitle: sources.find((source) => source.pageKey === currentPageKey)?.businessTabTitle || "",
-    mode: mode === "execute" ? "execute" : "test",
+    mode: mode === "execute" ? "execute" : mode === "derived-preview" ? "derived-preview" : "test",
     method,
     savedMethod: method,
     data: null,
@@ -58,7 +62,17 @@ function createSkillWorkspaceSession({ skill = {}, method = "", mode = "test", c
     followups: [],
     followupDraft: "",
     resultTab: "result",
-    previewPage: 1
+    previewPage: 1,
+    derivedPreview: {
+      headers: [],
+      rows: [],
+      selectedColumns: [],
+      outputColumnName: "",
+      uniqueRequestCount: 0,
+      totalPreviewCount: 0,
+      failedFingerprints: [],
+      usedDefaultMethod: false
+    }
   };
 }
 
@@ -74,6 +88,16 @@ function invalidateSkillWorkspaceResult(session) {
   session.methodReview = "";
   session.submittedPrompt = "";
   session.resultTab = "result";
+  session.derivedPreview = {
+    headers: [],
+    rows: [],
+    selectedColumns: [],
+    outputColumnName: "",
+    uniqueRequestCount: 0,
+    totalPreviewCount: 0,
+    failedFingerprints: [],
+    usedDefaultMethod: false
+  };
   return session;
 }
 

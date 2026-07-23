@@ -6,7 +6,7 @@
 
 import { DEBUG, compactOneLine, refs } from "./state.js";
 import { isVisibleElement } from "./dom.js";
-import { getRowCells } from "./table-row-dom.js";
+import { getBusinessRowText, getRowCells } from "./table-row-dom.js";
 
 const DRAWER_MODAL_SELECTORS = ".ant-drawer-body, .ant-modal-body, .arco-drawer-body, .arco-modal-body";
 const ANT_PAGINATION_DISABLED = "ant-pagination-disabled";
@@ -53,9 +53,9 @@ function dumpAllTables(label) {
     const rect = tbl.getBoundingClientRect();
     const rows = tbl.querySelectorAll("tbody tr, tr");
     const rowTexts = Array.from(rows)
-      .filter(r => (r.querySelectorAll?.("td,th") || []).length > 0)
+      .filter((row) => getRowCells(row).length > 0)
       .map((r, i) => {
-        const raw = compactOneLine(r.innerText || r.textContent || "").slice(0, 50);
+        const raw = compactOneLine(getBusinessRowText(r, { separator: " ", emptyPlaceholder: "" })).slice(0, 50);
         return `[${i}] ${raw}`;
       });
     DEBUG && console.log(`[web2ai]   table[${idx}]: tag=${tbl.tagName} connected=${tbl.isConnected} visible=${visible} rect=${JSON.stringify({w:Math.round(rect.width),h:Math.round(rect.height)})} rows=${rowTexts.length}`);
@@ -144,9 +144,8 @@ function getTableRowTexts(root) {
   const rows = root.querySelectorAll?.("tbody tr, tr, [role='rowgroup'] [role='row'], [role='row']") || [];
   const texts = [];
   for (const r of rows) {
-    const cells = r.querySelectorAll?.("td,th,[role='cell'],[role='gridcell']") || [];
-    if (!cells.length) continue;
-    const raw = compactOneLine(r.innerText || r.textContent || "");
+    if (!getRowCells(r).length) continue;
+    const raw = compactOneLine(getBusinessRowText(r, { separator: " ", emptyPlaceholder: "" }));
     const stripped = raw.replace(/^\d+\s*[✓✗]?\s*\|?\s*/, "").replace(/\s+/g, "").slice(0, 30);
     if (!stripped) continue;
     texts.push(stripped);

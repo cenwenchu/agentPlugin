@@ -9,7 +9,7 @@ import { getCssSelector } from "./dom.js";
 import { skillHeadersMatch } from "./skill-collection-model.js";
 import { SOURCE_LOCATOR_VERSION, chooseSourceTableCandidate } from "./skill-source-model.js";
 import { resolveTableAdapter } from "./table-adapters.js";
-import { getRowCells, isHeaderRow } from "./table-row-dom.js";
+import { DERIVED_COLUMN_SELECTOR, getRowCells, isHeaderRow, isTableFooterOrSummaryRow } from "./table-row-dom.js";
 import { findHeaderRowAbove } from "./table-header-resolver.js";
 import { findPaginationNextButton } from "./table-pagination-dom.js";
 
@@ -100,7 +100,7 @@ function extractHeaders(table, preferredTarget = null) {
     "thead th, [role='columnheader'], th[scope='col'], " +
     ".art-table-header-cell, .ant-table-thead th, .arco-table-th, " +
     "[class*='table-header'] [class*='cell'], [class*='table-head'] [class*='cell']"
-  ));
+  )).filter((cell) => !cell.matches?.(DERIVED_COLUMN_SELECTOR));
   // 非标准 div 表格无法标识完整表头区域时，再使用用户实际点击行兜底。
   if (!cells.length) cells = clickedHeaderCells(preferredTarget);
   // 复用 Chat 的表头关联算法，兼容固定表头与表体拆成兄弟 table 的组件。
@@ -112,7 +112,10 @@ function extractHeaders(table, preferredTarget = null) {
   }
   if (!cells.length) {
     const firstRow = table.querySelector("tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
-    cells = firstRow ? Array.from(firstRow.querySelectorAll("th, td, [role='cell'], [role='gridcell'], .art-table-cell, .ant-table-cell, .arco-table-td")) : [];
+    cells = firstRow
+      ? Array.from(firstRow.querySelectorAll("th, td, [role='cell'], [role='gridcell'], .art-table-cell, .ant-table-cell, .arco-table-td"))
+        .filter((cell) => !cell.matches?.(DERIVED_COLUMN_SELECTOR))
+      : [];
   }
   return cellTexts(cells);
 }
@@ -303,7 +306,7 @@ function extractStoredSourceData(source, limit = 200) {
   if (!selected) return { found: false, status: located.status, ambiguous: located.ambiguous, candidateCount: located.candidateCount };
   const headers = extractHeaders(selected);
   const allRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
-    .filter((row) => !isHeaderRow(row))
+    .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row))
     .map((row) => alignedRowCellTexts(getRowCells(row), headers.length))
     .filter((cells) => cells.length && cells.some(Boolean));
   const uniqueRows = [];
@@ -326,6 +329,27 @@ function extractStoredSourceData(source, limit = 200) {
   };
 }
 
+function extractStoredSourcePreviewData(source, limit = 20) {
+  const located = locateStoredSource(source);
+  const selected = located.table;
+  if (!selected) return { found: false, status: located.status, ambiguous: located.ambiguous, candidateCount: located.candidateCount };
+  const headers = extractHeaders(selected);
+  const allRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
+    .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row))
+    .map((row) => alignedRowCellTexts(getRowCells(row), headers.length))
+    .filter((cells) => cells.length && cells.some(Boolean));
+  const rows = allRows.slice(0, Math.max(1, limit));
+  return {
+    found: true,
+    status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
+    headers,
+    rows,
+    rowCount: rows.length,
+    totalRowCount: allRows.length,
+    truncated: allRows.length > rows.length
+  };
+}
+
 function inspectStoredSourcePagination(source) {
   const located = locateStoredSource(source);
   const table = located.table;
@@ -344,5 +368,5 @@ function inspectStoredSourcePagination(source) {
 export {
   pageKey, tableCandidates, resolveTableFromTarget, alignedRowCellTexts, extractHeaders,
   describeTable, headerSimilarity, locateStoredSource, resolveStoredSource,
-  extractStoredSourceData, inspectStoredSourcePagination
+  extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination
 };

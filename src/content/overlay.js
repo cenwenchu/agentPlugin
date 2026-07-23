@@ -27,7 +27,17 @@ import { showToast } from './toast.js';
 import { showConfirmDialog, showPromptDialog } from './dialog.js';
 import { createSkillDraft, cancelSkillDraft, selectSkillTable, saveSkillDraft, rebindSkill, removeSkillDraftSource, deleteSkill, deleteAllSkills, switchToSkillPage, renameCurrentSkillPage, buildAnalysisPrompt, downloadSkillsExport, previewSkillsImport, applySkillsImport } from './skills.js';
 import {
-  initSkillWorkspaceController, startSkillExecution, startSkillTest
+  DEFAULT_DERIVED_METHOD_VERSION,
+  SKILL_TYPE_DERIVED_COLUMN,
+  SKILL_TYPE_TABLE_ANALYSIS,
+  normalizeDerivedColumnOutput,
+  normalizeDerivedColumnSelections,
+  normalizeDerivedColumnSkill,
+  normalizedHeaderText,
+  skillTypeOf
+} from './derived-column-model.js';
+import {
+  initSkillWorkspaceController, startDerivedColumnPreview, startSkillExecution, startSkillTest
 } from './skill-workspace-controller.js';
 import { SKILL_WORKSPACE_CSS } from './skill-workspace-style.js';
 import { renderSkillWorkspace } from './skill-workspace-view.js';
@@ -117,13 +127,30 @@ const OVERLAY_CSS = `
     .composerActions { width: 92px; display: flex; flex-direction: column; gap: 8px; }
     .composerActions .btn { width: 100%; }
     .skillBody { flex: 1; min-height: 0; padding: 10px; overflow: auto; background: #f8fafc; }
-    .skillIntro { padding: 10px; margin-bottom: 10px; border: 1px solid #bfdbfe; border-radius: 10px; background: #eff6ff; color: #1e3a8a; font-size: 11px; line-height: 1.5; }
     .skillForm, .skillCard { padding: 11px; margin-bottom: 9px; border: 1px solid rgba(0,0,0,.09); border-radius: 11px; background: #fff; }
     .skillForm { border-color: #93c5fd; }
+    .skillFormNotice { margin-bottom: 9px; padding: 10px 11px; border: 1px solid #bfdbfe; border-radius: 11px; background: #eff6ff; color: #1e3a8a; font-size: 11px; line-height: 1.6; }
     .skillTitle { font-size: 12px; font-weight: 650; color: #111827; }
-    .skillNumber { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 20px; margin-right: 7px; border-radius: 6px; background: #ede9fe; color: #7c3aed; font-size: 10px; font-weight: 750; }
+    .skillTypeIcon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      height: 20px;
+      margin-right: 6px;
+      padding: 0 6px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 750;
+    }
+    .skillTypeIcon.table { background: #dbeafe; color: #1d4ed8; }
+    .skillTypeIcon.column { background: #ede9fe; color: #7c3aed; }
+    .skillNumber { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 20px; margin-right: 7px; border-radius: 6px; background: #fee2e2; color: #b91c1c; font-size: 10px; font-weight: 750; }
     .skillField { display: block; margin-top: 9px; }
     .skillFieldLabel { display: block; margin-bottom: 4px; font-size: 11px; color: #475569; }
+    .skillScenarioCard { margin-top: 10px; padding: 12px; border: 1px solid #93c5fd; border-radius: 12px; background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,.55); }
+    .skillScenarioTitle { margin-bottom: 6px; color: #1d4ed8; font-size: 11px; font-weight: 750; }
+    .skillScenarioText { color: #1e3a8a; font-size: 11px; line-height: 1.65; }
     .skillInput { width: 100%; height: 32px; box-sizing: border-box; border: 1px solid rgba(0,0,0,.14); border-radius: 8px; padding: 0 9px; background: #fff; color: #111827; font-size: 12px; }
     .skillSource { margin-top: 9px; padding: 8px; max-height: 120px; overflow: auto; border: 1px dashed #94a3b8; border-radius: 8px; background: #f8fafc; color: #475569; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
     .skillMeta { margin-top: 5px; color: #64748b; font-size: 10px; line-height: 1.5; }
@@ -140,19 +167,23 @@ const OVERLAY_CSS = `
     .skillSummary { padding: 10px 11px; border-bottom: 1px solid rgba(0,0,0,.07); background: #f8fafc; color: #334155; font-size: 11px; }
     .skillSummaryTitle { display: flex; align-items: center; gap: 8px; font-weight: 650; color: #1e293b; }
     .skillSummaryTitleText { flex: 1; }
+    .skillSummaryFooter { display: flex; align-items: center; justify-content: flex-end; height: 26px; margin-top: 6px; }
     .skillCreateSummary { height: 25px; border: 1px solid #2563eb; border-radius: 7px; padding: 0 8px; background: #2563eb; color: #fff; font-size: 10px; font-weight: 650; cursor: pointer; }
     .skillTransfer { height: 25px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 0 8px; background: #fff; color: #334155; font-size: 10px; cursor: pointer; }
     .skillPagesLabel { margin-top: 8px; color: #64748b; font-size: 10px; }
+    .skillPagesWrap { margin-top: 7px; }
+    .skillPagesWrap.collapsed { max-height: 60px; overflow: hidden; }
     .skillCurrentLabel { display: flex; align-items: center; gap: 7px; padding: 11px; border-bottom: 1px solid rgba(0,0,0,.07); background: #fff; color: #334155; font-size: 13px; font-weight: 700; line-height: 1.5; }
     .skillCurrentLabelText { flex: 1; min-width: 0; overflow-wrap: anywhere; }
     .skillRename { border: 0; padding: 0 3px; background: transparent; color: #2563eb; font-size: 10px; cursor: pointer; vertical-align: baseline; }
+    .skillToggleList { height: 26px; border: 1px solid #bfdbfe; border-radius: 7px; padding: 0 9px; background: #eff6ff; color: #1d4ed8; font-size: 10px; font-weight: 700; cursor: pointer; }
     .skillList .skillCard { margin: 0; border: 0; border-radius: 0; }
     .skillList .skillCard + .skillCard { border-top: 1px solid rgba(0,0,0,.07); }
     .skillPages { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
     .skillPageLink { max-width: 100%; height: 27px; border: 1px solid #bfdbfe; border-radius: 8px; padding: 0 8px; background: #eff6ff; color: #1d4ed8; font-size: 10px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .skillPageName { color: #1d4ed8; }
     .skillPageCount { margin: 0 2px; color: #dc2626; font-weight: 750; }
-    .skillPageNumbers { color: #7c3aed; font-size: 9px; font-weight: 700; }
+    .skillPageNumbers { color: #b91c1c; font-size: 9px; font-weight: 700; }
     .skillMethodTitle { margin-top: 13px; padding-top: 11px; border-top: 1px solid rgba(0,0,0,.07); color: #1e3a8a; font-size: 12px; font-weight: 650; }
     .skillSourceBlock { margin-top: 12px; padding: 10px; border: 1px solid rgba(59,130,246,.2); border-radius: 10px; background: #f8fbff; }
     .skillBlockTitle { margin-bottom: 8px; color: #1e3a8a; font-size: 12px; font-weight: 650; }
@@ -166,6 +197,14 @@ const OVERLAY_CSS = `
     .skillSourceNameInput:focus { border-color: #60a5fa; box-shadow: 0 0 0 2px rgba(59,130,246,.12); }
     .skillSourceItemMeta { margin-top: 4px; color: #64748b; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
     .skillSourceItemActions { display: flex; gap: 6px; margin-top: 7px; }
+    .skillReuseBlock { margin-top: 10px; padding: 10px; border: 1px dashed #bfdbfe; border-radius: 10px; background: #fff; }
+    .skillReuseTitle { color: #1d4ed8; font-size: 11px; font-weight: 700; }
+    .skillReuseHint { margin-top: 4px; color: #64748b; font-size: 10px; line-height: 1.5; }
+    .skillReuseList { display: grid; gap: 7px; margin-top: 8px; }
+    .skillReuseItem { padding: 8px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+    .skillReuseItem.unavailable { opacity: 0.68; }
+    .skillReuseHead { display: flex; align-items: center; gap: 6px; }
+    .skillReuseName { flex: 1; min-width: 0; color: #1e293b; font-size: 11px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .skillTextarea { width: 100%; height: 132px; min-height: 100px; box-sizing: border-box; resize: vertical; flex: none; border: 1px solid rgba(0,0,0,.14); border-radius: 8px; padding: 9px 10px; background: #fff; color: #111827; font-size: 12px; line-height: 1.55; }
     .skillMethodState { display: inline-block; margin-top: 6px; padding: 2px 6px; border-radius: 999px; font-size: 10px; }
     .skillMethodState.ready { color: #166534; background: #dcfce7; }
@@ -700,6 +739,10 @@ function ensureOverlay() {
 function render() {
   if (!IS_TOP_FRAME) return;
   ensureOverlay();
+  const previousSkillsPanel = refs.overlayShadow?.getElementById?.("web2ai_skills_body");
+  if (previousSkillsPanel && STATE.activePanelTab === "skills") {
+    STATE.skillsPanelScrollTop = previousSkillsPanel.scrollTop || 0;
+  }
   if (refs.launcherFab) {
     refs.launcherFab.style.display = !STATE.open && STATE.launcherVisible ? "flex" : "none";
   }
@@ -1073,15 +1116,196 @@ function render() {
     }
     const otherPages = [...pageGroups.values()].filter((group) => group.pageKey !== currentPageKey);
     const currentPageName = STATE.skillPageNames[currentPageKey] || STATE.skills[0]?.pageTitle || document.title || currentPageKey;
+    if (!otherPages.length) {
+      STATE.skillCatalogExpanded = false;
+      STATE.skillCatalogCanToggle = false;
+    }
     if (draft) draft.analysisMethod = { description: buildAnalysisPrompt(draft.analysisMethod) };
+    const draftType = draft ? skillTypeOf(draft) : SKILL_TYPE_TABLE_ANALYSIS;
+    const setDraftType = (nextType) => {
+      if (!draft || nextType === draftType) return;
+      if (nextType === SKILL_TYPE_DERIVED_COLUMN) {
+        const normalized = normalizeDerivedColumnSkill({
+          ...draft,
+          type: nextType,
+          sources: draft.sources.slice(0, 1),
+          selectedColumns: normalizeDerivedColumnSelections(draft.selectedColumns),
+          output: normalizeDerivedColumnOutput(draft.output),
+          defaultMethodVersion: draft.defaultMethodVersion || DEFAULT_DERIVED_METHOD_VERSION
+        });
+        draft.type = nextType;
+        draft.sources = draft.sources.slice(0, 1);
+        draft.selectedColumns = normalized.selectedColumns;
+        draft.output = normalized.output;
+        draft.trigger = normalized.trigger;
+        draft.execution = normalized.execution;
+        draft.defaultMethodVersion = normalized.defaultMethodVersion;
+      } else {
+        draft.type = SKILL_TYPE_TABLE_ANALYSIS;
+        draft.sources = [...(draft.sources || [])];
+        delete draft.selectedColumns;
+        delete draft.output;
+        delete draft.trigger;
+        delete draft.execution;
+        delete draft.defaultMethodVersion;
+      }
+      render();
+    };
+    const toggleDerivedDraftColumn = (header, index) => {
+      if (!draft) return;
+      const normalizedHeader = normalizedHeaderText(header);
+      if (!normalizedHeader) return;
+      const headers = Array.isArray(draft.sources?.[0]?.headers) ? draft.sources[0].headers : [];
+      const occurrence = headers
+        .slice(0, index + 1)
+        .filter((item) => normalizedHeaderText(item) === normalizedHeader)
+        .length || 1;
+      const key = `${normalizedHeader}#${occurrence}`;
+      const selected = normalizeDerivedColumnSelections(draft.selectedColumns);
+      const exists = selected.some((item) => `${item.normalizedHeader}#${item.occurrence}` === key);
+      if (exists) {
+        draft.selectedColumns = selected.filter((item) => `${item.normalizedHeader}#${item.occurrence}` !== key);
+      } else {
+        if (selected.length >= 10) {
+          showToast("最多选择 10 列");
+          return;
+        }
+        draft.selectedColumns = [...selected, {
+          index,
+          header,
+          normalizedHeader,
+          occurrence
+        }].sort((left, right) => left.index - right.index);
+      }
+      render();
+    };
+    const statusLabels = {
+      checking: "校验中",
+      available: "可用",
+      deferred: "执行时校验",
+      changed: "数据源已变化",
+      ambiguous: "数据源位置不明确",
+      missing: "数据源失效"
+    };
+    const sourceStatusLabel = (detail = {}) => (
+      statusLabels[detail.status || "checking"] || detail.status || "校验中"
+    );
+    const collectSkillUnavailableSources = (skill) => {
+      const sources = skill.sources || [skill.source].filter(Boolean);
+      const sourceStatuses = STATE.skillSourceStatuses[skill.id] || {};
+      return sources
+        .map((source, index) => ({ source, index, detail: sourceStatuses[source.id] || { status: "checking" } }))
+        .filter((item) => ["missing", "ambiguous"].includes(item.detail.status));
+    };
+    const sourceHeaders = Array.isArray(draft?.sources?.[0]?.headers) ? draft.sources[0].headers : [];
+    const selectedColumnKeys = new Set(
+      normalizeDerivedColumnSelections(draft?.selectedColumns).map((column) => `${column.normalizedHeader}#${column.occurrence}`)
+    );
+    const buildReusableSourceKey = (source = {}) => [
+      // 去重键必须兼容老绑定（无 framePathHint / locatorVersion）和新绑定，
+      // 仅依赖稳定定位信息，避免同一数据源被拆成多条推荐项。
+      String(source.pageKey || "").trim(),
+      String(source.frameUrl || "").trim(),
+      String(source.selector || "").trim(),
+      Number(source.tableIndex) || 0,
+      Array.isArray(source.headers) ? source.headers.map((item) => normalizedHeaderText(item || "")).join("|") : ""
+    ].join("::");
+    const reusableSourceStatusRank = (detail = {}) => {
+      switch (detail.status) {
+        case "available": return 5;
+        case "deferred": return 4;
+        case "changed": return 3;
+        case "checking": return 2;
+        case "ambiguous": return 1;
+        case "missing": return 0;
+        default: return 2;
+      }
+    };
+    const cloneReusableSource = (source = {}) => ({
+      ...source,
+      id: uid(),
+      headers: Array.isArray(source.headers) ? [...source.headers] : [],
+      framePath: Array.isArray(source.framePath) ? [...source.framePath] : source.framePath,
+      frameUrlChain: Array.isArray(source.frameUrlChain) ? [...source.frameUrlChain] : source.frameUrlChain
+    });
+    const currentDraftSourceKeys = new Set((draft?.sources || []).map((source) => buildReusableSourceKey(source)).filter(Boolean));
+    const reusableSourceMap = new Map();
+    for (const skill of STATE.skills) {
+      const skillSources = skill.sources || [skill.source].filter(Boolean);
+      const sourceStatuses = STATE.skillSourceStatuses[skill.id] || {};
+      for (let index = 0; index < skillSources.length; index++) {
+        const source = skillSources[index];
+        if (!source || source.pageKey !== currentPageKey) continue;
+        const key = buildReusableSourceKey(source);
+        if (!key || reusableSourceMap.has(key) || currentDraftSourceKeys.has(key)) continue;
+        const nextEntry = {
+          key,
+          source,
+          sourceIndex: index,
+          skillId: skill.id,
+          skillName: skill.name,
+          statusDetail: sourceStatuses[source.id] || { status: "checking" }
+        };
+        const existingEntry = reusableSourceMap.get(key);
+        if (!existingEntry || reusableSourceStatusRank(nextEntry.statusDetail) > reusableSourceStatusRank(existingEntry.statusDetail)) {
+          reusableSourceMap.set(key, nextEntry);
+        }
+      }
+    }
+    const reusableSources = [...reusableSourceMap.values()];
+    const canReuseMoreSources = draftType === SKILL_TYPE_DERIVED_COLUMN
+      ? (draft?.sources?.length || 0) < 1
+      : (draft?.sources?.length || 0) < 5;
+    const reuseExistingDraftSource = (entry) => {
+      if (!draft || !entry?.source) return;
+      const source = cloneReusableSource(entry.source);
+      if (draftType === SKILL_TYPE_DERIVED_COLUMN) {
+        draft.sources = [source];
+        draft.selectedColumns = [];
+      } else {
+        if ((draft.sources?.length || 0) >= 5) {
+          showToast("最多添加 5 个数据源");
+          return;
+        }
+        draft.sources = [...(draft.sources || []), source];
+      }
+      render();
+    };
+    const skillTypeLocked = Boolean(draft?.id);
     const form = draft ? el("div", { class: "skillForm" }, [
       el("div", { class: "skillTitle" }, [draft.id ? "修改技能" : "创建技能"]),
+      el("div", { class: "skillField" }, [
+        el("span", { class: "skillFieldLabel" }, ["技能类型"]),
+        el("div", { class: "skillActions" }, [
+          el("button", {
+            class: `btn ${draftType === SKILL_TYPE_TABLE_ANALYSIS ? "primary" : ""}`,
+            disabled: skillTypeLocked,
+            title: skillTypeLocked ? "修改技能时不允许切换类型" : "切换为整表分析",
+            onClick: () => setDraftType(SKILL_TYPE_TABLE_ANALYSIS)
+          }, ["整表分析"]),
+          el("button", {
+            class: `btn ${draftType === SKILL_TYPE_DERIVED_COLUMN ? "primary" : ""}`,
+            disabled: skillTypeLocked,
+            title: skillTypeLocked ? "修改技能时不允许切换类型" : "切换为按列分析",
+            onClick: () => setDraftType(SKILL_TYPE_DERIVED_COLUMN)
+          }, ["按列分析"])
+        ])
+      ]),
+      skillTypeLocked ? el("div", { class: "skillMeta" }, ["修改技能时不允许切换技能类型。"]) : null,
+      el("div", { class: "skillScenarioCard" }, [
+        el("div", { class: "skillScenarioTitle" }, [draftType === SKILL_TYPE_DERIVED_COLUMN ? "按列分析适用场景" : "整表分析适用场景"]),
+        el("div", { class: "skillScenarioText" }, [
+          draftType === SKILL_TYPE_DERIVED_COLUMN
+            ? "适合针对表格中选中的多行生成 AI 结论，例如风险识别、异常判断、优先级建议、补充标签等。正式运行时会把结果作为新列插入表格。"
+            : "适合让 AI 对整张表做整体总结，例如问题归纳、趋势判断、原因分析、经营建议等。结果以整表分析结论为主，不会逐行插入结果列。"
+        ])
+      ]),
       el("label", { class: "skillField" }, [
         el("span", { class: "skillFieldLabel" }, ["技能名称"]),
         el("input", { class: "skillInput", value: draft.name, placeholder: "例如：异常订单分析", onInput: (event) => { draft.name = event.target.value; } })
       ]),
       el("div", { class: "skillSourceBlock" }, [
-        el("div", { class: "skillBlockTitle" }, [`数据源（${draft.sources.length}）`]),
+        el("div", { class: "skillBlockTitle" }, [draftType === SKILL_TYPE_DERIVED_COLUMN ? "数据源（仅支持 1 个）" : `数据源（${draft.sources.length}）`]),
         draft.sources.length ? el("div", { class: "skillSourceList" }, draft.sources.map((source, index) => el("div", { class: "skillSourceItem" }, [
           el("div", { class: "skillSourceItemHead" }, [
             el("span", { class: "skillSourceItemName", style: { flex: "0 0 auto" } }, [`${index + 1}.`]),
@@ -1106,40 +1330,139 @@ function render() {
             el("button", { class: "btn", onClick: () => selectSkillTable(source.id) }, ["重新选择"]),
             el("button", { class: "btn danger", onClick: () => removeSkillDraftSource(source.id) }, ["删除"])
           ])
-        ]))) : el("div", { class: "skillSource" }, ["尚未选择数据源。选择时目标页面必须保持打开。"]),
+        ]))) : el("div", { class: "skillSource" }, ["选择页面上的列表，用于后续作为大模型分析的数据来源"]),
         el("div", { class: "skillActions" }, [
-          el("button", { class: "btn", disabled: draft.sources.length >= 5, onClick: () => selectSkillTable() }, [draft.sources.length ? "＋ 添加数据源" : "选择数据源"]),
-          draft.sources.length > 1 ? el("span", { class: "skillMeta" }, [`测试和执行时将依次载入 ${draft.sources.length} 个数据源。`]): null
-        ])
+          (!draft.sources.length || draftType !== SKILL_TYPE_DERIVED_COLUMN) ? el("button", {
+            class: "btn",
+            disabled: draftType === SKILL_TYPE_DERIVED_COLUMN ? draft.sources.length >= 1 : draft.sources.length >= 5,
+            onClick: () => selectSkillTable()
+          }, [draft.sources.length ? "＋ 添加数据源" : "选择数据源"]) : null,
+          draftType !== SKILL_TYPE_DERIVED_COLUMN && draft.sources.length > 1
+            ? el("span", { class: "skillMeta" }, [`测试和执行时将依次载入 ${draft.sources.length} 个数据源。`])
+            : null
+        ]),
+        reusableSources.length && canReuseMoreSources ? el("div", { class: "skillReuseBlock" }, [
+          el("div", { class: "skillReuseTitle" }, ["复用已有数据源"]),
+          el("div", { class: "skillReuseHint" }, [
+            draftType === SKILL_TYPE_DERIVED_COLUMN
+              ? "当前页面已有技能绑定过的数据源如下，可直接点选 1 个复用。"
+              : "当前页面已有技能绑定过的数据源如下，可按需点击某一个或多个直接复用。"
+          ]),
+          el("div", { class: "skillReuseList" }, reusableSources.map((entry) => {
+            const detail = entry.statusDetail || { status: "checking" };
+            const reusable = ["available", "deferred", "changed", "checking"].includes(detail.status);
+            return el("div", {
+              class: `skillReuseItem${reusable ? "" : " unavailable"}`
+            }, [
+              el("div", { class: "skillReuseHead" }, [
+                el("span", { class: "skillReuseName" }, [entry.source.displayName || `数据源 ${entry.sourceIndex + 1}`]),
+                el("span", { class: `skillStatus ${reusable ? "available" : "missing"}` }, [sourceStatusLabel(detail)])
+              ]),
+              el("div", { class: "skillSourceItemMeta" }, [
+                `来源技能：${entry.skillName}`,
+                el("br"),
+                `【${entry.source.pageTitle || entry.source.pageKey || "当前页面"}】· ${entry.source.headers?.length || 0} 个字段`,
+                el("br"),
+                entry.source.headers?.join("、") || "未识别到数据源字段"
+              ]),
+              el("div", { class: "skillSourceItemActions" }, [
+                el("button", {
+                  class: "btn",
+                  disabled: reusable ? null : true,
+                  onClick: () => reuseExistingDraftSource(entry)
+                }, [draftType === SKILL_TYPE_DERIVED_COLUMN ? "复用这个数据源" : "复用"])
+              ])
+            ]);
+          }))
+        ]) : null
       ]),
+      draftType === SKILL_TYPE_DERIVED_COLUMN ? el("div", { class: "skillSourceBlock" }, [
+        el("div", { class: "skillBlockTitle" }, ["用于分析的字段"]),
+        !draft.sources.length ? el("div", { class: "skillSource" }, ["请先选择数据源，再选择需要参与分析的字段。"]) : null,
+        draft.sources.length && !sourceHeaders.length ? el("div", { class: "skillSource" }, ["当前数据源未识别到字段，请重新选择数据源。"]) : null,
+        sourceHeaders.length ? el("div", { class: "skillSourceList" }, sourceHeaders.map((header, index) => {
+          const normalized = normalizedHeaderText(header);
+          const occurrence = sourceHeaders.slice(0, index + 1).filter((item) => normalizedHeaderText(item) === normalized).length || 1;
+          const key = `${normalized}#${occurrence}`;
+          const checked = selectedColumnKeys.has(key);
+          const displayHeader = String(header || "").trim().split(/\s+/)[0] || String(header || "").trim();
+          const label = sourceHeaders.filter((item) => normalizedHeaderText(item) === normalized).length > 1
+            ? `${displayHeader}（第 ${index + 1} 列）`
+            : displayHeader;
+          return el("label", {
+            class: "skillSourceItem",
+            style: { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }
+          }, [
+            el("input", {
+              type: "checkbox",
+              checked,
+              onChange: () => toggleDerivedDraftColumn(header, index)
+            }),
+            el("span", { class: "skillSourceItemName", style: { whiteSpace: "normal" } }, [label])
+          ]);
+        })) : null,
+        draft.sources.length ? el("div", { class: "skillMeta" }, [`已选择 ${selectedColumnKeys.size} / 10 列。`]) : null
+      ]) : null,
       el("div", { class: "skillMethodTitle" }, ["分析方法"]),
       el("label", { class: "skillField" }, [
-        el("span", { class: "skillFieldLabel" }, ["请描述希望 AI 如何分析这个数据源"]),
-        el("textarea", { class: "skillTextarea", placeholder: "可以直接用自己的话描述。例如：帮我找出付款超过 48 小时仍未发货的订单，按风险高低列出订单号、异常原因和处理建议。", onInput: (event) => { draft.analysisMethod.description = event.target.value; } }, [draft.analysisMethod.description])
+        el("span", { class: "skillFieldLabel" }, [draftType === SKILL_TYPE_DERIVED_COLUMN ? "可选填写分析方法；留空将使用默认分析方法" : "请描述希望 AI 如何分析这个数据源"]),
+        el("textarea", {
+          class: "skillTextarea",
+          placeholder: draftType === SKILL_TYPE_DERIVED_COLUMN
+            ? "例如：识别高风险、异常、矛盾和值得关注的业务情况。留空则使用默认分析方法。"
+            : "可以直接用自己的话描述。例如：帮我找出付款超过 48 小时仍未发货的订单，按风险高低列出订单号、异常原因和处理建议。",
+          onInput: (event) => { draft.analysisMethod.description = event.target.value; }
+        }, [draft.analysisMethod.description])
       ]),
+      draftType === SKILL_TYPE_DERIVED_COLUMN ? el("div", { class: "skillSourceBlock" }, [
+        el("div", { class: "skillBlockTitle" }, ["输出配置"]),
+        el("label", { class: "skillField" }, [
+          el("span", { class: "skillFieldLabel" }, ["新增列名称"]),
+          el("input", {
+            class: "skillInput",
+            value: draft.output?.columnName || "智能分析结论",
+            onInput: (event) => {
+              draft.output = normalizeDerivedColumnOutput({ ...draft.output, columnName: event.target.value });
+            }
+          })
+        ]),
+        el("label", {
+          class: "skillField",
+          style: { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }
+        }, [
+          el("input", {
+            type: "checkbox",
+            checked: draft.trigger?.autoRunEnabled === true,
+            onChange: (event) => {
+              const normalized = normalizeDerivedColumnSkill({
+                ...draft,
+                trigger: {
+                  ...draft.trigger,
+                  autoRunEnabled: Boolean(event.target.checked)
+                }
+              });
+              draft.trigger = normalized.trigger;
+            }
+          }),
+          el("span", { class: "skillFieldLabel", style: { margin: 0 } }, ["自动执行"])
+        ]),
+        el("div", { class: "skillMeta" }, [
+          "使用说明：自动执行默认关闭；关闭时刷新页面不会自动提交，但仍可在表格上方技能列表里手动点“更新”。"
+        ]),
+        el("div", { class: "skillMeta" }, [
+          "列表变化后，自动执行会重新判断是否分析；如果当前页面已达到访问上限，本次仍会被保护。建议先通过“测试预览”确认字段、分析方法和结果样式，再决定是否开启自动执行。"
+        ])
+      ]) : null,
       el("div", { class: "skillActions" }, [
         el("button", { class: "btn primary", onClick: () => saveSkillDraft() }, [draft.id ? "保存修改" : "保存"]),
         el("button", { class: "btn", onClick: () => cancelSkillDraft() }, ["取消"])
       ])
     ]) : null;
-    const statusLabels = {
-      checking: "校验中",
-      available: "可用",
-      deferred: "执行时校验",
-      changed: "数据源已变化",
-      ambiguous: "数据源位置不明确",
-      missing: "数据源失效"
-    };
-    const sourceStatusLabel = (detail = {}) => (
-      statusLabels[detail.status || "checking"] || detail.status || "校验中"
-    );
-    const collectSkillUnavailableSources = (skill) => {
-      const sources = skill.sources || [skill.source].filter(Boolean);
-      const sourceStatuses = STATE.skillSourceStatuses[skill.id] || {};
-      return sources
-        .map((source, index) => ({ source, index, detail: sourceStatuses[source.id] || { status: "checking" } }))
-        .filter((item) => ["missing", "ambiguous"].includes(item.detail.status));
-    };
+    const draftNotice = draft ? el("div", { class: "skillFormNotice" }, [
+      draft.id
+        ? `当前正在修改技能。为避免和下面的技能目录混淆，目录已暂时收起；保存或取消后返回技能列表。`
+        : `当前正在创建技能。为避免和已有技能目录混淆，目录已暂时收起；保存或取消后返回技能列表。`
+    ]) : null;
     const cards = STATE.skills.map((skill) => {
       const sources = skill.sources || [skill.source].filter(Boolean);
       const sourceStatuses = STATE.skillSourceStatuses[skill.id] || {};
@@ -1154,11 +1477,18 @@ function render() {
           : currentStatuses.includes("checking")
             ? "checking"
             : currentStatuses.length ? "available" : "deferred";
+      const type = skillTypeOf(skill);
+      const normalizedDerived = type === SKILL_TYPE_DERIVED_COLUMN ? normalizeDerivedColumnSkill(skill) : null;
       const analysisPrompt = buildAnalysisPrompt(skill.analysisMethod);
+      const selectedColumns = type === SKILL_TYPE_DERIVED_COLUMN ? normalizeDerivedColumnSelections(skill.selectedColumns) : [];
       return el("div", { class: "skillCard" }, [
         el("div", { style: { display: "flex", alignItems: "center", gap: "8px" } }, [
           el("div", { class: "skillTitle", style: { flex: "1" } }, [
             el("span", { class: "skillNumber" }, [`#${skillNumberById.get(skill.id) || "-"}`]),
+            el("span", {
+              class: `skillTypeIcon ${type === SKILL_TYPE_DERIVED_COLUMN ? "column" : "table"}`,
+              title: type === SKILL_TYPE_DERIVED_COLUMN ? "按列分析" : "整表分析"
+            }, [type === SKILL_TYPE_DERIVED_COLUMN ? "列" : "表"]),
             skill.name
           ]),
           el("span", { class: `skillStatus ${status}` }, [statusLabels[status] || status])
@@ -1172,39 +1502,60 @@ function render() {
             }, [`${index + 1}. ${source.displayName || `数据源 ${index + 1}`} · 【${source.pageTitle || source.pageKey || "页面"}】· ${source.headers?.length || 0} 个字段 · ${sourceStatusLabel(sourceStatuses[source.id])}`])
           ]),
           el("br"),
-          el("span", { class: `skillMethodState ${analysisPrompt ? "ready" : "empty"}` }, [analysisPrompt ? "分析方法已配置" : "尚未配置分析方法"]),
+          type === SKILL_TYPE_DERIVED_COLUMN
+            ? el("span", { class: "skillMethodState ready" }, [analysisPrompt ? "使用自定义分析方法" : "使用默认分析方法"])
+            : el("span", { class: `skillMethodState ${analysisPrompt ? "ready" : "empty"}` }, [analysisPrompt ? "分析方法已配置" : "尚未配置分析方法"]),
+          type === SKILL_TYPE_DERIVED_COLUMN
+            ? el("div", { style: { marginTop: "5px", color: "#475569" } }, [`自动执行：${normalizedDerived?.trigger?.autoRunEnabled ? "开启" : "关闭"}`])
+            : null,
+          type === SKILL_TYPE_DERIVED_COLUMN && selectedColumns.length
+            ? el("div", { style: { marginTop: "5px", color: "#475569" } }, [`分析字段：${selectedColumns.map((column) => column.header || column.normalizedHeader).join("、")}`])
+            : null,
           analysisPrompt ? el("div", { style: { marginTop: "5px", color: "#475569" } }, [`分析方法：${analysisPrompt.slice(0, 80)}${analysisPrompt.length > 80 ? "…" : ""}`]) : null
         ]),
         el("div", { class: "skillActions" }, [
-          el("button", {
-            class: "btn primary",
-            disabled: status === "missing" || status === "ambiguous" || status === "checking",
-            onClick: async () => {
-              const unavailable = collectSkillUnavailableSources(skill);
-              if (unavailable.length) {
-                const names = unavailable
-                  .map((item) => item.source.displayName || `数据源 ${item.index + 1}`)
-                  .join("、");
-                showToast(`当前数据源不可用：${names}。请先点击“修改技能”重新选择数据源后再测试。`, 3500, { position: "center" });
-                return;
+          type === SKILL_TYPE_DERIVED_COLUMN
+            ? el("button", {
+              class: "btn primary",
+              disabled: status === "missing" || status === "ambiguous" || status === "checking",
+              onClick: async () => {
+                const unavailable = collectSkillUnavailableSources(skill);
+                if (unavailable.length) {
+                  const names = unavailable
+                    .map((item) => item.source.displayName || `数据源 ${item.index + 1}`)
+                    .join("、");
+                  showToast(`当前数据源不可用：${names}。请先点击“修改技能”重新选择数据源后再测试。`, 3500, { position: "center" });
+                  return;
+                }
+                startDerivedColumnPreview(skill);
               }
-              if (analysisPrompt) {
-                startSkillTest(skill);
-                return;
+            }, ["测试预览"])
+            : el("button", {
+              class: "btn primary",
+              disabled: status === "missing" || status === "ambiguous" || status === "checking",
+              onClick: async () => {
+                const unavailable = collectSkillUnavailableSources(skill);
+                if (unavailable.length) {
+                  const names = unavailable
+                    .map((item) => item.source.displayName || `数据源 ${item.index + 1}`)
+                    .join("、");
+                  showToast(`当前数据源不可用：${names}。请先点击“修改技能”重新选择数据源后再测试。`, 3500, { position: "center" });
+                  return;
+                }
+                if (analysisPrompt) {
+                  startSkillTest(skill);
+                  return;
+                }
+                const accepted = await showConfirmDialog("当前技能未配置分析方法，点击修改技能配置");
+                if (accepted) rebindSkill(skill.id);
               }
-              const accepted = await showConfirmDialog("当前技能未配置分析方法，点击修改技能配置");
-              if (accepted) rebindSkill(skill.id);
-            }
-          }, ["测试技能"]),
+            }, ["测试技能"]),
           el("button", { class: "btn", onClick: () => rebindSkill(skill.id) }, ["修改技能"]),
           el("button", { class: "btn danger", onClick: () => deleteSkill(skill.id) }, ["删除"])
         ])
       ]);
     });
-    return el("div", { class: "skillBody" }, [
-      el("div", { class: "skillIntro" }, ["选择数据源，并用自己的话描述分析需求。测试会原样提交分析任务并展示实际结果；如有需要，可再单独优化分析方法。"]),
-      form,
-      el("div", { class: "skillList" }, [
+    const skillList = el("div", { class: "skillList" }, [
         el("div", { class: "skillSummary" }, [
           el("div", { class: "skillSummaryTitle" }, [
             el("span", { class: "skillSummaryTitleText" }, [`全部技能 ${STATE.skillCatalog.length} 个`]),
@@ -1214,19 +1565,33 @@ function render() {
             STATE.skillCatalog.length ? el("button", { class: "skillTransfer", onClick: () => deleteAllSkills() }, ["删除全部技能"]) : null
           ]),
           otherPages.length ? el("div", { class: "skillPagesLabel" }, ["其他页面技能："]) : null,
-          otherPages.length ? el("div", { class: "skillPages" }, otherPages.map((group) => el("button", {
-            class: "skillPageLink",
-            title: group.pageKey,
-            onClick: () => switchToSkillPage(group.pageKey, group.pageUrl, group.source)
+          otherPages.length ? el("div", {
+            class: `skillPagesWrap${!STATE.skillCatalogExpanded ? " collapsed" : ""}`,
+            id: "web2ai_skill_pages_wrap"
           }, [
-            el("span", { class: "skillPageName" }, [`【${group.label}】`]),
-            " ",
-            el("span", { class: "skillPageCount" }, [String(group.count)]),
-            " 个技能 ",
-            el("span", { class: "skillPageNumbers" }, [
-              `（${group.skills.map((skill) => `#${skillNumberById.get(skill.id) || "-"}`).join("、")}）`
-            ])
-          ]))) : null
+            el("div", { class: "skillPages" }, otherPages.map((group) => el("button", {
+              class: "skillPageLink",
+              title: group.pageKey,
+              onClick: () => switchToSkillPage(group.pageKey, group.pageUrl, group.source)
+            }, [
+              el("span", { class: "skillPageName" }, [`【${group.label}】`]),
+              " ",
+              el("span", { class: "skillPageCount" }, [String(group.count)]),
+              " 个技能 ",
+              el("span", { class: "skillPageNumbers" }, [
+                `（${group.skills.map((skill) => `#${skillNumberById.get(skill.id) || "-"}`).join("、")}）`
+              ])
+            ])))
+          ]) : null,
+          STATE.skillCatalogCanToggle ? el("div", { class: "skillSummaryFooter" }, [
+            el("button", {
+              class: "skillToggleList",
+              onClick: () => {
+                STATE.skillCatalogExpanded = !STATE.skillCatalogExpanded;
+                render();
+              }
+            }, [STATE.skillCatalogExpanded ? "收起" : "展开"])
+          ]) : null
         ]),
         el("div", { class: "skillCurrentLabel" }, [
           el("span", { class: "skillCurrentLabelText" }, [
@@ -1236,7 +1601,11 @@ function render() {
           ])
         ]),
         ...(cards.length ? cards : [el("div", { style: { padding: "24px 10px", textAlign: "center", color: "#64748b", fontSize: "12px" } }, ["当前页面还没有技能"])])
-      ])
+      ]);
+    return el("div", { class: "skillBody", id: "web2ai_skills_body" }, [
+      draftNotice,
+      form,
+      draft ? null : skillList
     ]);
   }
   const sideTabs = el("div", { class: "sideTabs", role: "tablist", "aria-label": "功能切换" }, [
@@ -1295,6 +1664,18 @@ function render() {
   const skillExecutionResultPanel = refs.overlayShadow.getElementById("web2ai_skill_execution_result_panel");
   if (skillExecutionResultPanel && STATE.skillTest?.pending) {
     skillExecutionResultPanel.scrollTop = skillExecutionResultPanel.scrollHeight;
+  }
+  const currentSkillsPanel = refs.overlayShadow.getElementById("web2ai_skills_body");
+  if (currentSkillsPanel && STATE.activePanelTab === "skills") {
+    currentSkillsPanel.scrollTop = Math.max(0, Number(STATE.skillsPanelScrollTop) || 0);
+  }
+  const skillPagesWrap = refs.overlayShadow.getElementById("web2ai_skill_pages_wrap");
+  if (skillPagesWrap && STATE.activePanelTab === "skills") {
+    const canToggleCatalog = skillPagesWrap.scrollHeight > 60 + 1;
+    if (STATE.skillCatalogCanToggle !== canToggleCatalog) {
+      STATE.skillCatalogCanToggle = canToggleCatalog;
+      requestAnimationFrame(() => render());
+    }
   }
 }
 

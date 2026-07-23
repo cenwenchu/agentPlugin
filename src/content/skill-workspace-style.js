@@ -21,6 +21,7 @@ const SKILL_WORKSPACE_CSS = `
     .skillTestContent { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 36%) minmax(0, 1fr); gap: 12px; padding: 12px; overflow: hidden; }
     .skillTestPanel { min-height: 0; padding: 13px; border: 1px solid rgba(0,0,0,.08); border-radius: 12px; background: #fff; overflow: auto; }
     .skillTestMeta { margin-bottom: 10px; padding: 9px; border-radius: 9px; background: #f8fafc; color: #475569; font-size: 11px; line-height: 1.55; }
+    .skillUsageNote { margin-bottom: 12px; padding: 10px 12px; border: 1px solid #bfdbfe; border-radius: 10px; background: #eff6ff; color: #1e3a8a; font-size: 11px; line-height: 1.6; }
     .skillDataPreview { margin-bottom: 12px; border: 1px solid rgba(59,130,246,.18); border-radius: 10px; overflow: hidden; background: #fff; }
     .skillDataPreviewHead { display: flex; align-items: center; gap: 8px; padding: 8px 9px; background: #eff6ff; color: #1e3a8a; font-size: 11px; font-weight: 650; }
     .skillDataPreviewStatus { margin-left: auto; color: #64748b; font-size: 10px; font-weight: 500; }
@@ -29,6 +30,17 @@ const SKILL_WORKSPACE_CSS = `
     .skillDataPreview table { width: max-content; min-width: 100%; border-collapse: collapse; color: #334155; font-size: 10px; }
     .skillDataPreview th, .skillDataPreview td { max-width: 180px; padding: 5px 6px; border: 1px solid #e2e8f0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .skillDataPreview th { position: sticky; top: 0; background: #f8fafc; color: #475569; }
+    .skillDerivedPreviewResultBody { padding: 8px; overflow-x: auto; overflow-y: visible; }
+    .skillDerivedPreviewResultBody table { width: 100%; min-width: 100%; border-collapse: collapse; color: #334155; font-size: 12px; table-layout: fixed; }
+    .skillDerivedPreviewResultBody table.has-extra-columns { width: max-content; min-width: 100%; }
+    .skillDerivedPreviewResultBody th, .skillDerivedPreviewResultBody td { min-width: 140px; max-width: 420px; padding: 8px 10px; border: 1px solid #e2e8f0; text-align: left; vertical-align: top; white-space: normal; overflow: visible; text-overflow: clip; }
+    .skillDerivedPreviewResultBody th { position: sticky; top: 0; background: #f8fafc; color: #475569; z-index: 1; }
+    .skillDerivedPreviewResultBody .skillDerivedPreviewAiCol.sticky { position: sticky; left: 0; z-index: 2; }
+    .skillDerivedPreviewResultBody th.skillDerivedPreviewAiCol.sticky { z-index: 3; }
+    .skillDerivedPreviewCell { color: #111827; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .skillDerivedPreviewCell.markdown :is(p, ul, ol, blockquote, pre) { margin-top: 0; }
+    .skillDerivedPreviewCell.markdown > :last-child { margin-bottom: 0; }
+    .skillDerivedPreviewAiBox { padding: 8px 10px; border-radius: 8px; background: #dcfce7; border: 1px solid #86efac; box-shadow: inset 0 0 0 1px rgba(34,197,94,.08); }
     .skillDataPreviewEmpty { padding: 18px 8px; color: #64748b; font-size: 11px; text-align: center; }
     .skillDataPreviewMore { padding: 6px 2px 0; color: #64748b; font-size: 10px; text-align: center; }
     .skillDataSourceTabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }

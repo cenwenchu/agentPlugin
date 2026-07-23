@@ -6,11 +6,36 @@
 
 import { DEBUG } from "./state.js";
 
-/**
- * 从任意行元素中提取单元格列表（通用实现）。
- * 支持：<tr>、[role="row"]、div-based 表格、以及各种非标准表格结构。
- */
-function getRowCells(rowEl) {
+const DERIVED_COLUMN_SELECTOR = "[data-web2ai-derived-column]";
+const WEB2AI_UI_SELECTOR = "[data-web2ai-ui],[id^='web2ai_']";
+const BUSINESS_TEXT_EXCLUDE_SELECTOR = `${DERIVED_COLUMN_SELECTOR},${WEB2AI_UI_SELECTOR}`;
+
+function isDerivedColumnCell(cell) {
+  return Boolean(cell?.matches?.(DERIVED_COLUMN_SELECTOR));
+}
+
+function filterBusinessCells(cells = []) {
+  return Array.from(cells).filter((cell) => !isDerivedColumnCell(cell));
+}
+
+function extractElementBusinessText(element) {
+  if (!element) return "";
+  const clone = element.cloneNode?.(true);
+  if (!clone) return String(element.textContent || "");
+  clone.querySelectorAll?.(BUSINESS_TEXT_EXCLUDE_SELECTOR).forEach((node) => node.remove());
+  return String(clone.textContent || "");
+}
+
+function normalizeBusinessText(value) {
+  return String(value ?? "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getRawRowCells(rowEl) {
   if (!rowEl) return [];
   const tag = rowEl.tagName?.toLowerCase();
 
@@ -35,16 +60,41 @@ function getRowCells(rowEl) {
   if (semanticCells.length) return Array.from(semanticCells);
 
   // 4. 兜底：取直接子元素中非 script/style/template 的作为单元格
-  const directChildren = Array.from(rowEl.children).filter(c => {
-    const t = c.tagName?.toLowerCase();
-    return t !== "script" && t !== "style" && t !== "template" && t !== "noscript";
+  return Array.from(rowEl.children).filter((child) => {
+    const tagName = child.tagName?.toLowerCase();
+    return tagName !== "script" &&
+      tagName !== "style" &&
+      tagName !== "template" &&
+      tagName !== "noscript";
   });
-  return directChildren;
+}
+
+/**
+ * 从任意行元素中提取单元格列表（通用实现）。
+ * 支持：<tr>、[role="row"]、div-based 表格、以及各种非标准表格结构。
+ */
+function getRowCells(rowEl) {
+  return filterBusinessCells(getRawRowCells(rowEl));
 }
 
 /** 获取任意行元素的单元格数 */
 function getCellCount(rowEl) {
   return getRowCells(rowEl).length;
+}
+
+function getBusinessCellText(cell, { emptyPlaceholder = "" } = {}) {
+  const text = normalizeBusinessText(extractElementBusinessText(cell));
+  return text || emptyPlaceholder;
+}
+
+function getBusinessCellTexts(rowEl, { emptyPlaceholder = "" } = {}) {
+  return getRowCells(rowEl).map((cell) => getBusinessCellText(cell, { emptyPlaceholder }));
+}
+
+function getBusinessRowText(rowEl, { separator = " ", emptyPlaceholder = "" } = {}) {
+  const texts = getBusinessCellTexts(rowEl, { emptyPlaceholder });
+  if (texts.length) return texts.join(separator).trim();
+  return normalizeBusinessText(extractElementBusinessText(rowEl));
 }
 
 /**
@@ -54,11 +104,11 @@ function getCellCount(rowEl) {
 function isHeaderRow(rowEl) {
   if (!rowEl) return false;
   // 标准 th
-  if (rowEl.querySelector("th")) return true;
+  if (Array.from(rowEl.querySelectorAll("th")).some((cell) => !isDerivedColumnCell(cell))) return true;
   // role-based 表头
-  if (rowEl.querySelector('[role="columnheader"],[role="rowheader"]')) return true;
+  if (Array.from(rowEl.querySelectorAll('[role="columnheader"],[role="rowheader"]')).some((cell) => !isDerivedColumnCell(cell))) return true;
   // WCAG 标准：scope 属性标记的表头
-  if (rowEl.querySelector('td[scope="col"],td[scope="row"],th[scope="col"],th[scope="row"]')) return true;
+  if (Array.from(rowEl.querySelectorAll('td[scope="col"],td[scope="row"],th[scope="col"],th[scope="row"]')).some((cell) => !isDerivedColumnCell(cell))) return true;
   return false;
 }
 
@@ -97,11 +147,11 @@ function isVisibleElementDiag(el, label) {
 function hasHeaderCells(row) {
   if (!row) return false;
   // th 元素
-  if (row.querySelector("th")) return true;
+  if (Array.from(row.querySelectorAll("th")).some((cell) => !isDerivedColumnCell(cell))) return true;
   // role-based
-  if (row.querySelector('[role="columnheader"], [role="rowheader"]')) return true;
+  if (Array.from(row.querySelectorAll('[role="columnheader"], [role="rowheader"]')).some((cell) => !isDerivedColumnCell(cell))) return true;
   // WCAG scope 属性
-  if (row.querySelector('[scope="col"], [scope="row"]')) return true;
+  if (Array.from(row.querySelectorAll('[scope="col"], [scope="row"]')).some((cell) => !isDerivedColumnCell(cell))) return true;
   return false;
 }
 
@@ -114,6 +164,7 @@ function isTableFooterOrSummaryRow(rowEl) {
 
 
 export {
-  getRowCells, getCellCount, isHeaderRow, isVisibleElementDiag,
-  hasHeaderCells, isTableFooterOrSummaryRow
+  DERIVED_COLUMN_SELECTOR, BUSINESS_TEXT_EXCLUDE_SELECTOR,
+  getRowCells, getCellCount, getBusinessCellText, getBusinessCellTexts, getBusinessRowText,
+  isHeaderRow, isVisibleElementDiag, hasHeaderCells, isTableFooterOrSummaryRow
 };

@@ -12,12 +12,22 @@ import { showToast } from "./toast.js";
 import { showConfirmDialog, showPromptDialog } from "./dialog.js";
 import { skillContentFingerprint } from "./skill-import-model.js";
 import {
+  SKILL_TYPE_DERIVED_COLUMN,
+  SKILL_TYPE_TABLE_ANALYSIS,
+  normalizeDerivedColumnOutput,
+  normalizeDerivedColumnSelections,
+  normalizeDerivedColumnSkill,
+  skillTypeOf,
+  validateDerivedColumnSkill
+} from "./derived-column-model.js";
+import {
   pageKey, tableCandidates, resolveTableFromTarget, extractHeaders, describeTable,
-  headerSimilarity, resolveStoredSource, extractStoredSourceData, inspectStoredSourcePagination
+  headerSimilarity, resolveStoredSource, extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination
 } from "./skill-source-dom.js";
 import {
   collectStoredSourceData, stopStoredSourceCollection, findStoredSourceTable
 } from "./skill-collector.js";
+import { scheduleDerivedColumnRuntime, stopDerivedColumnRuntime, triggerDerivedColumnRuntime } from "./derived-column-controller.js";
 
 const STORAGE_KEY = "web2aiSkills";
 const PAGE_NAMES_STORAGE_KEY = "web2aiSkillPageNames";
@@ -61,6 +71,37 @@ function getBusinessPageTabs() {
 
 function emptyAnalysisMethod() {
   return { description: "" };
+}
+
+function createSkillDraftState(type = SKILL_TYPE_TABLE_ANALYSIS) {
+  if (type === SKILL_TYPE_DERIVED_COLUMN) {
+    const normalized = normalizeDerivedColumnSkill({
+      type,
+      analysisMethod: emptyAnalysisMethod(),
+      sources: []
+    });
+    return {
+      id: "",
+      revision: 0,
+      name: "",
+      type: normalized.type,
+      sources: [],
+      analysisMethod: normalized.analysisMethod,
+      selectedColumns: normalized.selectedColumns,
+      output: normalized.output,
+      trigger: normalized.trigger,
+      execution: normalized.execution,
+      defaultMethodVersion: normalized.defaultMethodVersion
+    };
+  }
+  return {
+    id: "",
+    revision: 0,
+    name: "",
+    type: SKILL_TYPE_TABLE_ANALYSIS,
+    sources: [],
+    analysisMethod: emptyAnalysisMethod()
+  };
 }
 
 function normalizeAnalysisMethod(value) {
@@ -137,30 +178,83 @@ function renderSkillBars(skills = []) {
     bar.dataset.web2aiSkillBar = "1";
     bar.dataset.web2aiUi = "1";
     Object.assign(bar.style, {
-      display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap",
+      display: "flex", flexDirection: "column", alignItems: "stretch", gap: "6px",
       boxSizing: "border-box", width: "100%", margin: "0 0 8px", padding: "8px 10px",
       border: "1px solid #bfdbfe", borderRadius: "9px", background: "#eff6ff",
       color: "#1e3a8a", fontFamily: "system-ui,-apple-system,sans-serif", fontSize: "12px"
     });
+    const topRow = document.createElement("div");
+    Object.assign(topRow.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      flexWrap: "wrap"
+    });
     const label = document.createElement("span");
     label.textContent = "技能列表：";
     Object.assign(label.style, { fontWeight: "700", marginRight: "2px", whiteSpace: "nowrap" });
-    bar.appendChild(label);
+    topRow.appendChild(label);
+    const help = document.createElement("span");
+    Object.assign(help.style, {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "8px",
+      flexWrap: "wrap",
+      color: "#475569",
+      fontSize: "10px",
+      lineHeight: "1.5"
+    });
+    const tableHelp = document.createElement("span");
+    tableHelp.textContent = "表：点击“执行”后，会按当前数据源立即发起一次整表分析。";
+    const columnHelp = document.createElement("span");
+    columnHelp.textContent = "列：用开关控制“自动执行”；点“更新”可手动重跑当前页。列表变化会重新判断，但模型请求仍受当前页面总额度限制。";
+    help.append(tableHelp, columnHelp);
+    topRow.appendChild(help);
+    bar.appendChild(topRow);
+    const listRow = document.createElement("div");
+    Object.assign(listRow.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      flexWrap: "wrap"
+    });
     for (const skill of tableSkills) {
+      const type = skillTypeOf(skill);
+      const typeBadgeText = type === SKILL_TYPE_DERIVED_COLUMN ? "列" : "表";
+      const typeBadgeStyle = type === SKILL_TYPE_DERIVED_COLUMN
+        ? { background: "#ede9fe", color: "#7c3aed" }
+        : { background: "#dbeafe", color: "#1d4ed8" };
       const item = document.createElement("span");
       Object.assign(item.style, {
         display: "inline-flex", alignItems: "center", gap: "6px", maxWidth: "100%",
         padding: "4px 5px 4px 8px", border: "1px solid #dbeafe", borderRadius: "8px", background: "#fff"
+      });
+      const typeBadge = document.createElement("span");
+      typeBadge.textContent = typeBadgeText;
+      typeBadge.title = type === SKILL_TYPE_DERIVED_COLUMN ? "按列分析" : "整表分析";
+      Object.assign(typeBadge.style, {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: "20px",
+        height: "20px",
+        padding: "0 6px",
+        borderRadius: "6px",
+        fontSize: "10px",
+        fontWeight: "700",
+        ...typeBadgeStyle
       });
       const name = document.createElement("span");
       name.textContent = skill.name;
       name.title = skill.name;
       Object.assign(name.style, { maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
       const button = document.createElement("button");
-      const canExecute = Boolean(buildAnalysisPrompt(skill.analysisMethod));
-      button.textContent = "执行";
+      const canExecute = type !== SKILL_TYPE_DERIVED_COLUMN && Boolean(buildAnalysisPrompt(skill.analysisMethod));
+      button.textContent = type === SKILL_TYPE_DERIVED_COLUMN ? "自动运行开发中" : "执行";
       button.disabled = !canExecute;
-      button.title = canExecute ? `执行技能：${skill.name}` : "请先配置分析方法";
+      button.title = type === SKILL_TYPE_DERIVED_COLUMN
+        ? "按列分析自动运行尚未接入"
+        : (canExecute ? `执行技能：${skill.name}` : "请先配置分析方法");
       Object.assign(button.style, {
         height: "24px", padding: "0 8px", border: "0", borderRadius: "7px",
         background: canExecute ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: canExecute ? "pointer" : "not-allowed", fontSize: "11px"
@@ -170,9 +264,81 @@ function renderSkillBars(skills = []) {
         event.stopPropagation();
         chrome.runtime.sendMessage({ type: "EXECUTE_SKILL_FROM_PAGE", skillId: skill.id }).catch(() => void 0);
       });
-      item.append(name, button);
-      bar.appendChild(item);
+      item.append(typeBadge, name);
+      if (type === SKILL_TYPE_DERIVED_COLUMN) {
+        const enabled = isDerivedRuntimeEnabled(skill);
+        const toggleLabel = document.createElement("label");
+        toggleLabel.title = enabled
+          ? "已开启自动执行：开启后会立即执行一次；之后刷新页面或列表变化都会重新判断，但模型请求仍受当前页面总额度限制"
+          : "已关闭自动执行：刷新页面不会自动分析，但仍可手动点击更新";
+        Object.assign(toggleLabel.style, {
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
+          color: enabled ? "#166534" : "#64748b",
+          cursor: "pointer",
+          userSelect: "none",
+          whiteSpace: "nowrap",
+          fontSize: "10px"
+        });
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = enabled;
+        toggle.addEventListener("click", (event) => event.stopPropagation());
+        toggle.addEventListener("change", async (event) => {
+          event.stopPropagation();
+          const nextEnabled = Boolean(toggle.checked);
+          try {
+            await updateDerivedSkillAutoRun(skill, nextEnabled);
+            if (!nextEnabled) {
+              await stopDerivedColumnRuntime(skill.id, { clearUi: true, clearHistory: true });
+              showToast(`已关闭自动执行，并清除当前页历史结果：${skill.name}`);
+            } else {
+              const started = triggerDerivedColumnRuntime(skill, {
+                manual: true,
+                bypassPageGuard: false,
+                ignoreCache: false,
+                ignoreRecentResult: false
+              });
+              showToast(started ? `已开启自动执行，并立即运行一次：${skill.name}` : `已开启自动执行：${skill.name}`);
+            }
+          } catch (error) {
+            toggle.checked = enabled;
+            showToast(`更新失败：${String(error?.message ?? error)}`);
+          }
+        });
+        const toggleText = document.createElement("span");
+        toggleText.textContent = "自动执行";
+        toggleLabel.append(toggle, toggleText);
+        const refreshButton = document.createElement("button");
+        refreshButton.textContent = "更新";
+        refreshButton.title = `手动更新：立即重新分析当前页并展示结果（绕过页面自动熔断）`;
+        Object.assign(refreshButton.style, {
+          height: "24px", padding: "0 8px", border: "0", borderRadius: "7px",
+          background: "#16a34a", color: "#fff", cursor: "pointer", fontSize: "11px"
+        });
+        refreshButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const started = triggerDerivedColumnRuntime(skill, {
+            manual: true,
+            bypassPageGuard: true,
+            ignoreCache: true,
+            ignoreRecentResult: true
+          });
+          if (started) {
+            showToast(`已开始手动更新：${skill.name}`);
+          } else {
+            showToast("当前 frame 无法手动更新该技能");
+          }
+        });
+        item.append(toggleLabel, refreshButton);
+      } else {
+        item.append(button);
+      }
+      listRow.appendChild(item);
     }
+    bar.appendChild(listRow);
     table.parentNode?.insertBefore(bar, table);
   }
   const diagnostic = JSON.stringify({
@@ -203,6 +369,7 @@ function scheduleSkillBars(skills = []) {
   skillBarTimer = null;
   skillBarBroadcastTimer = null;
   renderSkillBars(skills);
+  scheduleDerivedColumnRuntime(skills);
   if (skills.length) {
     // 业务表可能在页面加载十几秒后才出现，也可能被 SPA/虚拟列表整体替换。
     // 低频重建只在当前页面存在技能时运行，确保横条最终出现并持续存在。
@@ -225,6 +392,42 @@ async function readSkills() {
   const stored = Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
   // 读取时只做结构兼容，绝不回写或重新生成已经保存的数据源名称。
   return stored.map(normalizeStoredSkill);
+}
+
+function isDerivedRuntimeEnabled(skill = {}) {
+  if (skillTypeOf(skill) !== SKILL_TYPE_DERIVED_COLUMN) return true;
+  return normalizeDerivedColumnSkill(skill).trigger.autoRunEnabled === true;
+}
+
+async function updateDerivedSkillAutoRun(skillOrId = "", enabled = false) {
+  const inputId = typeof skillOrId === "string" ? skillOrId : skillOrId?.id;
+  let current = typeof skillOrId === "object" && skillOrId ? skillOrId : null;
+  if ((!current || skillTypeOf(current) !== SKILL_TYPE_DERIVED_COLUMN) && inputId) {
+    current = STATE.skillCatalog.find((item) => item.id === inputId) || null;
+  }
+  if ((!current || skillTypeOf(current) !== SKILL_TYPE_DERIVED_COLUMN) && inputId) {
+    const latestSkills = await readSkills();
+    current = latestSkills.find((item) => item.id === inputId) || null;
+  }
+  if (!current || skillTypeOf(current) !== SKILL_TYPE_DERIVED_COLUMN) {
+    throw new Error("技能不存在");
+  }
+  const normalized = normalizeDerivedColumnSkill(current);
+  const skill = {
+    ...normalized,
+    trigger: {
+      ...normalized.trigger,
+      autoRunEnabled: Boolean(enabled)
+    },
+    updatedAt: Date.now()
+  };
+  await mutateSkills({
+    type: "UPSERT_SKILL",
+    skill,
+    expectedRevision: current?.revision ?? 0
+  });
+  if (IS_TOP_FRAME) await loadSkills();
+  await chrome.runtime.sendMessage({ type: "REFRESH_SKILLS_ALL_TABS" }).catch(() => void 0);
 }
 
 async function mutateSkills(mutation) {
@@ -386,6 +589,7 @@ function skillSources(skill) {
 
 function normalizeStoredSkill(skill) {
   if (!skill || typeof skill !== "object") return skill;
+  const type = skillTypeOf(skill);
   const sources = skillSources(skill).map((source, index) => {
     const migrationId = skill.id ? `source_${skill.id}_${index + 1}` : "";
     // 修复上一版从旧 `source` 推导 pageKey 时误用了 frameUrl 的记录。
@@ -401,9 +605,10 @@ function normalizeStoredSkill(skill) {
   // 当主页面不属于任何数据源时，可确定为错归属并安全迁移到第一个数据源页面。
   const repairPrimaryPage = Boolean(primarySource?.pageKey && !sourcePageKeys.has(skill.pageKey));
   return {
-    ...skill,
+    ...(type === "derived-column" ? normalizeDerivedColumnSkill(skill) : skill),
     version: Math.max(3, Number(skill.version) || 1),
     revision: Math.max(0, Number(skill.revision) || 0),
+    type,
     pageKey: repairPrimaryPage ? primarySource.pageKey : skill.pageKey,
     pageUrl: repairPrimaryPage ? (primarySource.pageUrl || skill.pageUrl) : skill.pageUrl,
     pageTitle: repairPrimaryPage ? (primarySource.pageTitle || skill.pageTitle) : skill.pageTitle,
@@ -449,7 +654,7 @@ async function loadSkills() {
 }
 
 function createSkillDraft() {
-  STATE.skillDraft = { id: "", revision: 0, name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
+  STATE.skillDraft = createSkillDraftState();
   STATE.activePanelTab = "skills";
   STATE.open = true;
   chrome.storage.sync.set({ lastPanelTab: "skills" }).catch(() => void 0);
@@ -462,7 +667,7 @@ function cancelSkillDraft() {
 }
 
 async function selectSkillTable(sourceId = "") {
-  if (!STATE.skillDraft) STATE.skillDraft = { id: "", revision: 0, name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
+  if (!STATE.skillDraft) STATE.skillDraft = createSkillDraftState();
   const sessionId = uid();
   STATE.skillPicking = true;
   STATE.skillPickSession = sessionId;
@@ -560,7 +765,7 @@ function acceptSkillTablePickResult(payload) {
   if (payload.cancelled) {
     showToast("已取消选择数据源");
   } else if (payload.source) {
-    STATE.skillDraft ||= { id: "", revision: 0, name: "", sources: [], analysisMethod: emptyAnalysisMethod() };
+    STATE.skillDraft ||= createSkillDraftState();
     const selectedSource = {
       ...payload.source,
       id: STATE.skillPickSourceId || uid(),
@@ -602,6 +807,8 @@ function acceptSkillTablePickResult(payload) {
     } else if (STATE.skillPickSourceId) {
       const index = STATE.skillDraft.sources.findIndex((item) => item.id === STATE.skillPickSourceId);
       if (index >= 0) STATE.skillDraft.sources[index] = source;
+    } else if (skillTypeOf(STATE.skillDraft) === SKILL_TYPE_DERIVED_COLUMN) {
+      STATE.skillDraft.sources = [source];
     } else {
       STATE.skillDraft.sources.push(source);
     }
@@ -620,22 +827,47 @@ async function saveSkillDraft() {
   const draft = STATE.skillDraft;
   if (!draft?.sources?.length) return showToast("请至少选择一个数据源");
   if (!String(draft.name).trim()) return showToast("请填写技能名称");
+  const type = skillTypeOf(draft);
   const all = await readSkills();
   const now = Date.now();
   const existing = all.find((skill) => skill.id === draft.id);
-  const primarySource = normalizeSkillSource(draft.sources[0]);
+  const normalizedSources = type === SKILL_TYPE_DERIVED_COLUMN
+    ? draft.sources.slice(0, 1).map(normalizeSkillSource)
+    : draft.sources.map(normalizeSkillSource);
+  const primarySource = normalizeSkillSource(normalizedSources[0]);
+  let derivedConfig = null;
+  if (type === SKILL_TYPE_DERIVED_COLUMN) {
+    const validation = validateDerivedColumnSkill({
+      ...draft,
+      type,
+      sources: normalizedSources,
+      analysisMethod: normalizeAnalysisMethod(draft.analysisMethod),
+      selectedColumns: normalizeDerivedColumnSelections(draft.selectedColumns),
+      output: normalizeDerivedColumnOutput(draft.output)
+    });
+    if (!validation.valid) return showToast(validation.errors[0] || "按列分析配置无效");
+    derivedConfig = validation.normalized;
+  }
   const skill = {
     id: draft.id || uid(),
     version: 3,
+    type,
     name: String(draft.name).trim(),
     // 创建/修改期间可能跨多个页面选表，技能主归属始终跟随第一个数据源。
     pageKey: primarySource.pageKey || existing?.pageKey || pageKey(),
     pageUrl: primarySource.pageUrl || existing?.pageUrl || location.href,
     pageTitle: primarySource.pageTitle || existing?.pageTitle || document.title,
     sourceName: primarySource.displayName,
-    sources: draft.sources.map(normalizeSkillSource),
+    sources: normalizedSources,
     source: primarySource,
     analysisMethod: normalizeAnalysisMethod(draft.analysisMethod),
+    ...(derivedConfig ? {
+      selectedColumns: derivedConfig.selectedColumns,
+      output: derivedConfig.output,
+      trigger: derivedConfig.trigger,
+      execution: derivedConfig.execution,
+      defaultMethodVersion: derivedConfig.defaultMethodVersion
+    } : null),
     createdAt: existing?.createdAt || now,
     updatedAt: now
   };
@@ -712,12 +944,22 @@ async function updateSkillSourceHeaders(skillId, sourceId, headers) {
 function rebindSkill(id) {
   const skill = STATE.skillCatalog.find((item) => item.id === id);
   if (!skill) return;
+  const type = skillTypeOf(skill);
+  const normalizedDerived = type === SKILL_TYPE_DERIVED_COLUMN ? normalizeDerivedColumnSkill(skill) : null;
   STATE.skillDraft = {
     id: skill.id,
     revision: skill.revision || 0,
     name: skill.name,
     sources: skillSources(skill),
+    type,
     analysisMethod: normalizeAnalysisMethod(skill.analysisMethod),
+    ...(type === SKILL_TYPE_DERIVED_COLUMN ? {
+      selectedColumns: normalizeDerivedColumnSelections(skill.selectedColumns),
+      output: normalizeDerivedColumnOutput(skill.output),
+      trigger: normalizedDerived.trigger,
+      execution: normalizedDerived.execution,
+      defaultMethodVersion: normalizedDerived.defaultMethodVersion
+    } : null),
     createdAt: skill.createdAt || 0
   };
   STATE.activePanelTab = "skills";
@@ -881,7 +1123,7 @@ export {
   startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult,
   saveSkillDraft, rebindSkill, removeSkillDraftSource, deleteSkill, deleteAllSkills, resolveStoredSource, switchToSkillPage,
   renameCurrentSkillPage, buildAnalysisPrompt,
-  extractStoredSourceData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource,
+  extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource,
   saveSkillAnalysisMethod, updateSkillSourceHeaders, scheduleSkillBars,
   downloadSkillsExport, previewSkillsImport, applySkillsImport, getBusinessPageTabs
 };
