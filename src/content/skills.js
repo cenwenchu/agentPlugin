@@ -55,6 +55,43 @@ let businessTabRefreshTimers = [];
 const SKILL_DIAGNOSTICS = true;
 const SKILL_SOURCE_VALIDATE_RETRY_DELAYS_MS = [400, 900, 1600, 2400];
 const SKILL_BUSINESS_TAB_REFRESH_DELAYS_MS = [180, 700, 1600];
+const EXTENSION_CONTEXT_INVALIDATED_MESSAGE = "扩展已更新，请刷新当前页面后重试";
+
+function isExtensionContextInvalidatedError(error) {
+  const message = String(error?.message || error || "");
+  return message.includes("Extension context invalidated") || message.includes("context invalidated");
+}
+
+function ensureExtensionContextAvailable() {
+  if (typeof chrome === "undefined" || !chrome.runtime?.id || !chrome.storage?.local) {
+    throw new Error(EXTENSION_CONTEXT_INVALIDATED_MESSAGE);
+  }
+}
+
+async function readLocalStorage(keys) {
+  try {
+    ensureExtensionContextAvailable();
+    return await chrome.storage.local.get(keys);
+  } catch (error) {
+    if (isExtensionContextInvalidatedError(error)) {
+      throw new Error(EXTENSION_CONTEXT_INVALIDATED_MESSAGE);
+    }
+    throw error;
+  }
+}
+
+async function sendRuntimeMessageSafely(message) {
+  try {
+    ensureExtensionContextAvailable();
+    return await chrome.runtime.sendMessage(message).catch((error) => {
+      if (isExtensionContextInvalidatedError(error)) return null;
+      throw error;
+    });
+  } catch (error) {
+    if (isExtensionContextInvalidatedError(error)) return null;
+    throw error;
+  }
+}
 
 function buildSkillStatusStateSnapshot(skill, statuses = {}) {
   const sources = skill?.sources || [skill?.source].filter(Boolean);
@@ -497,7 +534,7 @@ function scheduleSkillBars(skills = []) {
       // 子 frame 的 main.js 通过动态 import 初始化，首次广播可能早于监听器注册。
       // 顶层低频重发，使延迟加载、重新导航或后创建的 iframe 最终都能收到技能列表。
       skillBarBroadcastTimer = setInterval(() => {
-        chrome.runtime.sendMessage({
+        sendRuntimeMessageSafely({
           type: "BROADCAST_TO_TAB",
           payload: { message: { type: "SYNC_SKILL_BARS", skills } }
         }).catch(() => void 0);
@@ -507,7 +544,7 @@ function scheduleSkillBars(skills = []) {
 }
 
 async function readSkills() {
-  const data = await chrome.storage.local.get([STORAGE_KEY]);
+  const data = await readLocalStorage([STORAGE_KEY]);
   const stored = Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
   // 读取时只做结构兼容，绝不回写或重新生成已经保存的数据源名称。
   return stored.map(normalizeStoredSkill);
@@ -562,7 +599,7 @@ async function mutateSkills(mutation) {
 async function downloadSkillsExport() {
   const [skills, pageNamesData] = await Promise.all([
     readSkills(),
-    chrome.storage.local.get([PAGE_NAMES_STORAGE_KEY])
+    readLocalStorage([PAGE_NAMES_STORAGE_KEY])
   ]);
   const payload = {
     format: "web2ai-skills",
