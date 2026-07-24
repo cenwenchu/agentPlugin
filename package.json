@@ -9,7 +9,8 @@
   },
   "scripts": {
     "test": "node --test tests/unit/*.test.mjs && node tests/regression/verify-demo-html.mjs",
-    "test:e2e": "node tests/e2e/chrome-extension.mjs"
+    "test:e2e": "node tests/e2e/chrome-extension.mjs",
+    "test:e2e:business-tab": "node tests/e2e/business-tab-source-status.mjs"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",

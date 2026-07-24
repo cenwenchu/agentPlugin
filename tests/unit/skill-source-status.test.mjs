@@ -87,3 +87,28 @@ test("builds a concise recovery hint for changed sources", () => {
   assert.match(hint, /表结构已更新/);
   assert.match(hint, /修改技能/);
 });
+
+test("builds dedicated recovery hints for ambiguous and missing sources", () => {
+  const ambiguous = buildSkillSourceRecoveryHint(skill, {
+    source_1: { status: "ambiguous" },
+    source_2: { status: "available" }
+  });
+  assert.match(ambiguous, /多个可能位置/);
+  assert.match(ambiguous, /重新选择更明确的数据源/);
+
+  const missing = buildSkillSourceRecoveryHint(skill, {
+    source_1: { status: "missing" },
+    source_2: { status: "available" }
+  });
+  assert.match(missing, /未找到原数据源/);
+  assert.match(missing, /重新选择数据源/);
+});
+
+test("uses a wait-and-retry hint while sources are still checking", () => {
+  const hint = buildSkillSourceRecoveryHint(skill, {
+    source_1: { status: "checking" },
+    source_2: { status: "available" }
+  });
+  assert.match(hint, /仍在校验数据源/);
+  assert.match(hint, /请稍后再试/);
+});

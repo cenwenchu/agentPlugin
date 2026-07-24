@@ -63,6 +63,19 @@ test("derives reuse, dirty-method and active-source state", () => {
   assert.equal(clampSkillWorkspaceActiveSource(session), 1);
 });
 
+test("requires every source in the workspace session to be fully reusable", () => {
+  const session = createSkillWorkspaceSession({ skill, method: "分析" });
+  session.dataSources[0].data = { rows: [["A"]], completeForRequest: true };
+  session.dataSources[1].data = { rows: [["B"]], completeForRequest: false };
+  assert.equal(
+    skillWorkspaceHasAllSourceData(session),
+    false,
+    "one incomplete source must force the next test run to collect again"
+  );
+  session.dataSources[1].data.completeForRequest = true;
+  assert.equal(skillWorkspaceHasAllSourceData(session), true);
+});
+
 test("clamps preview pages and returns only the current rows", () => {
   const item = { previewPage: 9, data: { rows: [[1], [2], [3], [4], [5]] } };
   assert.deepEqual(selectSkillWorkspacePreview(item, 2), {

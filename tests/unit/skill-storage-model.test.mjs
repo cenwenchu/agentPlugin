@@ -70,3 +70,46 @@ test("merges imports with the latest skills and page names", () => {
   assert.equal(next.skills.length, 2);
   assert.deepEqual(next.pageNames, { "/orders": "订单", "/refund": "售后" });
 });
+
+test("skips duplicate imports but still merges latest page-name snapshots", () => {
+  const current = storedSkill();
+  const duplicate = {
+    ...current,
+    id: "skill-duplicate",
+    sources: [{ id: "source-dup", headers: ["订单号"] }]
+  };
+  const next = applySkillMutation({ skills: [current], pageNames: { "/orders": "订单" } }, {
+    type: "IMPORT_SKILLS",
+    skills: [duplicate],
+    pageNames: { "/refund": "售后" },
+    now: 100
+  });
+  assert.equal(next.result.added, 0);
+  assert.equal(next.skills.length, 1);
+  assert.deepEqual(next.pageNames, { "/orders": "订单", "/refund": "售后" });
+});
+
+test("deletes one skill without touching unrelated skills", () => {
+  const current = storedSkill();
+  const preserved = { id: "skill-2", revision: 4, name: "售后分析", sources: [{ id: "source-2", headers: ["售后单"] }] };
+  const next = applySkillMutation({ skills: [current, preserved], pageNames: { "/orders": "订单" } }, {
+    type: "DELETE_SKILL",
+    skillId: current.id,
+    expectedRevision: 2
+  });
+  assert.deepEqual(next.result, { deletedId: current.id });
+  assert.deepEqual(next.skills.map((skill) => skill.id), ["skill-2"]);
+  assert.deepEqual(next.pageNames, { "/orders": "订单" });
+});
+
+test("deletes all skills together with page names", () => {
+  const next = applySkillMutation({
+    skills: [storedSkill(), { id: "skill-2", revision: 1, name: "售后分析", sources: [{ id: "source-2", headers: ["售后单"] }] }],
+    pageNames: { "/orders": "订单", "/refund": "售后" }
+  }, {
+    type: "DELETE_ALL_SKILLS"
+  });
+  assert.deepEqual(next.result, { deletedAll: true });
+  assert.deepEqual(next.skills, []);
+  assert.deepEqual(next.pageNames, {});
+});
