@@ -8,7 +8,23 @@ import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const chromeCandidates = [
+  process.env.CHROME_PATH,
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser"
+].filter(Boolean);
+const CHROME = (await Promise.all(chromeCandidates.map(async (candidate) => (
+  await fs.access(candidate).then(() => candidate).catch(() => "")
+)))).find(Boolean);
+if (!CHROME) {
+  throw new Error(`Chrome executable not found. Set CHROME_PATH explicitly. Checked: ${chromeCandidates.join(", ")}`);
+}
+const HEADLESS = /^(1|true)$/i.test(process.env.E2E_HEADLESS || "");
+const reportE2eSection = (name) => console.log(`[e2e] ${name}`);
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   let crc = value;
   for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
@@ -167,6 +183,74 @@ const derivedRuntimeFixture = `<!doctype html><meta charset="utf-8"><title>Deriv
     document.querySelector('#derived-rerender').onclick = () => render();
     render();
   <\/script>`;
+const skillSourceTabsFixture = `<!doctype html><meta charset="utf-8"><title>Skill Source Tabs</title>
+  <style>
+    body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:16px}
+    .tabs{display:flex;gap:8px;margin-bottom:12px}
+    .tabs button[data-active="1"]{background:#2563eb;color:#fff}
+    .pane[hidden]{display:none}
+    .art-table{margin-bottom:16px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #d1d5db;padding:8px 10px;text-align:left}
+  </style>
+  <div class="tabs">
+    <button class="plan-realTab" data-tab="plan" data-active="1" aria-selected="true">计划视图</button>
+    <button class="link-realTab" data-tab="link" data-active="0" aria-selected="false">链接视图</button>
+  </div>
+  <section id="plan-pane" class="pane">
+    <div class="art-table" id="plan-table">
+      <table>
+        <thead><tr><th>序号</th><th>计划预算及消耗</th><th>计划转化 更多指标</th><th>计划历史ROI 更多指标</th></tr></thead>
+        <tbody><tr><td>1</td><td>100</td><td>9</td><td>1.2</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+  <section id="link-pane" class="pane" hidden>
+    <div class="art-table" id="link-table">
+      <table>
+        <thead><tr><th>序号</th><th>店铺链接 展示设置</th><th>链接ROI分析 更多指标</th><th>广告直接成交占比 更多指标</th></tr></thead>
+        <tbody><tr><td>1</td><td>链接A</td><td>0.8</td><td>15%</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+  <script>
+    const applyTab = (name) => {
+      document.querySelector('#plan-pane').hidden = name !== 'plan';
+      document.querySelector('#link-pane').hidden = name !== 'link';
+      document.querySelectorAll('.tabs button').forEach((button) => {
+        const active = button.dataset.tab === name;
+        button.dataset.active = active ? '1' : '0';
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      window.dispatchEvent(new Event('scroll'));
+      document.dispatchEvent(new Event('scroll'));
+    };
+    document.querySelectorAll('.tabs button').forEach((button) => {
+      button.addEventListener('click', () => applyTab(button.dataset.tab));
+    });
+    applyTab('plan');
+  <\/script>`;
+const skillSourceMultiTableFixture = `<!doctype html><meta charset="utf-8"><title>Skill Source Multi Table</title>
+  <style>
+    body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:16px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #d1d5db;padding:8px 10px;text-align:left}
+  </style>
+  <div class="grid">
+    <div class="art-table" id="wrong-table">
+      <table>
+        <thead><tr><th>序号</th><th>店铺链接</th><th>成交转化 更多指标</th></tr></thead>
+        <tbody><tr><td>1</td><td>链接A</td><td>12</td></tr></tbody>
+      </table>
+    </div>
+    <div class="art-table" id="target-table">
+      <table>
+        <thead><tr><th>序号</th><th>计划预算及消耗</th><th>计划转化 更多指标</th></tr></thead>
+        <tbody><tr><td>1</td><td>100</td><td>9</td></tr></tbody>
+      </table>
+    </div>
+  </div>`;
 function parseDerivedRowsFromMessages(messages = []) {
   const content = (Array.isArray(messages) ? messages : [])
     .map((message) => typeof message?.content === "string" ? message.content : "")
@@ -221,6 +305,8 @@ const server = http.createServer((req, res) => {
       : req.url === "/inner-frame-host" ? innerFrameHostFixture
       : req.url === "/virtual-collection" ? virtualCollectionFixture
       : req.url === "/derived-runtime" ? derivedRuntimeFixture
+      : req.url === "/skill-source-tabs" ? skillSourceTabsFixture
+      : req.url === "/skill-source-multi" ? skillSourceMultiTableFixture
       : fixture
   );
 });
@@ -300,6 +386,207 @@ const setDerivedRuntimeSkills = async (worker, { pageUrl, skills, pageRequestLim
   });
 };
 
+const setStoredSkills = async (worker, { skills, pageNames = {} }) => {
+  await worker.evaluate(async ({ nextSkills, nextPageNames }) => {
+    const SKILL_STORAGE_KEY = "web2aiSkills";
+    const SKILL_PAGE_NAMES_STORAGE_KEY = "web2aiSkillPageNames";
+    await chrome.storage.local.set({
+      [SKILL_STORAGE_KEY]: nextSkills,
+      [SKILL_PAGE_NAMES_STORAGE_KEY]: nextPageNames
+    });
+  }, { nextSkills: skills, nextPageNames: pageNames });
+};
+
+const makeLocatorDerivedSkill = ({
+  id,
+  name,
+  pageUrl,
+  selector,
+  headers,
+  selectedColumns,
+  columnName = "AI结论"
+}) => {
+  const source = {
+    id: `${id}-source`,
+    pageKey: pageUrl,
+    frameUrl: pageUrl,
+    selector,
+    selectorStrength: "positional",
+    tableIndex: 0,
+    locatorVersion: 2,
+    componentType: "art-table",
+    headers,
+    headerFingerprint: headers.map((item) => String(item || "").replace(/\s+/g, "").toLowerCase()).join("|"),
+    businessTabTitle: "广告智能投放控制台"
+  };
+  return {
+    id,
+    type: "derived-column",
+    name,
+    revision: 1,
+    version: 3,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    analysisMethod: { description: "根据字段给出简短结论" },
+    output: { columnName, position: "before-first-selected-column", maxChars: 1000 },
+    trigger: { mode: "page-load", autoRunEnabled: false },
+    execution: { scope: "current-page", maxRows: 100, maxBatchRows: 20 },
+    source,
+    sources: [source],
+    selectedColumns: selectedColumns.map((header, index) => ({
+      index,
+      header,
+      normalizedHeader: String(header || "").replace(/\s+/g, "").toLowerCase(),
+      occurrence: 1
+    }))
+  };
+};
+
+const openSkillsPanel = async (page) => {
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    if (host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden")) {
+      document.querySelector("#web2ai_launcher_fab")?.click();
+    }
+  });
+  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".wrap")?.classList.contains("hidden"));
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
+  });
+};
+
+const waitForSkillStatusClass = async (page, skillName, statusClass) => {
+  try {
+    await page.waitForFunction(
+      ({ expectedSkillName, expectedStatusClass }) => {
+        const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+        const cards = Array.from(shadow?.querySelectorAll(".skillCard") || []);
+        const card = cards.find((node) => node.querySelector(".skillTitle")?.textContent?.includes(expectedSkillName));
+        const status = card?.querySelector(".skillStatus");
+        return Boolean(status && status.classList.contains(expectedStatusClass));
+      },
+      { timeout: 30000, polling: 100 },
+      { expectedSkillName: skillName, expectedStatusClass: statusClass }
+    );
+  } catch (error) {
+    const statuses = await readSkillStatuses(page);
+    throw new Error(
+      `skill "${skillName}" did not reach status "${statusClass}": ${JSON.stringify(statuses)}`,
+      { cause: error }
+    );
+  }
+};
+
+const readSkillStatuses = (page) => page.$eval("#web2ai_overlay_host", (host) => (
+  Array.from(host.shadowRoot.querySelectorAll(".skillCard")).map((card) => ({
+    name: Array.from(card.querySelector(".skillTitle")?.childNodes || [])
+      .filter((node) => node.nodeType === Node.TEXT_NODE)
+      .map((node) => node.textContent || "")
+      .join("")
+      .trim(),
+    statusClass: Array.from(card.querySelector(".skillStatus")?.classList || []).join(" "),
+    statusText: card.querySelector(".skillStatus")?.textContent?.trim() || ""
+  }))
+));
+
+const openSkillCreateForm = async (page) => {
+  const waitForEntry = () => page.waitForFunction(() => {
+    const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+    return Boolean(
+      shadow?.querySelector(".skillForm") ||
+      Array.from(shadow?.querySelectorAll("button") || []).some((button) => button.textContent?.includes("创建技能"))
+    );
+  }, { timeout: 5000 });
+  await openSkillsPanel(page);
+  try {
+    await waitForEntry();
+  } catch {
+    await page.reload();
+    await page.waitForSelector("#web2ai_overlay_host");
+    await openSkillsPanel(page);
+    await waitForEntry();
+  }
+  const alreadyOpen = await page.$eval("#web2ai_overlay_host", (host) => Boolean(host.shadowRoot.querySelector(".skillForm")));
+  if (!alreadyOpen) {
+    await page.$eval("#web2ai_overlay_host", (host) => {
+      const button = host.shadowRoot.querySelector(".skillCreateSummary");
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true }));
+    });
+  }
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+};
+
+const waitForWorkerTabsApi = async (worker, { timeoutMs = 10000, intervalMs = 200 } = {}) => {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const ready = await worker.evaluate(() => Boolean(globalThis.chrome?.tabs?.query && globalThis.chrome?.tabs?.sendMessage));
+    if (ready) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("extension worker tabs api did not become ready in time");
+};
+
+const readWorkspaceDataSourceDiagnostics = (page, workspaceSelector) => page.$eval(
+  "#web2ai_overlay_host",
+  (host, selector) => {
+    const shadow = host.shadowRoot;
+    return {
+      pending: Boolean(shadow.querySelector(`${selector}Head button`)?.disabled),
+      status: shadow.querySelector(`${selector}Status`)?.textContent || "",
+      error: shadow.querySelector(".skillTestError")?.textContent || "",
+      tabs: Array.from(shadow.querySelectorAll(".skillDataSourceTab")).map((tab) => ({
+        className: tab.className,
+        text: tab.textContent || ""
+      })),
+      preview: shadow.querySelector(".skillDataPreviewStatus")?.textContent || ""
+    };
+  },
+  workspaceSelector
+);
+
+const waitForWorkspaceDataSources = async (page, {
+  workspaceSelector,
+  expectedCount,
+  timeout = 30000
+}) => {
+  try {
+    await page.waitForFunction(
+      ({ selector, count }) => {
+        const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+        if (!shadow) return false;
+        const tabs = Array.from(shadow.querySelectorAll(".skillDataSourceTab"));
+        return tabs.length === count &&
+          tabs.every((tab) => tab.classList.contains("complete")) &&
+          !shadow.querySelector(`${selector}Head button`)?.disabled;
+      },
+      { timeout, polling: 100 },
+      { selector: workspaceSelector, count: expectedCount }
+    );
+  } catch (error) {
+    const diagnostics = await readWorkspaceDataSourceDiagnostics(page, workspaceSelector);
+    throw new Error(`workspace data sources did not complete: ${JSON.stringify(diagnostics)}`, { cause: error });
+  }
+};
+
+const openSkillDraftFromWorker = async (worker, page, pageUrl) => {
+  await waitForWorkerTabsApi(worker);
+  const response = await worker.evaluate(async (targetUrl) => {
+    const [tab] = await chrome.tabs.query({ url: targetUrl });
+    if (!tab?.id) throw new Error("fixture tab not found for skill draft");
+    return chrome.tabs.sendMessage(tab.id, { type: "OPEN_SKILL_DRAFT" }, { frameId: 0 });
+  }, pageUrl);
+  if (!response?.ok) {
+    throw new Error(`OPEN_SKILL_DRAFT failed: ${JSON.stringify(response)}`);
+  }
+  try {
+    await page.waitForFunction(
+      () => Boolean(document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm")),
+      { timeout: 2000 }
+    );
+  } catch {
+    await openSkillCreateForm(page);
+  }
+};
+
 const makeDerivedSkill = ({
   id,
   name,
@@ -377,7 +664,8 @@ const waitForDerivedColumnTexts = (page, skillId, matcherText) => page.waitForFu
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
-  headless: false,
+  headless: HEADLESS,
+  protocolTimeout: 600000,
   // Puppeteer's path-based extension loader communicates over the DevTools pipe.
   // Without this option Chrome starts, but Puppeteer rejects the launch before
   // the extension can be installed, so none of the browser regressions run.
@@ -393,8 +681,12 @@ try {
   assert.match(extensionTarget.url(), /^chrome-extension:\/\//, "extension service worker must start before page tests");
   const page = await browser.newPage();
   const browserDiagnostics = [];
-  page.on("console", (message) => browserDiagnostics.push(`[console:${message.type()}] ${message.text()}`));
-  page.on("pageerror", (error) => browserDiagnostics.push(`[pageerror] ${error.message}`));
+  const recordBrowserDiagnostic = (message) => {
+    browserDiagnostics.push(message);
+    if (browserDiagnostics.length > 200) browserDiagnostics.shift();
+  };
+  page.on("console", (message) => recordBrowserDiagnostic(`[console:${message.type()}] ${message.text()}`));
+  page.on("pageerror", (error) => recordBrowserDiagnostic(`[pageerror] ${error.message}`));
   await page.goto(url);
   try {
     await page.waitForSelector("#web2ai_overlay_host");
@@ -417,6 +709,7 @@ try {
 
   const worker = await extensionTarget.worker();
   assert.ok(worker, "extension service worker must be available to restore the launcher");
+  await waitForWorkerTabsApi(worker);
   await worker.evaluate(async (pageUrl) => {
     const [tab] = await chrome.tabs.query({ url: pageUrl });
     if (!tab?.id) throw new Error("fixture tab not found");
@@ -486,6 +779,7 @@ try {
 
   // Mirrors the right-click “截图（框选区域）” menu action: background asks the
   // top frame to open Chat and enter the existing region-selection flow.
+  await waitForWorkerTabsApi(worker);
   await worker.evaluate(async (pageUrl) => {
     const [tab] = await chrome.tabs.query({ url: pageUrl });
     if (!tab?.id) throw new Error("fixture tab not found for region screenshot");
@@ -542,9 +836,7 @@ try {
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
   });
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
-  });
+  await openSkillDraftFromWorker(worker, page, url);
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
   assert.equal(
     await page.$eval("#web2ai_overlay_host", (host) => Boolean(host.shadowRoot.querySelector(".skillList"))),
@@ -653,17 +945,21 @@ try {
   assert.match(modifiedSkill, /使用列表输出/, "modified analysis methods must persist");
   await page.bringToFront();
   await page.evaluate(() => history.pushState({}, "", "/another-business-page"));
-  await new Promise((resolve) => setTimeout(resolve, 900));
+  await page.waitForFunction(
+    () => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillCard"),
+    { timeout: 15000, polling: 100 }
+  );
   assert.equal(await page.$eval("#web2ai_overlay_host", (host) => Boolean(host.shadowRoot.querySelector(".skillCard"))), false);
   await page.evaluate(() => history.pushState({}, "", "/"));
-  await new Promise((resolve) => setTimeout(resolve, 900));
+  await page.waitForFunction(() => {
+    const cards = Array.from(document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillCard") || []);
+    return cards.some((card) => card.textContent?.includes("订单综合分析"));
+  }, { timeout: 15000, polling: 100 });
   assert.match(await page.$eval("#web2ai_overlay_host", (host) => {
     const cards = Array.from(host.shadowRoot.querySelectorAll(".skillCard"));
     return cards.find((card) => card.textContent?.includes("订单综合分析"))?.textContent || "";
   }), /订单综合分析/);
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
-  });
+  await openSkillDraftFromWorker(worker, page, url);
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
   assert.equal(
     await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillReuseItem").length),
@@ -685,18 +981,7 @@ try {
   });
   await page.reload();
   await page.waitForSelector("#web2ai_overlay_host");
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    if (host.shadowRoot.querySelector(".wrap")?.classList.contains("hidden")) {
-      document.querySelector("#web2ai_launcher_fab")?.click();
-    }
-  });
-  await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".wrap")?.classList.contains("hidden"));
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
-  });
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
-  });
+  await openSkillDraftFromWorker(worker, page, url);
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
   assert.equal(
     await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillReuseItem").length),
@@ -719,9 +1004,7 @@ try {
     Array.from(host.shadowRoot.querySelectorAll(".skillForm button")).find((button) => button.textContent?.trim() === "保存")?.click();
   });
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.textContent?.includes("订单复用分析"));
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
-  });
+  await openSkillDraftFromWorker(worker, page, url);
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
   assert.equal(
     await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillReuseItem").length),
@@ -860,13 +1143,7 @@ try {
     Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "Chat")?.click();
   });
 
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "技能")?.click();
-  });
-  await page.$eval("#web2ai_overlay_host", (host) => {
-    Array.from(host.shadowRoot.querySelectorAll("button")).find((button) => button.textContent?.includes("创建技能"))?.click();
-  });
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillForm"));
+  await openSkillCreateForm(page);
   await page.$eval("#web2ai_overlay_host", (host) => {
     const derivedButton = Array.from(host.shadowRoot.querySelectorAll(".skillForm button"))
       .find((button) => button.textContent?.trim() === "按列分析");
@@ -1195,33 +1472,10 @@ try {
   await page.$eval("#web2ai_overlay_host", (host) => {
     Array.from(host.shadowRoot.querySelectorAll(".skillTestPanel button")).find((button) => button.textContent?.trim() === "开始测试")?.click();
   });
-  try {
-    await page.waitForFunction(() => {
-      const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
-      return shadow?.querySelectorAll(".skillDataSourceTab.complete").length === 4 && !shadow.querySelector(".skillTestHead button")?.disabled;
-    }, { timeout: 30000 });
-  } catch (error) {
-    const workspace = await page.$eval("#web2ai_overlay_host", (host) => ({
-      tabs: Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => ({
-        className: tab.className,
-        text: tab.textContent || ""
-      })),
-      error: host.shadowRoot.querySelector(".skillTestError")?.textContent || "",
-      preview: host.shadowRoot.querySelector(".skillDataPreviewStatus")?.textContent || ""
-    }));
-    workspace.sources = [];
-    for (let index = 0; index < workspace.tabs.length; index++) {
-      await page.$eval("#web2ai_overlay_host", (host, sourceIndex) => {
-        host.shadowRoot.querySelectorAll(".skillDataSourceTab")[sourceIndex]?.click();
-      }, index);
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      workspace.sources.push(await page.$eval("#web2ai_overlay_host", (host) => ({
-        status: host.shadowRoot.querySelector(".skillDataPreviewStatus")?.textContent || "",
-        error: host.shadowRoot.querySelector(".skillTestError")?.textContent || ""
-      })));
-    }
-    throw new Error(`skill test did not complete all sources: ${JSON.stringify(workspace)}`, { cause: error });
-  }
+  await waitForWorkspaceDataSources(page, {
+    workspaceSelector: ".skillTest",
+    expectedCount: 4
+  });
   assert.ok(aiRequestCount > 0, "the completed skill test must reach the local model fixture");
   const testedSources = await page.$eval("#web2ai_overlay_host", (host) =>
     Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => tab.textContent || "")
@@ -1312,14 +1566,38 @@ try {
   assert.match(xlsxPreview, /runtime-after-sales.xlsx \/ 售后明细/);
   assert.match(xlsxPreview, /R-100/);
   await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector("#web2ai_run_skill")?.click());
-  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillDataPreviewStatus")?.textContent?.includes("本次使用"));
-  const loadedSkillData = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionPanel")?.textContent || "");
-  assert.match(loadedSkillData, /已读取 \d+ 行，本次使用 \d+ 行/);
+  await waitForWorkspaceDataSources(page, {
+    workspaceSelector: ".skillExecution",
+    expectedCount: 4
+  });
   const executedSources = await page.$eval("#web2ai_overlay_host", (host) =>
     Array.from(host.shadowRoot.querySelectorAll(".skillDataSourceTab")).map((tab) => tab.textContent || "")
   );
   assert.equal(executedSources.length, 4, "execution mode must combine configured sources with its own uploaded XLSX source");
   assert.ok(executedSources.every((label) => /共 \d+ 条/.test(label)), `execution mode must show a row count for every source: ${JSON.stringify(executedSources)}`);
+  const executedSourceStatuses = [];
+  for (let index = 0; index < executedSources.length; index++) {
+    await page.$eval("#web2ai_overlay_host", (host, sourceIndex) => {
+      host.shadowRoot.querySelectorAll(".skillDataSourceTab")[sourceIndex]?.click();
+    }, index);
+    await page.waitForFunction(
+      (sourceIndex) => document.querySelector("#web2ai_overlay_host")?.shadowRoot
+        ?.querySelectorAll(".skillDataSourceTab")[sourceIndex]?.classList.contains("active"),
+      {},
+      index
+    );
+    executedSourceStatuses.push(await page.$eval(
+      "#web2ai_overlay_host",
+      (host) => host.shadowRoot.querySelector(".skillDataPreviewStatus")?.textContent || ""
+    ));
+  }
+  assert.ok(
+    executedSourceStatuses.every((status) => /已读取 \d+ 行，本次使用 \d+ 行/.test(status)),
+    `execution mode must report loaded and submitted rows for every source: ${JSON.stringify(executedSourceStatuses)}`
+  );
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    host.shadowRoot.querySelectorAll(".skillDataSourceTab")[0]?.click();
+  });
   const previewedSkillRows = await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelectorAll(".skillDataPreview tbody tr").length);
   assert.ok(previewedSkillRows > 0 && previewedSkillRows <= 10, "skill execution must preview up to ten loaded rows per page");
   const firstPreviewCells = await page.$eval("#web2ai_overlay_host", (host) =>
@@ -1329,12 +1607,14 @@ try {
   await page.waitForFunction(() => !document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector(".skillExecutionHead button")?.disabled, { timeout: 15000 });
   await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionHead button")?.click());
 
+  reportE2eSection("multi-source skill execution passed");
   const innerPage = await browser.newPage();
   await innerPage.goto(`${url}inner-frame-host`);
   await innerPage.bringToFront();
   await innerPage.waitForSelector("#web2ai_overlay_host");
   const scrollingFrame = await innerPage.waitForFrame((frame) => frame.url().endsWith("/inner-scroll"));
   await scrollingFrame.$eval("#scrollbox", (node) => { node.scrollTop = 120; });
+  await waitForWorkerTabsApi(worker);
   await worker.evaluate(async (pageUrl) => {
     const [tab] = await chrome.tabs.query({ url: pageUrl });
     if (!tab?.id) throw new Error("inner-frame tab not found for multi-screen screenshot");
@@ -1351,9 +1631,11 @@ try {
   // A hybrid data source may open every page in the middle with earlier rows
   // already recycled. The collector must reset each page before its first read,
   // scroll through all recycled rows, then restore page 1 and the scroll top.
+  reportE2eSection("multi-screen inner-frame capture passed");
   const virtualPage = await browser.newPage();
   await virtualPage.goto(`${url}virtual-collection`);
   await virtualPage.waitForSelector("#web2ai_overlay_host");
+  await waitForWorkerTabsApi(worker);
   const virtualCollection = await worker.evaluate(async (pageUrl) => {
     const [tab] = await chrome.tabs.query({ url: pageUrl });
     if (!tab?.id) throw new Error("virtual collection tab not found");
@@ -1396,6 +1678,7 @@ try {
       })
     ]
   });
+  reportE2eSection("virtual collection passed");
   const derivedPage = await browser.newPage();
   await derivedPage.goto(derivedRuntimeUrl);
   await derivedPage.waitForSelector("#web2ai_overlay_host");
@@ -1467,6 +1750,7 @@ try {
       })
     ]
   });
+  reportE2eSection("automatic derived-column runtime passed");
   const derivedManualPage = await browser.newPage();
   await derivedManualPage.goto(derivedRuntimeUrl);
   await derivedManualPage.waitForSelector("#web2ai_overlay_host");
@@ -1499,6 +1783,7 @@ try {
 
   // Adding a model is a separate draft flow: it must not appear in the
   // existing-model selector until saved, and cancel must restore edit mode.
+  reportE2eSection("manual derived-column runtime passed");
   const extensionId = new URL(extensionTarget.url()).host;
   const optionsPage = await browser.newPage();
   await optionsPage.goto(`chrome-extension://${extensionId}/src/options.html`);
@@ -1512,6 +1797,67 @@ try {
   assert.equal(await optionsPage.$eval("#createTitle", (node) => node.hidden), true, "cancel must return to existing-model edit mode");
   assert.equal(await optionsPage.$$eval("#profile option", (options) => options.length), profileCountBeforeAdd);
   await optionsPage.close();
+
+  reportE2eSection("options model draft passed");
+  const tabbedSkillPage = `${url}skill-source-tabs`;
+  await setStoredSkills(worker, {
+    skills: [
+      makeLocatorDerivedSkill({
+        id: "plan-locator-skill",
+        name: "计划表定位",
+        pageUrl: tabbedSkillPage,
+        selector: "#missing-plan-selector",
+        headers: ["序号", "计划预算及消耗", "计划转化 更多指标", "计划历史ROI 更多指标"],
+        selectedColumns: ["计划预算及消耗", "计划转化 更多指标"]
+      }),
+      makeLocatorDerivedSkill({
+        id: "link-locator-skill",
+        name: "链接表定位",
+        pageUrl: tabbedSkillPage,
+        selector: "#missing-link-selector",
+        headers: ["序号", "店铺链接 展示设置", "链接ROI分析 更多指标", "广告直接成交占比 更多指标"],
+        selectedColumns: ["链接ROI分析 更多指标", "广告直接成交占比 更多指标"]
+      })
+    ]
+  });
+  await page.goto(tabbedSkillPage);
+  await page.waitForSelector("#web2ai_overlay_host");
+  await openSkillsPanel(page);
+  await waitForSkillStatusClass(page, "计划表定位", "available");
+  await waitForSkillStatusClass(page, "链接表定位", "changed");
+  let tabStatuses = await readSkillStatuses(page);
+  assert.ok(tabStatuses.find((item) => item.name === "计划表定位" && item.statusClass.includes("available")));
+  assert.ok(tabStatuses.find((item) => item.name === "链接表定位" && item.statusClass.includes("changed")));
+  await page.click(".link-realTab");
+  await waitForSkillStatusClass(page, "链接表定位", "available");
+  await waitForSkillStatusClass(page, "计划表定位", "changed");
+  tabStatuses = await readSkillStatuses(page);
+  assert.ok(tabStatuses.find((item) => item.name === "链接表定位" && item.statusClass.includes("available")));
+  assert.ok(tabStatuses.find((item) => item.name === "计划表定位" && item.statusClass.includes("changed")));
+
+  reportE2eSection("business-tab source status passed");
+  const multiTableSkillPage = `${url}skill-source-multi`;
+  await setStoredSkills(worker, {
+    skills: [
+      makeLocatorDerivedSkill({
+        id: "multi-table-derv",
+        name: "多表定位恢复",
+        pageUrl: multiTableSkillPage,
+        selector: "#wrong-table",
+        headers: ["序号", "计划预算及消耗", "计划转化 更多指标"],
+        selectedColumns: ["计划预算及消耗", "计划转化 更多指标"]
+      })
+    ]
+  });
+  await page.goto(multiTableSkillPage);
+  await page.waitForSelector("#web2ai_overlay_host");
+  await openSkillsPanel(page);
+  await waitForSkillStatusClass(page, "多表定位恢复", "available");
+  const multiTableStatus = await readSkillStatuses(page);
+  assert.ok(
+    multiTableStatus.find((item) => item.name === "多表定位恢复" && item.statusClass.includes("available")),
+    "multi-table fallback should recover the exact-header table even when the selector drifts to another table"
+  );
 
 console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, runtime CSV/XLSX sources, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing, derived runtime auto/manual/page-guard coverage");
 } finally {

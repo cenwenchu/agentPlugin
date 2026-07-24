@@ -11,6 +11,7 @@ import { getBusinessRowText, getRowCells } from "./table-row-dom.js";
 const DRAWER_MODAL_SELECTORS = ".ant-drawer-body, .ant-modal-body, .arco-drawer-body, .arco-modal-body";
 const ANT_PAGINATION_DISABLED = "ant-pagination-disabled";
 const ARCO_PAGINATION_DISABLED = "arco-pagination-item-disabled";
+const VXE_PAGER_DISABLED = "is--disabled";
 
 function getTableRootForRow(rowEl) {
   if (!rowEl) return null;
@@ -281,6 +282,10 @@ function findPaginationNextButton(anchorRowEl) {
       p.querySelector?.(`.arco-pagination-item-next:not(.${ARCO_PAGINATION_DISABLED}) a`) ||
       p.querySelector?.(`.arco-pagination-next:not(.${ARCO_PAGINATION_DISABLED}) button`);
     if (arco && (!drawerContainer || drawerContainer.contains(arco))) return arco;
+    const vxe =
+      p.querySelector?.(`.vxe-pager--next-btn:not(.${VXE_PAGER_DISABLED})`) ||
+      p.querySelector?.(`.vxe-pager .btn-next:not(.${VXE_PAGER_DISABLED})`);
+    if (vxe && (!drawerContainer || drawerContainer.contains(vxe))) return vxe;
     const ariaNext =
       p.querySelector?.(
         "button[aria-label*='下一页']:not([disabled]):not([aria-disabled='true']),a[aria-label*='下一页']"
@@ -289,7 +294,7 @@ function findPaginationNextButton(anchorRowEl) {
         "button[aria-label*='next']:not([disabled]):not([aria-disabled='true']),a[aria-label*='next']"
       );
     if (ariaNext && (!drawerContainer || drawerContainer.contains(ariaNext))) return ariaNext;
-    const nav = p.querySelector?.("[class*='pagination'],[role='navigation']");
+    const nav = p.querySelector?.("[class*='pagination'],[class*='pager'],[role='navigation']");
     if (nav) {
       const btns = Array.from(nav.querySelectorAll("button,a")).filter((x) => x && isVisibleElement(x));
       const pick = btns.find((b) => {

@@ -21,7 +21,20 @@ function parseDerivedColumnResults({
   output = {}
 } = {}) {
   const normalizedOutput = normalizeDerivedColumnOutput(output);
-  const payload = parseDerivedColumnResultPayload(text);
+  let payload;
+  try {
+    payload = parseDerivedColumnResultPayload(text);
+  } catch (error) {
+    const message = String(error?.message || "模型返回格式不正确").trim() || "模型返回格式不正确";
+    return {
+      results: [],
+      resultMap: new Map(),
+      failures: (Array.isArray(expectedFingerprints) ? expectedFingerprints : [])
+        .map((fingerprint) => String(fingerprint || "").trim())
+        .filter(Boolean)
+        .map((fingerprint) => ({ fingerprint, error: `结果解析失败：${message}` }))
+    };
+  }
   const items = Array.isArray(payload?.results) ? payload.results : null;
   if (!items) throw new Error("模型返回格式不正确：缺少 results 数组");
   const expected = new Set(expectedFingerprints);

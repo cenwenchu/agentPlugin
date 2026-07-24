@@ -113,7 +113,10 @@ function clampSkillWorkspaceActiveSource(session) {
 
 function skillWorkspaceHasAllSourceData(session) {
   const sources = session?.dataSources || [];
-  return Boolean(sources.length) && sources.every((item) => item?.data);
+  // “已有数据”只代表当前会话中存过 rows，不代表这份数据允许再次复用。
+  // 当采集器明确标记 completeForRequest=false 时，测试页再次点击“开始测试”
+  // 必须重新采集，不能直接拿上一次残缺缓存进入提交流程。
+  return Boolean(sources.length) && sources.every((item) => item?.data && item.data.completeForRequest !== false);
 }
 
 function skillWorkspaceMethodDirty(session) {

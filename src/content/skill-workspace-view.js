@@ -20,6 +20,8 @@ import {
   runDerivedColumnPreview, saveSkillTestMethod, stopSkillExecution, uploadSkillRuntimeFiles, viewSkillSubmittedPrompt
 } from "./skill-workspace-controller.js";
 
+const SKILL_DIAGNOSTICS = true;
+
 function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, render: renderOverlay }) {
   const renderUsageBox = (lines = []) => el("div", { class: "skillUsageNote" }, [
     ...lines.flatMap((line, index) => index === 0 ? [line] : [el("br"), line])
@@ -173,7 +175,19 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
           }, [test.method]),
           renderModelSetupHint(),
           el("div", { class: "skillActions" }, [
-            el("button", { class: "btn primary", disabled: test.pending, style: test.pending ? { display: "none" } : {}, onClick: () => runSkillTest() }, [
+            el("button", {
+              class: "btn primary",
+              disabled: test.pending,
+              style: test.pending ? { display: "none" } : {},
+              onClick: () => {
+                SKILL_DIAGNOSTICS && console.info("[web2ai.skill-preview]", "workspace-test-click", JSON.stringify({
+                  skillId: test.skillId || "",
+                  mode: test.mode || "",
+                  sourceCount: (test.dataSources || []).length
+                }));
+                runSkillTest();
+              }
+            }, [
               test.pending ? "执行中…" : test.attempts ? (test.mode === "execute" ? "重新执行" : "再次测试") : (test.mode === "execute" ? "执行技能" : "开始测试")
             ]),
             el("button", { class: "btn danger", style: test.pending ? {} : { display: "none" }, onClick: () => stopSkillExecution() }, [test.status === "loading" ? "停止采集并分析" : "停止测试"]),
@@ -328,10 +342,31 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
             el("button", { class: "btn", onClick: () => viewSkillSubmittedPrompt(execution) }, ["查看提交内容"])
           ]) : null,
           !execution.pending && !execution.attempts && !execution.error ? el("div", { class: "skillActions" }, [
-            el("button", { id: "web2ai_run_skill", class: "btn primary", onClick: () => runSkillTest() }, ["执行技能"])
+            el("button", {
+              id: "web2ai_run_skill",
+              class: "btn primary",
+              onClick: () => {
+                SKILL_DIAGNOSTICS && console.info("[web2ai.skill-preview]", "workspace-click", JSON.stringify({
+                  skillId: execution.skillId || "",
+                  mode: execution.mode || "",
+                  sourceCount: (execution.dataSources || []).length
+                }));
+                runSkillTest();
+              }
+            }, ["执行技能"])
           ]) : null,
           execution.data && !execution.pending ? el("div", { class: "skillActions" }, [
-            el("button", { class: "btn primary", onClick: () => runSkillTest({ reuseData: true }) }, ["重新分析"])
+            el("button", {
+              class: "btn primary",
+              onClick: () => {
+                SKILL_DIAGNOSTICS && console.info("[web2ai.skill-preview]", "workspace-reuse-click", JSON.stringify({
+                  skillId: execution.skillId || "",
+                  mode: execution.mode || "",
+                  sourceCount: (execution.dataSources || []).length
+                }));
+                runSkillTest({ reuseData: true });
+              }
+            }, ["重新分析"])
           ]) : null,
           execution.pending
             ? el("div", { class: "skillActions" }, [

@@ -24,7 +24,8 @@ function ensureDerivedRuntimeStyle() {
       min-width: var(--web2ai-derived-column-width, 110px);
       width: var(--web2ai-derived-column-width, 110px);
       max-width: var(--web2ai-derived-column-width, 110px);
-      vertical-align: top;
+      vertical-align: middle;
+      text-align: center;
       background: inherit;
     }
 
@@ -37,8 +38,11 @@ function ensureDerivedRuntimeStyle() {
     }
 
     [${RUNTIME_ROOT_ATTR}] {
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       width: 100%;
+      height: 100%;
     }
 
     [${RUNTIME_NOTE_ATTR}] {
@@ -52,6 +56,7 @@ function ensureDerivedRuntimeStyle() {
       font: 12px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       white-space: normal;
       word-break: break-word;
+      text-align: center;
       box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.08);
     }
 

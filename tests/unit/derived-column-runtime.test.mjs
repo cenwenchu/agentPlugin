@@ -293,6 +293,94 @@ test("blocked runtime retries when list signature changes", () => {
   }
 });
 
+test("source-changed blocked runtime stays blocked when current headers are unchanged", () => {
+  const { shouldRetryBlockedRuntimeForListChange, buildSourceChangeRetrySignature } = runtimeTest;
+  const cleanup = installDom(`
+    <table id="orders">
+      <thead>
+        <tr><th>店铺链接</th><th>链接广告消耗&ROI 更多指标</th><th>成交转化 更多指标</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>链接A</td><td>1.2</td><td>10</td></tr>
+      </tbody>
+    </table>
+  `);
+  try {
+    const skill = {
+      id: "skill_changed",
+      type: "derived-column",
+      source: {
+        id: "source_changed",
+        selector: "#orders",
+        tableIndex: 0,
+        headers: ["店铺链接", "链接ROI分析 更多指标", "成交转化 更多指标"]
+      },
+      selectedColumns: [
+        { header: "链接ROI分析 更多指标", normalizedHeader: "链接roi分析更多指标", occurrence: 1 }
+      ]
+    };
+    const blockedListSignature = buildSourceChangeRetrySignature({
+      status: "changed",
+      actualHeaders: ["店铺链接", "链接广告消耗&ROI 更多指标", "成交转化 更多指标"],
+      candidateCount: 1,
+      ambiguous: false
+    });
+    assert.equal(shouldRetryBlockedRuntimeForListChange({
+      skillId: "skill_changed",
+      status: "blocked",
+      blockedReason: "source-changed",
+      blockedUntil: Number.MAX_SAFE_INTEGER,
+      blockedListSignature
+    }, skill), false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("source-changed blocked runtime retries when visible headers change", () => {
+  const { shouldRetryBlockedRuntimeForListChange, buildSourceChangeRetrySignature } = runtimeTest;
+  const cleanup = installDom(`
+    <table id="orders">
+      <thead>
+        <tr><th>店铺链接</th><th>链接广告消耗&ROI 更多指标</th><th>成交转化 更多指标</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>链接A</td><td>1.2</td><td>10</td></tr>
+      </tbody>
+    </table>
+  `);
+  try {
+    const skill = {
+      id: "skill_changed",
+      type: "derived-column",
+      source: {
+        id: "source_changed",
+        selector: "#orders",
+        tableIndex: 0,
+        headers: ["店铺链接", "链接ROI分析 更多指标", "成交转化 更多指标"]
+      },
+      selectedColumns: [
+        { header: "链接ROI分析 更多指标", normalizedHeader: "链接roi分析更多指标", occurrence: 1 }
+      ]
+    };
+    const blockedListSignature = buildSourceChangeRetrySignature({
+      status: "changed",
+      actualHeaders: ["店铺链接", "营销场景", "成交转化 更多指标"],
+      candidateCount: 1,
+      ambiguous: false
+    });
+    assert.equal(shouldRetryBlockedRuntimeForListChange({
+      skillId: "skill_changed",
+      status: "blocked",
+      blockedReason: "source-changed",
+      blockedUntil: Number.MAX_SAFE_INTEGER,
+      blockedListSignature
+    }, skill), true);
+  } finally {
+    cleanup();
+  }
+});
+
 test("stable rendered blocked runtime is preserved", () => {
   const { shouldKeepStableRenderedRuntime } = runtimeTest;
   const cleanup = installDom(`

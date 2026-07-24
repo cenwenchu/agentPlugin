@@ -4,7 +4,8 @@
  * 本模块运行在所有 frame：目标 frame 的定位和采集分别委托给
  * skill-source-dom.js 与 skill-collector.js；
  * top frame 负责技能目录、页面归属和状态汇总。持久化读取仍直接使用 storage，
- * 写入统一交给 background 串行 mutation；模型调用与全屏交互位于 overlay.js。
+ * 写入统一交给 background 串行 mutation；全屏工作台的采集、提交与继续问
+ * 主流程位于 skill-workspace-controller.js，overlay.js 只保留壳层入口与渲染。
  */
 
 import { DEBUG, IS_TOP_FRAME, STATE, compactOneLine, refs, uid } from "./state.js";
@@ -12,6 +13,7 @@ import { showToast } from "./toast.js";
 import { showConfirmDialog, showPromptDialog } from "./dialog.js";
 import { skillContentFingerprint } from "./skill-import-model.js";
 import {
+  reconcileDerivedColumnSelections,
   SKILL_TYPE_DERIVED_COLUMN,
   SKILL_TYPE_TABLE_ANALYSIS,
   normalizeDerivedColumnOutput,
@@ -20,6 +22,7 @@ import {
   skillTypeOf,
   validateDerivedColumnSkill
 } from "./derived-column-model.js";
+import { buildSkillSourceRecoveryHint, skillSourceStatusLabel } from "./skill-source-status.js";
 import {
   pageKey, tableCandidates, resolveTableFromTarget, extractHeaders, describeTable,
   headerSimilarity, resolveStoredSource, extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination
@@ -45,10 +48,40 @@ let activeBusinessTabTitle = "";
 let confirmedBusinessTabTitle = "";
 let pendingBusinessTabTitle = "";
 let businessTabClickListenerInstalled = false;
-// 技能采集诊断默认跟随内容脚本 DEBUG。日志只输出 frame、DOM 特征、
-// 页码、滚动尺寸和行数，不输出业务单元格内容。
-const SKILL_DIAGNOSTICS = DEBUG;
+let businessTabRefreshGeneration = 0;
+let businessTabRefreshTimers = [];
+// 技能相关排障日志当前默认开启，便于定位跨 frame 校验、状态写入与面板渲染。
+// 日志只输出 frame、DOM 特征、页码、滚动尺寸和行数，不输出业务单元格内容。
+const SKILL_DIAGNOSTICS = true;
 const SKILL_SOURCE_VALIDATE_RETRY_DELAYS_MS = [400, 900, 1600, 2400];
+const SKILL_BUSINESS_TAB_REFRESH_DELAYS_MS = [180, 700, 1600];
+
+function buildSkillStatusStateSnapshot(skill, statuses = {}) {
+  const sources = skill?.sources || [skill?.source].filter(Boolean);
+  return {
+    skillId: skill?.id || "",
+    skillName: skill?.name || "",
+    skillType: skillTypeOf(skill),
+    page: pageKey(),
+    sources: sources.map((source, index) => {
+      const detail = statuses[source.id] || { status: "checking" };
+      return {
+        index,
+        sourceId: source.id || "",
+        sourceName: source.displayName || source.tableTitle || `数据源 ${index + 1}`,
+        businessTabTitle: source.businessTabTitle || "",
+        status: detail.status || "checking",
+        found: Boolean(detail.found),
+        ambiguous: Boolean(detail.ambiguous),
+        candidateCount: Number(detail.candidateCount || 0),
+        similarity: Number(detail.similarity || 0),
+        headerCoverage: Number(detail.headerCoverage || 0),
+        selectedColumnCoverage: Number(detail.selectedColumnCoverage || 0),
+        score: Number(detail.score || 0)
+      };
+    })
+  };
+}
 
 function readBusinessPageTabs() {
   const titles = Array.from(document.querySelectorAll('[class*="realTab"]'))
@@ -165,6 +198,10 @@ async function anchorSkillSourceBar(source, fallbackPage = {}) {
 function renderSkillBars(skills = []) {
   document.querySelectorAll("[data-web2ai-skill-bar]").forEach((node) => node.remove());
   const grouped = new Map();
+  // 某些技能在当前 frame 已不可用，但用户仍需要在表格上方看到它并获知原因。
+  // 这里把“未能定位到表”的技能挂到首个可见表格上统一展示，避免直接消失。
+  const fallbackUnavailableSkills = [];
+  const fallbackUnavailableIds = new Set();
   const probes = [];
   for (const skill of skills) {
     for (const source of (Array.isArray(skill.pageSources) ? skill.pageSources : skillSources(skill))) {
@@ -181,11 +218,27 @@ function renderSkillBars(skills = []) {
         foundTable: Boolean(table),
         similarity: Number(similarity.toFixed(3))
       });
+      if (
+        frameMatches &&
+        !table &&
+        !fallbackUnavailableIds.has(skill.id)
+      ) {
+        fallbackUnavailableIds.add(skill.id);
+        fallbackUnavailableSkills.push(skill);
+      }
       if (!table || !frameMatches) continue;
       const list = grouped.get(table) || [];
       if (!list.some((item) => item.id === skill.id)) list.push(skill);
       grouped.set(table, list);
     }
+  }
+  const fallbackTable = [...grouped.keys()][0] || tableCandidates()[0] || null;
+  if (fallbackTable && fallbackUnavailableSkills.length) {
+    const list = grouped.get(fallbackTable) || [];
+    for (const skill of fallbackUnavailableSkills) {
+      if (!list.some((item) => item.id === skill.id)) list.push(skill);
+    }
+    grouped.set(fallbackTable, list);
   }
   for (const [table, tableSkills] of grouped) {
     const bar = document.createElement("div");
@@ -234,6 +287,32 @@ function renderSkillBars(skills = []) {
     });
     for (const skill of tableSkills) {
       const type = skillTypeOf(skill);
+      const primarySource = skill.sources?.[0] || skill.source;
+      const sourceStatuses = STATE.skillSourceStatuses[skill.id] || {};
+      let statusDetail = primarySource ? sourceStatuses[primarySource.id] : null;
+      if (!statusDetail && primarySource) {
+        // 子 frame 不一定拿得到 top frame 汇总后的状态；统一回退到实时定位，
+        // 让整表分析和按列分析都能得到 changed / missing / ambiguous 灰态。
+        const resolved = resolveStoredSource(primarySource, {
+          skillType: type,
+          selectedColumns: type === SKILL_TYPE_DERIVED_COLUMN ? skill.selectedColumns : []
+        });
+        statusDetail = {
+          status: resolved.status || (resolved.found ? "available" : "missing"),
+          found: Boolean(resolved.found),
+          ambiguous: Boolean(resolved.ambiguous),
+          candidateCount: Number(resolved.candidateCount || 0),
+          similarity: Number(resolved.similarity || 0),
+          headerCoverage: Number(resolved.headerCoverage || 0),
+          selectedColumnCoverage: Number(resolved.selectedColumnCoverage || 0)
+        };
+      }
+      statusDetail ||= { status: "missing" };
+      const statusLabel = skillSourceStatusLabel(statusDetail);
+      const recoveryHint = buildSkillSourceRecoveryHint(skill, sourceStatuses);
+      // 表类型与列类型在技能条上的可用性规则保持一致：只要数据源处于
+      // changed / missing / ambiguous，就统一灰化并禁用操作。
+      const unavailableSource = ["changed", "ambiguous", "missing"].includes(String(statusDetail.status || ""));
       const typeBadgeText = type === SKILL_TYPE_DERIVED_COLUMN ? "列" : "表";
       const typeBadgeStyle = type === SKILL_TYPE_DERIVED_COLUMN
         ? { background: "#ede9fe", color: "#7c3aed" }
@@ -241,8 +320,16 @@ function renderSkillBars(skills = []) {
       const item = document.createElement("span");
       Object.assign(item.style, {
         display: "inline-flex", alignItems: "center", gap: "6px", maxWidth: "100%",
-        padding: "4px 5px 4px 8px", border: "1px solid #dbeafe", borderRadius: "8px", background: "#fff"
+        padding: "4px 5px 4px 8px",
+        border: unavailableSource ? "1px solid #cbd5e1" : "1px solid #dbeafe",
+        borderRadius: "8px",
+        background: unavailableSource ? "#f8fafc" : "#fff",
+        color: unavailableSource ? "#94a3b8" : "#0f172a",
+        opacity: unavailableSource ? "0.78" : "1"
       });
+      if (unavailableSource) {
+        item.title = `数据源不可用（${statusLabel}）。${recoveryHint || "请检查当前页面或重新选择数据源。"}`;
+      }
       const typeBadge = document.createElement("span");
       typeBadge.textContent = typeBadgeText;
       typeBadge.title = type === SKILL_TYPE_DERIVED_COLUMN ? "按列分析" : "整表分析";
@@ -260,18 +347,26 @@ function renderSkillBars(skills = []) {
       });
       const name = document.createElement("span");
       name.textContent = skill.name;
-      name.title = skill.name;
+      name.title = unavailableSource
+        ? `${skill.name}\n数据源不可用（${statusLabel}）`
+        : skill.name;
       Object.assign(name.style, { maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
       const button = document.createElement("button");
       const canExecute = type !== SKILL_TYPE_DERIVED_COLUMN && Boolean(buildAnalysisPrompt(skill.analysisMethod));
+      const executeDisabled = unavailableSource || !canExecute;
       button.textContent = type === SKILL_TYPE_DERIVED_COLUMN ? "自动运行开发中" : "执行";
-      button.disabled = !canExecute;
+      button.disabled = executeDisabled;
       button.title = type === SKILL_TYPE_DERIVED_COLUMN
         ? "按列分析自动运行尚未接入"
-        : (canExecute ? `执行技能：${skill.name}` : "请先配置分析方法");
+        : unavailableSource
+          ? (item.title || `数据源不可用（${statusLabel}）`)
+          : (canExecute ? `执行技能：${skill.name}` : "请先配置分析方法");
       Object.assign(button.style, {
         height: "24px", padding: "0 8px", border: "0", borderRadius: "7px",
-        background: canExecute ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: canExecute ? "pointer" : "not-allowed", fontSize: "11px"
+        background: executeDisabled ? "#cbd5e1" : "#2563eb",
+        color: "#fff",
+        cursor: executeDisabled ? "not-allowed" : "pointer",
+        fontSize: "11px"
       });
       button.addEventListener("click", (event) => {
         event.preventDefault();
@@ -289,8 +384,8 @@ function renderSkillBars(skills = []) {
           display: "inline-flex",
           alignItems: "center",
           gap: "4px",
-          color: enabled ? "#166534" : "#64748b",
-          cursor: "pointer",
+          color: unavailableSource ? "#94a3b8" : (enabled ? "#166534" : "#64748b"),
+          cursor: unavailableSource ? "not-allowed" : "pointer",
           userSelect: "none",
           whiteSpace: "nowrap",
           fontSize: "10px"
@@ -298,6 +393,7 @@ function renderSkillBars(skills = []) {
         const toggle = document.createElement("input");
         toggle.type = "checkbox";
         toggle.checked = enabled;
+        toggle.disabled = unavailableSource;
         toggle.addEventListener("click", (event) => event.stopPropagation());
         toggle.addEventListener("change", async (event) => {
           event.stopPropagation();
@@ -327,10 +423,17 @@ function renderSkillBars(skills = []) {
         const refreshButton = document.createElement("button");
         refreshButton.textContent = "更新";
         refreshButton.title = `手动更新：立即重新分析当前页并展示结果（绕过页面自动熔断）`;
+        refreshButton.disabled = unavailableSource;
         Object.assign(refreshButton.style, {
           height: "24px", padding: "0 8px", border: "0", borderRadius: "7px",
-          background: "#16a34a", color: "#fff", cursor: "pointer", fontSize: "11px"
+          background: unavailableSource ? "#94a3b8" : "#16a34a",
+          color: "#fff",
+          cursor: unavailableSource ? "not-allowed" : "pointer",
+          fontSize: "11px"
         });
+        if (unavailableSource) {
+          refreshButton.title = item.title || `数据源不可用（${statusLabel}）`;
+        }
         refreshButton.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -673,6 +776,9 @@ function createSkillDraft() {
   STATE.skillDraft = createSkillDraftState();
   STATE.activePanelTab = "skills";
   STATE.open = true;
+  refs.suppressPanelCloseUntil = Date.now() + 1000;
+  if (refs.panelCloseTimer) clearTimeout(refs.panelCloseTimer);
+  refs.panelCloseTimer = null;
   chrome.storage.sync.set({ lastPanelTab: "skills" }).catch(() => void 0);
   renderCallback();
 }
@@ -823,8 +929,18 @@ function acceptSkillTablePickResult(payload) {
     } else if (STATE.skillPickSourceId) {
       const index = STATE.skillDraft.sources.findIndex((item) => item.id === STATE.skillPickSourceId);
       if (index >= 0) STATE.skillDraft.sources[index] = source;
+      if (skillTypeOf(STATE.skillDraft) === SKILL_TYPE_DERIVED_COLUMN) {
+        STATE.skillDraft.selectedColumns = reconcileDerivedColumnSelections(
+          STATE.skillDraft.selectedColumns,
+          source.headers || []
+        );
+      }
     } else if (skillTypeOf(STATE.skillDraft) === SKILL_TYPE_DERIVED_COLUMN) {
       STATE.skillDraft.sources = [source];
+      STATE.skillDraft.selectedColumns = reconcileDerivedColumnSelections(
+        STATE.skillDraft.selectedColumns,
+        source.headers || []
+      );
     } else {
       STATE.skillDraft.sources.push(source);
     }
@@ -836,6 +952,9 @@ function acceptSkillTablePickResult(payload) {
 function removeSkillDraftSource(sourceId) {
   if (!STATE.skillDraft) return;
   STATE.skillDraft.sources = STATE.skillDraft.sources.filter((source) => source.id !== sourceId);
+  if (skillTypeOf(STATE.skillDraft) === SKILL_TYPE_DERIVED_COLUMN && !STATE.skillDraft.sources.length) {
+    STATE.skillDraft.selectedColumns = [];
+  }
   renderCallback();
 }
 
@@ -1011,6 +1130,8 @@ async function deleteAllSkills() {
   showToast("全部技能已删除");
 }
 
+// source 可传单个数据源，也可传某个页面的候选数据源列表。background 会按
+// 顺序重试聚焦，直到定位到该页面里的第一个有效技能。
 async function switchToSkillPage(targetPageKey, targetUrl, source = null) {
   let response = await chrome.runtime.sendMessage({
     type: "SWITCH_TO_SKILL_PAGE",
@@ -1061,8 +1182,34 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
     try {
       let validated = null;
       for (let attempt = 0; attempt <= SKILL_SOURCE_VALIDATE_RETRY_DELAYS_MS.length; attempt++) {
-        const response = await chrome.runtime.sendMessage({ type: "VALIDATE_SKILL_SOURCE", source });
+        const businessTabs = readBusinessPageTabs();
+        const response = await chrome.runtime.sendMessage({
+          type: "VALIDATE_SKILL_SOURCE",
+          source,
+          options: {
+            skillType: skill.type,
+            selectedColumns: skill.selectedColumns
+          }
+        });
         validated = response?.data || { status: "missing" };
+        SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] validate-attempt", JSON.stringify({
+          skillId: skill.id,
+          skillName: skill.name,
+          sourceId: source.id,
+          sourceName: source.displayName || source.tableTitle || "",
+          sourceBusinessTabTitle: source.businessTabTitle || "",
+          attempt,
+          page: pageKey(),
+          activeBusinessTabTitle: businessTabs.activeTitle,
+          activeBusinessTabTitleConfirmed: businessTabs.activeTitleConfirmed,
+          availableBusinessTabs: businessTabs.titles,
+          status: validated?.status || "missing",
+          found: Boolean(validated?.found),
+          similarity: Number(validated?.similarity || 0),
+          candidateCount: Number(validated?.candidateCount || 0),
+          frameMismatch: Boolean(validated?.frameMismatch),
+          ambiguous: Boolean(validated?.ambiguous)
+        }));
         // 站点慢加载时，首轮常出现“表格尚未挂载”；给一个短暂重试窗口避免误报失效。
         if (validated.found || validated.status === "changed") break;
         if (attempt >= SKILL_SOURCE_VALIDATE_RETRY_DELAYS_MS.length) break;
@@ -1095,14 +1242,66 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
           probes: statuses[source.id]?.probes || []
         }));
       }
+      SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] validate-final", JSON.stringify({
+        skillId: skill.id,
+        skillName: skill.name,
+        sourceId: source.id,
+        sourceName: source.displayName || source.tableTitle || "",
+        sourceBusinessTabTitle: source.businessTabTitle || "",
+        finalStatus: statuses[source.id]?.status || "missing",
+        found: Boolean(statuses[source.id]?.found),
+        similarity: Number(statuses[source.id]?.similarity || 0),
+        headerCoverage: Number(statuses[source.id]?.headerCoverage || 0),
+        selectedColumnCoverage: Number(statuses[source.id]?.selectedColumnCoverage || 0),
+        candidateCount: Number(statuses[source.id]?.candidateCount || 0),
+        frameMismatch: Boolean(statuses[source.id]?.frameMismatch),
+        ambiguous: Boolean(statuses[source.id]?.ambiguous),
+        expectedHeaders: statuses[source.id]?.expectedHeaders || [],
+        actualHeaders: statuses[source.id]?.actualHeaders || [],
+        headerDiff: statuses[source.id]?.headerDiff || null,
+        missingSelectedColumns: statuses[source.id]?.selectedColumnCoverageDetail?.missing || []
+      }));
     } catch {
       statuses[source.id] = { status: "missing" };
+      SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] validate-final", JSON.stringify({
+        skillId: skill.id,
+        skillName: skill.name,
+        sourceId: source.id,
+        sourceName: source.displayName || source.tableTitle || "",
+        sourceBusinessTabTitle: source.businessTabTitle || "",
+        finalStatus: "missing",
+        found: false,
+        error: "validate-skill-source-threw"
+      }));
     }
   }));
   // 页面切换会同时产生多轮异步校验；旧页面较晚返回时不能覆盖新页面状态。
   if (validationRunId !== skillValidationRunId || !STATE.skills.some((item) => item.id === skill.id)) return;
   STATE.skillSourceStatuses[skill.id] = statuses;
+  const stateSnapshot = buildSkillStatusStateSnapshot(skill, statuses);
+  const stateSignature = JSON.stringify(stateSnapshot);
+  if (SKILL_DIAGNOSTICS && refs.lastSkillStatusStateLog !== stateSignature) {
+    refs.lastSkillStatusStateLog = stateSignature;
+    console.info("[web2ai.skill-panel] state", stateSignature);
+  }
   renderCallback();
+}
+
+function scheduleBusinessTabSkillRefresh() {
+  if (!IS_TOP_FRAME) return;
+  businessTabRefreshGeneration += 1;
+  const refreshGeneration = businessTabRefreshGeneration;
+  for (const timer of businessTabRefreshTimers) clearTimeout(timer);
+  businessTabRefreshTimers = [];
+  // 业务 Tab 切换后，站点经常先切按钮高亮、再异步替换真实表格 DOM。
+  // 这里做 3 次短间隔重校验，确保“已变化/已失效”能在切回原 Tab 后及时恢复。
+  for (const delay of SKILL_BUSINESS_TAB_REFRESH_DELAYS_MS) {
+    const timer = setTimeout(() => {
+      if (refreshGeneration !== businessTabRefreshGeneration) return;
+      loadSkills().catch(() => void 0);
+    }, delay);
+    businessTabRefreshTimers.push(timer);
+  }
 }
 
 function initSkills(onRender) {
@@ -1113,6 +1312,7 @@ function initSkills(onRender) {
       const tab = event.target instanceof Element ? event.target.closest('[class*="realTab"]') : null;
       if (!tab || !String(tab.className || "").split(/\s+/).some((name) => name.endsWith("-realTab"))) return;
       pendingBusinessTabTitle = compactOneLine(tab.textContent || "");
+      scheduleBusinessTabSkillRefresh();
     }, true);
   }
   if (IS_TOP_FRAME && !pageWatchTimer) {

@@ -17,7 +17,7 @@ import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen, clearDraftInput, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition, startSkillExecution } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, initContextDependencies, removeContextByRef } from './context.js';
-import { initSkills, reloadSkills, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars, getBusinessPageTabs } from './skills.js';
+import { initSkills, reloadSkills, createSkillDraft, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars, getBusinessPageTabs } from './skills.js';
 import { applySkillWorkspaceCollectionProgress } from './skill-workspace-controller.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
@@ -95,6 +95,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     Promise.all([
       chrome.storage.sync.set({ launcherHidden: false }),
       startSkillCreation()
+    ])
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    return true;
+  }
+
+  if (message?.type === "OPEN_SKILL_DRAFT") {
+    if (!IS_TOP_FRAME) {
+      sendResponse({ ok: false, error: "Skill draft must run in the top frame" });
+      return;
+    }
+    STATE.launcherVisible = true;
+    setTableSelectionEnabled(true);
+    Promise.all([
+      chrome.storage.sync.set({ launcherHidden: false }),
+      Promise.resolve().then(() => createSkillDraft())
     ])
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
@@ -301,7 +317,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true }); return;
   }
   if (message?.type === "CHECK_SKILL_SOURCE") {
-    sendResponse({ ok: true, data: resolveStoredSource(message.source) });
+    sendResponse({ ok: true, data: resolveStoredSource(message.source, message.options) });
     return;
   }
   if (message?.type === "ACTIVATE_BUSINESS_PAGE_TAB") {
@@ -322,15 +338,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
   if (message?.type === "EXTRACT_SKILL_SOURCE_DATA") {
-    sendResponse({ ok: true, data: extractStoredSourceData(message.source, message.limit || 200) });
+    sendResponse({ ok: true, data: extractStoredSourceData(message.source, message.limit || 200, message.options) });
     return;
   }
   if (message?.type === "EXTRACT_SKILL_SOURCE_PREVIEW_DATA") {
-    sendResponse({ ok: true, data: extractStoredSourcePreviewData(message.source, message.limit || 20) });
+    sendResponse({ ok: true, data: extractStoredSourcePreviewData(message.source, message.limit || 20, message.options) });
     return;
   }
   if (message?.type === "INSPECT_SKILL_SOURCE_PAGINATION") {
-    sendResponse({ ok: true, data: inspectStoredSourcePagination(message.source) });
+    sendResponse({ ok: true, data: inspectStoredSourcePagination(message.source, message.options) });
     return;
   }
   if (message?.type === "COLLECT_SKILL_SOURCE_DATA") {

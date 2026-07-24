@@ -24,7 +24,8 @@ const {
   findPaginationNextButton, getTableContentDigest, getTableRowTexts, waitForTableDataReady
 } = await import("../../src/content/table-pagination-dom.js");
 const {
-  alignedRowCellTexts, extractHeaders, extractStoredSourceData, extractStoredSourcePreviewData, tableCandidates
+  alignedRowCellTexts, extractHeaders, extractStoredSourceData, extractStoredSourcePreviewData,
+  locateStoredSource, resolveStoredSource, tableCandidates
 } = await import("../../src/content/skill-source-dom.js");
 const { extractTableRowText } = await import("../../src/content/context.js");
 
@@ -101,6 +102,23 @@ test("pagination lookup stays scoped to the row container and skips disabled Ant
         <li class="ant-pagination-next ant-pagination-disabled"><button id="disabled">下一页</button></li>
         <li class="ant-pagination-next"><button id="next">下一页</button></li>
       </ul>
+    </section>
+  `);
+  try {
+    assert.equal(findPaginationNextButton(document.querySelector("#row"))?.id, "next");
+  } finally {
+    cleanup();
+  }
+});
+
+test("pagination lookup recognizes VXE pager next button", () => {
+  const cleanup = installDom(`
+    <section>
+      <table><tbody><tr id="row"><td>1</td></tr></tbody></table>
+      <div class="vxe-pager">
+        <button class="vxe-pager--next-btn is--disabled" id="disabled-next">下一页</button>
+        <button class="vxe-pager--next-btn" id="next">下一页</button>
+      </div>
     </section>
   `);
   try {
@@ -212,6 +230,61 @@ test("skill source DOM keeps component identity and empty cell alignment", () =>
   }
 });
 
+test("skill source DOM switches from split header table to body table when rows live separately", () => {
+  const cleanup = installDom(`
+    <section class="vxe-table--render-wrapper">
+      <div class="vxe-table--header-wrapper">
+        <table id="ticket-header" class="vxe-table--header">
+          <thead>
+            <tr>
+              <th>工单号</th>
+              <th>创建时间</th>
+              <th>公司名</th>
+            </tr>
+          </thead>
+        </table>
+      </div>
+      <div class="vxe-table--body-wrapper">
+        <table id="ticket-body" class="vxe-table--body">
+          <tbody>
+            <tr>
+              <td>3251942</td>
+              <td>2026-07-24 13:26:57</td>
+              <td>台州市信驰眼镜有限公司</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `);
+  try {
+    const source = {
+      selector: "#ticket-header",
+      tableIndex: 0,
+      headers: ["工单号", "创建时间", "公司名"]
+    };
+    const data = extractStoredSourceData(source);
+    const preview = extractStoredSourcePreviewData(source);
+    assert.equal(data.found, true);
+    assert.equal(preview.found, true);
+    assert.deepEqual(data.headers, source.headers);
+    assert.deepEqual(preview.headers, source.headers);
+    assert.equal(data.rowCount, 1);
+    assert.deepEqual(data.rows, [[
+      "3251942",
+      "2026-07-24 13:26:57",
+      "台州市信驰眼镜有限公司"
+    ]]);
+    assert.deepEqual(preview.rows, [[
+      "3251942",
+      "2026-07-24 13:26:57",
+      "台州市信驰眼镜有限公司"
+    ]]);
+  } finally {
+    cleanup();
+  }
+});
+
 test("skill source DOM ignores derived headers and derived row cells", () => {
   const cleanup = installDom(`
     <table id="orders">
@@ -318,6 +391,122 @@ test("skill source data ignores fixed summary rows at the bottom", () => {
     ]);
     assert.equal(stored.totalRowCount, 2);
     assert.equal(preview.totalRowCount, 2);
+  } finally {
+    cleanup();
+  }
+});
+
+test("scored locator prefers exact headers over a drifting positional selector on multi-table pages", () => {
+  const cleanup = installDom(`
+    <div class="art-table" id="wrong-table">
+      <table>
+        <thead><tr><th>序号</th><th>店铺链接</th><th>成交转化 更多指标</th></tr></thead>
+        <tbody><tr><td>1</td><td>链接A</td><td>12</td></tr></tbody>
+      </table>
+    </div>
+    <div class="art-table" id="plan-table">
+      <table>
+        <thead><tr><th>序号</th><th>计划预算及消耗</th><th>计划转化 更多指标</th></tr></thead>
+        <tbody><tr><td>1</td><td>100</td><td>9</td></tr></tbody>
+      </table>
+    </div>
+  `);
+  try {
+    const source = {
+      selector: "#wrong-table",
+      selectorStrength: "positional",
+      tableIndex: 0,
+      headers: ["序号", "计划预算及消耗", "计划转化 更多指标"],
+      componentType: "art-table",
+      locatorVersion: 2
+    };
+    const located = locateStoredSource(source, {
+      skillType: "derived-column",
+      selectedColumns: [
+        { header: "计划预算及消耗", occurrence: 1 },
+        { header: "计划转化 更多指标", occurrence: 1 }
+      ]
+    });
+    assert.equal(located.status, "available");
+    assert.equal(located.table?.id, "plan-table");
+    assert.equal(located.matchMethod, "scored-candidate");
+  } finally {
+    cleanup();
+  }
+});
+
+test("scored locator keeps only the active tab table when tab panes coexist in the DOM", () => {
+  const cleanup = installDom(`
+    <div class="tabs">
+      <button class="plan-realTab" aria-selected="true">计划</button>
+      <button class="link-realTab" aria-selected="false">链接</button>
+    </div>
+    <section id="plan-pane">
+      <div class="art-table" id="plan-table">
+        <table>
+          <thead><tr><th>序号</th><th>计划预算及消耗</th><th>计划转化 更多指标</th></tr></thead>
+          <tbody><tr><td>1</td><td>100</td><td>9</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="link-pane" style="display:none">
+      <div class="art-table" id="link-table">
+        <table>
+          <thead><tr><th>序号</th><th>店铺链接</th><th>成交转化 更多指标</th></tr></thead>
+          <tbody><tr><td>1</td><td>链接A</td><td>12</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  `);
+  try {
+    const resolved = resolveStoredSource({
+      selector: "#link-table",
+      selectorStrength: "positional",
+      tableIndex: 0,
+      headers: ["序号", "计划预算及消耗", "计划转化 更多指标"],
+      componentType: "art-table",
+      locatorVersion: 2
+    }, {
+      skillType: "derived-column",
+      selectedColumns: [
+        { header: "计划预算及消耗", occurrence: 1 },
+        { header: "计划转化 更多指标", occurrence: 1 }
+      ]
+    });
+    assert.equal(resolved.found, true);
+    assert.equal(resolved.status, "available");
+    assert.equal(resolved.selectedColumnCoverage, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test("scored locator returns ambiguous when multiple visible tables are equally valid", () => {
+  const cleanup = installDom(`
+    <div class="art-table" id="orders-a">
+      <table>
+        <thead><tr><th>订单号</th><th>状态</th></tr></thead>
+        <tbody><tr><td>A-1</td><td>待处理</td></tr></tbody>
+      </table>
+    </div>
+    <div class="art-table" id="orders-b">
+      <table>
+        <thead><tr><th>订单号</th><th>状态</th></tr></thead>
+        <tbody><tr><td>B-1</td><td>完成</td></tr></tbody>
+      </table>
+    </div>
+  `);
+  try {
+    const located = locateStoredSource({
+      selector: "#missing-table",
+      selectorStrength: "positional",
+      headers: ["订单号", "状态"],
+      componentType: "art-table",
+      locatorVersion: 2
+    });
+    assert.equal(located.table, null);
+    assert.equal(located.status, "ambiguous");
+    assert.equal(located.ambiguous, true);
   } finally {
     cleanup();
   }

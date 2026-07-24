@@ -34,6 +34,11 @@ import {
 
 let renderWorkspace = () => void 0;
 let scheduleWorkspaceRender = () => renderWorkspace();
+const SKILL_DIAGNOSTICS = true;
+
+function logSkillWorkspaceCollection(event, details = {}) {
+  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-workspace]", event, JSON.stringify(details));
+}
 
 function initSkillWorkspaceController({ render, scheduleRender } = {}) {
   if (typeof render === "function") renderWorkspace = render;
@@ -231,6 +236,13 @@ async function startSkillTest(skill, { mode = "test", autoRun = false } = {}) {
   const method = buildAnalysisPrompt(skill.analysisMethod);
   if (!method) return showToast("请先配置分析方法");
   const currentPageKey = `${location.origin}${location.pathname}`;
+  logSkillWorkspaceCollection("test-open", {
+    skillId: skill?.id || "",
+    skillName: skill?.name || "",
+    mode,
+    autoRun,
+    currentPageKey
+  });
   openSkillWorkspace({ skill, method, mode, currentPageKey });
   if (autoRun) setTimeout(() => runSkillTest(), 0);
 }
@@ -242,6 +254,11 @@ function startSkillExecution(skill) {
 
 function startDerivedColumnPreview(skill) {
   const currentPageKey = `${location.origin}${location.pathname}`;
+  logSkillWorkspaceCollection("preview-open", {
+    skillId: skill?.id || "",
+    skillName: skill?.name || "",
+    currentPageKey
+  });
   openSkillWorkspace({
     skill,
     method: String(skill?.analysisMethod?.description || ""),
@@ -340,6 +357,12 @@ async function viewSkillSubmittedPrompt(test) {
 
 async function runDerivedColumnPreview() {
   const test = STATE.skillTest;
+  logSkillWorkspaceCollection("preview-run-invoke", {
+    hasTest: Boolean(test),
+    pending: Boolean(test?.pending),
+    mode: test?.mode || "",
+    skillId: test?.skillId || ""
+  });
   if (!test || test.pending || test.mode !== "derived-preview") return;
   if (!await ensureSkillModelConfigured()) return;
   const sourceItem = test.dataSources?.[0];
@@ -364,12 +387,39 @@ async function runDerivedColumnPreview() {
   sourceItem.data = null;
   renderWorkspace();
   try {
+    logSkillWorkspaceCollection("preview-request", {
+      skillId: test.skillId || "",
+      sourceId: sourceItem.source?.id || "",
+      sourceName: sourceItem.name || "",
+      selectedColumns: test.selectedColumns || []
+    });
     const previewResponse = await sendToBackground({
       type: "EXTRACT_SKILL_SOURCE_PREVIEW_DATA",
       source: sourceItem.source,
-      limit: 20
+      limit: 20,
+      options: {
+        skillType: test.skillType,
+        selectedColumns: test.selectedColumns
+      }
     }).catch(() => null);
+    logSkillWorkspaceCollection("preview-response", {
+      skillId: test.skillId || "",
+      sourceId: sourceItem.source?.id || "",
+      ok: Boolean(previewResponse?.ok),
+      hasData: Boolean(previewResponse?.data),
+      error: previewResponse?.error || ""
+    });
     const extracted = previewResponse?.data;
+    logSkillWorkspaceCollection("source-preview-result", {
+      skillId: test.skillId || "",
+      sourceId: sourceItem.source?.id || "",
+      sourceName: sourceItem.name || "",
+      found: Boolean(extracted?.found),
+      status: extracted?.status || "",
+      rowCount: Number(extracted?.rowCount || 0),
+      totalRowCount: Number(extracted?.totalRowCount || 0),
+      extractionDiagnostics: extracted?.extractionDiagnostics || null
+    });
     if (!extracted?.found) throw new Error("未找到当前数据源对应的表格");
     if (extracted.status === "changed") throw new Error("数据源字段已变化，请重新选择字段");
     if (!Array.isArray(extracted.rows) || !extracted.rows.length) throw new Error("当前页没有可测试的数据");
@@ -471,6 +521,13 @@ async function runDerivedColumnPreview() {
  */
 async function runSkillTest({ reuseData = false } = {}) {
   const test = STATE.skillTest;
+  logSkillWorkspaceCollection("test-run-invoke", {
+    hasTest: Boolean(test),
+    pending: Boolean(test?.pending),
+    mode: test?.mode || "",
+    reuseData,
+    skillId: test?.skillId || ""
+  });
   if (!test || test.pending) return;
   if (!await ensureSkillModelConfigured()) return;
   if (!normalizeText(test.method)) return showToast("请填写分析方法");
@@ -527,6 +584,14 @@ async function runSkillTest({ reuseData = false } = {}) {
         item.collection = { phase: "locating", pages: 0, rowCount: 0, maxPages: item.collectionMaxPages || 1, maxRows: MAX_SKILL_COLLECTION_ROWS };
         test.collectionId = item.collectionId;
         test.collection = item.collection;
+        logSkillWorkspaceCollection("test-source-load-request", {
+          skillId: test.skillId || "",
+          sourceId: item.source?.id || "",
+          sourceName: item.name || "",
+          collectionId: item.collectionId,
+          maxPages: item.collectionMaxPages || 1,
+          maxRows: MAX_SKILL_COLLECTION_ROWS
+        });
         renderWorkspace();
         try {
           let loaded = await sendToBackground({
@@ -534,7 +599,18 @@ async function runSkillTest({ reuseData = false } = {}) {
             source: item.source,
             collectionId: item.collectionId,
             maxPages: item.collectionMaxPages || 1,
-            maxRows: MAX_SKILL_COLLECTION_ROWS
+            maxRows: MAX_SKILL_COLLECTION_ROWS,
+            options: {
+              skillType: test.skillType,
+              selectedColumns: test.selectedColumns
+            }
+          });
+          logSkillWorkspaceCollection("test-source-load-response", {
+            skillId: test.skillId || "",
+            sourceId: item.source?.id || "",
+            ok: Boolean(loaded?.ok),
+            code: loaded?.code || "",
+            error: loaded?.error || ""
           });
           if (!loaded?.ok && loaded?.code === "SOURCE_STRUCTURE_CHANGED") {
             const accepted = await showConfirmDialog(
@@ -555,11 +631,26 @@ async function runSkillTest({ reuseData = false } = {}) {
               source: item.source,
               collectionId: item.collectionId,
               maxPages: item.collectionMaxPages || 1,
-              maxRows: MAX_SKILL_COLLECTION_ROWS
+              maxRows: MAX_SKILL_COLLECTION_ROWS,
+              options: {
+                skillType: test.skillType,
+                selectedColumns: test.selectedColumns
+              }
             });
           }
           if (!loaded?.ok) throw new Error(loaded?.error || "数据源载入失败");
           item.data = loaded.data;
+          logSkillWorkspaceCollection("source-load-result", {
+            skillId: test.skillId || "",
+            sourceId: item.source?.id || "",
+            sourceName: item.name || "",
+            status: loaded.data?.status || "",
+            rowCount: Number(loaded.data?.rowCount || 0),
+            totalRowCount: Number(loaded.data?.totalRowCount || 0),
+            completeForRequest: loaded.data?.completeForRequest !== false,
+            collectionReason: loaded.data?.collectionReason || "",
+            extractionDiagnostics: loaded.data?.extractionDiagnostics || null
+          });
           if (loaded.data?.completeForRequest === false) {
             const reason = loaded.data.collectionReason || "incomplete";
             const reasonLabels = {

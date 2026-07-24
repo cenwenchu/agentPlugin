@@ -5,9 +5,10 @@
  */
 
 import { DEBUG, IS_TOP_FRAME, compactOneLine } from "./state.js";
-import { getCssSelector } from "./dom.js";
+import { getCssSelector, isVisibleElement } from "./dom.js";
 import { skillHeadersMatch } from "./skill-collection-model.js";
-import { SOURCE_LOCATOR_VERSION, chooseSourceTableCandidate } from "./skill-source-model.js";
+import { SOURCE_LOCATOR_VERSION } from "./skill-source-model.js";
+import { normalizeDerivedColumnSelections, normalizedHeaderText, SKILL_TYPE_DERIVED_COLUMN } from "./derived-column-model.js";
 import { resolveTableAdapter } from "./table-adapters.js";
 import { DERIVED_COLUMN_SELECTOR, getRowCells, isHeaderRow, isTableFooterOrSummaryRow } from "./table-row-dom.js";
 import { findHeaderRowAbove } from "./table-header-resolver.js";
@@ -18,6 +19,9 @@ const TABLE_SELECTOR = [
   ".art-table", ".ant-table-wrapper", ".arco-table"
 ].join(",");
 const SKILL_DIAGNOSTICS = DEBUG;
+const STORED_SOURCE_ACCEPT_HEADER_COVERAGE = 0.78;
+const STORED_SOURCE_CHANGED_HEADER_COVERAGE = 0.45;
+const STORED_SOURCE_AMBIGUOUS_SCORE_DELTA = 0.08;
 
 function getStableTableRoot(rowEl) {
   return resolveTableAdapter(rowEl).scope;
@@ -38,11 +42,112 @@ function normalizeHeader(value) {
   return compactOneLine(value).toLowerCase().replace(/\s+/g, "");
 }
 
+function readBusinessTabDomSnapshot() {
+  return Array.from(document.querySelectorAll('[class*="realTab"]'))
+    .filter((element) => String(element.className || "").split(/\s+/).some((name) => name.endsWith("-realTab")))
+    .map((element, index) => ({
+      index,
+      text: compactOneLine(element.textContent || ""),
+      className: String(element.className || "").trim().split(/\s+/).slice(0, 6),
+      ariaSelected: element.getAttribute?.("aria-selected") || "",
+      dataActive: element.getAttribute?.("data-active") || "",
+      visible: isVisibleElement(element)
+    }));
+}
+
 function tableCandidates() {
   const candidates = Array.from(document.querySelectorAll(TABLE_SELECTOR));
   return candidates.filter((candidate, index) => !candidates.some((parent, parentIndex) => (
     parentIndex !== index && parent.contains(candidate) && parent.matches(TABLE_SELECTOR)
   )));
+}
+
+function dataRowsInTable(table) {
+  if (!table) return [];
+  return Array.from(table.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
+    .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row));
+}
+
+function commonAncestorDistance(left, right, maxDepth = 8) {
+  if (!left || !right) return -1;
+  let ancestor = left;
+  for (let depth = 0; ancestor && depth <= maxDepth; depth++, ancestor = ancestor.parentElement) {
+    if (ancestor.contains(right)) return depth;
+  }
+  return -1;
+}
+
+function resolveStoredSourceDataTable(table, source = {}) {
+  if (!table) return table;
+  if (dataRowsInTable(table).length) return table;
+  const expectedHeaders = Array.isArray(source?.headers) ? source.headers : [];
+  const fallbackHeaders = extractHeaders(table);
+  const candidates = preferVisibleTables(tableCandidates())
+    .filter((candidate) => candidate !== table)
+    .map((candidate) => {
+      const rows = dataRowsInTable(candidate);
+      if (!rows.length) return null;
+      const headers = extractHeaders(candidate);
+      const similarity = headerSimilarity(expectedHeaders.length ? expectedHeaders : fallbackHeaders, headers);
+      const distance = commonAncestorDistance(table, candidate);
+      const sameParent = table.parentElement && table.parentElement === candidate.parentElement;
+      return {
+        table: candidate,
+        rows,
+        headers,
+        similarity,
+        distance,
+        score: similarity * 10 + (sameParent ? 3 : 0) + (distance >= 0 ? Math.max(0, 4 - distance) : 0)
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const scoreDiff = right.score - left.score;
+      if (scoreDiff) return scoreDiff;
+      const similarityDiff = right.similarity - left.similarity;
+      if (similarityDiff) return similarityDiff;
+      return right.rows.length - left.rows.length;
+    });
+  const best = candidates[0];
+  if (!best) return table;
+  if (best.similarity < 0.9) return table;
+  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] resolve-data-table", JSON.stringify({
+    sourceId: source?.id || "",
+    fromSelector: getCssSelector(table),
+    toSelector: getCssSelector(best.table),
+    similarity: Number(best.similarity?.toFixed?.(4) || best.similarity || 0),
+    rowCount: best.rows.length,
+    distance: best.distance
+  }));
+  return best.table;
+}
+
+function summarizeTableCandidate(table, index = 0) {
+  if (!table) return null;
+  const rect = table.getBoundingClientRect?.();
+  let selector = "";
+  try {
+    selector = getCssSelector(table);
+  } catch {
+    selector = "";
+  }
+  return {
+    index,
+    tag: table.tagName?.toLowerCase?.() || "",
+    id: table.id || "",
+    className: String(table.className || "").trim().split(/\s+/).slice(0, 6),
+    visible: isVisibleElement(table),
+    selector,
+    title: inferTableTitle(table),
+    headerCount: extractHeaders(table).length,
+    headers: extractHeaders(table).slice(0, 12),
+    rect: rect ? {
+      width: Math.round(rect.width || 0),
+      height: Math.round(rect.height || 0),
+      top: Math.round(rect.top || 0),
+      left: Math.round(rect.left || 0)
+    } : null
+  };
 }
 
 function resolveTableFromTarget(target) {
@@ -53,6 +158,12 @@ function resolveTableFromTarget(target) {
   const matched = target.closest(TABLE_SELECTOR);
   if (!matched) return null;
   return tableCandidates().find((candidate) => candidate === matched || candidate.contains(matched)) || matched;
+}
+
+function preferVisibleTables(tables = []) {
+  const uniqueTables = [...new Set((tables || []).filter(Boolean))];
+  const visibleTables = uniqueTables.filter((table) => isVisibleElement(table));
+  return visibleTables.length ? visibleTables : uniqueTables;
 }
 
 function cellTexts(cells) {
@@ -216,54 +327,330 @@ function headerSimilarity(expected, actual) {
   return overlap / left.size;
 }
 
+function normalizeTitle(value) {
+  return compactOneLine(value).toLowerCase();
+}
+
+function resolveStoredSourceOptions(source = {}, options = {}) {
+  return {
+    skillType: String(options?.skillType || source?.skillType || "").trim(),
+    selectedColumns: Array.isArray(options?.selectedColumns)
+      ? options.selectedColumns
+      : Array.isArray(source?.selectedColumns) ? source.selectedColumns : []
+  };
+}
+
+function buildSelectedColumnCoverage(selectedColumns = [], actualHeaders = []) {
+  const selections = normalizeDerivedColumnSelections(selectedColumns);
+  if (!selections.length) {
+    return { total: 0, matched: 0, ratio: 0, missing: [] };
+  }
+  const actualMeta = (Array.isArray(actualHeaders) ? actualHeaders : []).map((header, index) => ({
+    index,
+    header,
+    normalizedHeader: normalizedHeaderText(header)
+  }));
+  const missing = [];
+  let matched = 0;
+  for (const selection of selections) {
+    const matches = actualMeta.filter((item) => item.normalizedHeader === selection.normalizedHeader);
+    if (matches[selection.occurrence - 1]) {
+      matched += 1;
+      continue;
+    }
+    missing.push(selection);
+  }
+  return {
+    total: selections.length,
+    matched,
+    ratio: selections.length ? matched / selections.length : 0,
+    missing
+  };
+}
+
+function buildStoredSourceCandidate(table, source = {}, options = {}, context = {}) {
+  const headers = extractHeaders(table);
+  const headerCoverage = Array.isArray(source?.headers) && source.headers.length
+    ? headerSimilarity(source.headers, headers)
+    : 0;
+  const selectedColumnCoverage = buildSelectedColumnCoverage(options.selectedColumns, headers);
+  const exactHeaderMatch = Array.isArray(source?.headers) && source.headers.length
+    ? skillHeadersMatch(source.headers, headers)
+    : false;
+  const componentTypeMatched = !source?.componentType || source.componentType === tableComponentType(table);
+  const sourceContainerSignature = compactOneLine(source?.containerSignature || "");
+  const actualContainerSignature = compactOneLine(tableContainerSignature(table));
+  const containerSignatureMatched = !sourceContainerSignature || sourceContainerSignature === actualContainerSignature;
+  const sourceTableTitle = normalizeTitle(source?.tableTitle || "");
+  const actualTableTitle = normalizeTitle(inferTableTitle(table));
+  const tableTitleMatched = !sourceTableTitle || (actualTableTitle && actualTableTitle === sourceTableTitle);
+  const selectorMatched = context.selectorSet?.has(table) || false;
+  const indexedMatched = context.indexedCandidate === table;
+  const visible = isVisibleElement(table);
+  const selectorStrength = String(source?.selectorStrength || "");
+  let score = 0;
+  score += visible ? 0.03 : 0;
+  score += selectorMatched ? (selectorStrength === "stable-id" ? 0.22 : 0.08) : 0;
+  score += indexedMatched ? 0.03 : 0;
+  score += componentTypeMatched ? 0.08 : -0.12;
+  if (sourceContainerSignature) score += containerSignatureMatched ? 0.18 : -0.12;
+  if (sourceTableTitle) score += tableTitleMatched ? 0.08 : -0.05;
+  score += exactHeaderMatch ? 0.35 : 0;
+  score += headerCoverage * 0.28;
+  score += selectedColumnCoverage.ratio * 0.30;
+  const reasons = [];
+  if (selectorMatched) reasons.push("selector");
+  if (indexedMatched) reasons.push("tableIndex");
+  if (exactHeaderMatch) reasons.push("exact-headers");
+  if (selectedColumnCoverage.ratio === 1 && selectedColumnCoverage.total) reasons.push("selected-columns");
+  return {
+    table,
+    headers,
+    candidateIndex: context.candidateIndex,
+    selectorMatched,
+    indexedMatched,
+    componentTypeMatched,
+    containerSignatureMatched,
+    tableTitleMatched,
+    visible,
+    headerCoverage,
+    exactHeaderMatch,
+    selectedColumnCoverage: selectedColumnCoverage.ratio,
+    selectedColumnCoverageDetail: selectedColumnCoverage,
+    score,
+    reasons
+  };
+}
+
+function candidateAcceptLevel(candidate = {}, options = {}) {
+  if (candidate.exactHeaderMatch) return "exact-headers";
+  if (options.skillType === SKILL_TYPE_DERIVED_COLUMN && candidate.selectedColumnCoverageDetail?.total) {
+    return candidate.selectedColumnCoverage === 1 ? "selected-columns" : "";
+  }
+  if (candidate.headerCoverage >= STORED_SOURCE_ACCEPT_HEADER_COVERAGE) return "header-coverage";
+  return "";
+}
+
+function pickBestStoredSourceCandidate(candidates = [], source = {}, options = {}) {
+  if (!candidates.length) {
+    return { table: null, status: "missing", candidateCount: 0, candidates: [] };
+  }
+  const sorted = [...candidates].sort((left, right) => {
+    const scoreDiff = right.score - left.score;
+    if (scoreDiff) return scoreDiff;
+    const selectedDiff = (right.selectedColumnCoverage || 0) - (left.selectedColumnCoverage || 0);
+    if (selectedDiff) return selectedDiff;
+    const headerDiff = (right.headerCoverage || 0) - (left.headerCoverage || 0);
+    if (headerDiff) return headerDiff;
+    return Number(right.selectorMatched) - Number(left.selectorMatched);
+  });
+  const best = sorted[0];
+  const second = sorted[1] || null;
+  const bestAcceptLevel = candidateAcceptLevel(best, options);
+  const secondAcceptLevel = second ? candidateAcceptLevel(second, options) : "";
+  const ambiguous = Boolean(
+    best && second &&
+    Math.abs((best.score || 0) - (second.score || 0)) < STORED_SOURCE_AMBIGUOUS_SCORE_DELTA &&
+    (bestAcceptLevel || secondAcceptLevel || (best.headerCoverage || 0) >= STORED_SOURCE_CHANGED_HEADER_COVERAGE)
+  );
+  if (ambiguous) {
+    return {
+      table: null,
+      status: "ambiguous",
+      ambiguous: true,
+      candidateCount: candidates.length,
+      candidates: sorted
+    };
+  }
+  const status = bestAcceptLevel
+    ? "available"
+    : (best.headerCoverage >= STORED_SOURCE_CHANGED_HEADER_COVERAGE || best.selectorMatched || best.indexedMatched)
+      ? "changed"
+      : "missing";
+  return {
+    table: status === "missing" ? null : best.table,
+    status,
+    ambiguous: false,
+    matchMethod: best.selectorMatched
+      ? (String(source?.selectorStrength || "") === "stable-id" ? "stable-selector" : "selector")
+      : best.indexedMatched ? "tableIndex" : "scored-candidate",
+    candidateCount: candidates.length,
+    candidate: best,
+    candidates: sorted
+  };
+}
+
+function analyzeHeaderDifferences(expected = [], actual = []) {
+  const normalizedExpected = (expected || []).map((header) => normalizeHeader(header));
+  const normalizedActual = (actual || []).map((header) => normalizeHeader(header));
+  const expectedSet = new Set(normalizedExpected.filter(Boolean));
+  const actualSet = new Set(normalizedActual.filter(Boolean));
+  const missingFromActual = [];
+  const addedInActual = [];
+  const positionMismatches = [];
+  const maxLength = Math.max(normalizedExpected.length, normalizedActual.length);
+  for (let index = 0; index < maxLength; index++) {
+    const expectedRaw = expected[index] ?? "";
+    const actualRaw = actual[index] ?? "";
+    const expectedNormalized = normalizedExpected[index] ?? "";
+    const actualNormalized = normalizedActual[index] ?? "";
+    if (!expectedNormalized && actualNormalized) {
+      addedInActual.push({ index, header: actualRaw, normalizedHeader: actualNormalized });
+      continue;
+    }
+    if (expectedNormalized && !actualNormalized) {
+      missingFromActual.push({ index, header: expectedRaw, normalizedHeader: expectedNormalized });
+      continue;
+    }
+    if (expectedNormalized !== actualNormalized) {
+      positionMismatches.push({
+        index,
+        expectedHeader: expectedRaw,
+        actualHeader: actualRaw,
+        expectedNormalized,
+        actualNormalized
+      });
+    }
+  }
+  for (let index = 0; index < normalizedExpected.length; index++) {
+    const normalized = normalizedExpected[index];
+    if (normalized && !actualSet.has(normalized)) {
+      missingFromActual.push({
+        index,
+        header: expected[index],
+        normalizedHeader: normalized
+      });
+    }
+  }
+  for (let index = 0; index < normalizedActual.length; index++) {
+    const normalized = normalizedActual[index];
+    if (normalized && !expectedSet.has(normalized)) {
+      addedInActual.push({
+        index,
+        header: actual[index],
+        normalizedHeader: normalized
+      });
+    }
+  }
+  const dedupeByIndexAndHeader = (items = []) => {
+    const seen = new Set();
+    return items.filter((item) => {
+      const key = `${item.index}::${item.normalizedHeader || item.expectedNormalized || ""}::${item.header || item.expectedHeader || ""}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  return {
+    expectedCount: expected.length,
+    actualCount: actual.length,
+    sameLength: expected.length === actual.length,
+    sameNormalizedSequence: normalizedExpected.length === normalizedActual.length &&
+      normalizedExpected.every((header, index) => header === normalizedActual[index]),
+    firstMismatchIndex: positionMismatches[0]?.index ?? -1,
+    positionMismatches: positionMismatches.slice(0, 20),
+    missingFromActual: dedupeByIndexAndHeader(missingFromActual).slice(0, 20),
+    addedInActual: dedupeByIndexAndHeader(addedInActual).slice(0, 20)
+  };
+}
+
 function sourceMatchesCurrentFrame(source) {
   const expected = pageKey(source?.frameUrl || "");
   return !expected || expected === pageKey(location.href);
 }
 
-function locateStoredSource(source) {
+function locateStoredSource(source, options = {}) {
   if (!sourceMatchesCurrentFrame(source)) {
     return { table: null, status: "missing", frameMismatch: true, candidateCount: 0 };
   }
   const candidates = tableCandidates();
+  const visibleCandidates = preferVisibleTables(candidates);
+  const resolvedOptions = resolveStoredSourceOptions(source, options);
   const versioned = Number(source?.locatorVersion) >= SOURCE_LOCATOR_VERSION;
   let selectorTables = [];
   try {
     const matches = source?.selector
       ? (versioned ? Array.from(document.querySelectorAll(source.selector)) : [document.querySelector(source.selector)].filter(Boolean))
       : [];
-    selectorTables = [...new Set(matches.map(resolveTableFromTarget).filter((table) => table && candidates.includes(table)))];
+    selectorTables = preferVisibleTables(matches.map(resolveTableFromTarget).filter((table) => table && candidates.includes(table)));
   } catch {
     selectorTables = [];
   }
   const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
-  // 新绑定记录了更强的定位语义。selector 本身不唯一，或 selector 与保存序号
-  // 指向不同组件时宁可要求重新绑定，也不能退化成任意选择。旧绑定保持原优先级。
-  const chosen = chooseSourceTableCandidate({
-    locatorVersion: source?.locatorVersion,
-    selectorCandidates: selectorTables,
-    indexedCandidate: indexedTable,
-    selectorStrength: source?.selectorStrength
-  });
+  const preferredIndexedTable = indexedTable && !isVisibleElement(indexedTable) && visibleCandidates.length === 1
+    ? visibleCandidates[0]
+    : indexedTable;
+  const selectorSet = new Set(selectorTables);
+  const scoredCandidates = preferVisibleTables(candidates).map((table, candidateIndex) => (
+    buildStoredSourceCandidate(table, source, resolvedOptions, {
+      candidateIndex,
+      selectorSet,
+      indexedCandidate: preferredIndexedTable
+    })
+  ));
+  const chosen = pickBestStoredSourceCandidate(scoredCandidates, source, resolvedOptions);
+  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] locate", JSON.stringify({
+    page: pageKey(location.href),
+    sourceId: source?.id || "",
+    sourceName: source?.displayName || source?.tableTitle || "",
+    sourceBusinessTabTitle: compactOneLine(source?.businessTabTitle || ""),
+    sourceSelector: source?.selector || "",
+    sourceTableIndex: Number.isInteger(source?.tableIndex) ? source.tableIndex : null,
+    locatorVersion: Number(source?.locatorVersion) || 0,
+    selectorCandidateCount: selectorTables.length,
+    visibleCandidateCount: visibleCandidates.length,
+    candidateCount: candidates.length,
+    indexedCandidateVisible: Boolean(indexedTable && isVisibleElement(indexedTable)),
+    chosenMatchMethod: chosen.matchMethod,
+    chosenAmbiguous: Boolean(chosen.ambiguous),
+    chosenStatus: chosen.status || "missing",
+    businessTabs: readBusinessTabDomSnapshot(),
+    candidates: candidates.map((table, index) => summarizeTableCandidate(table, index)),
+    scoredCandidates: (chosen.candidates || scoredCandidates).map((candidate) => ({
+      candidateIndex: candidate.candidateIndex,
+      score: Number(candidate.score?.toFixed?.(4) || candidate.score || 0),
+      selectorMatched: candidate.selectorMatched,
+      indexedMatched: candidate.indexedMatched,
+      exactHeaderMatch: candidate.exactHeaderMatch,
+      headerCoverage: Number(candidate.headerCoverage?.toFixed?.(4) || candidate.headerCoverage || 0),
+      selectedColumnCoverage: Number(candidate.selectedColumnCoverage?.toFixed?.(4) || candidate.selectedColumnCoverage || 0),
+      reasons: candidate.reasons
+    }))
+  }));
   if (chosen.ambiguous) {
     return { table: null, status: "ambiguous", ambiguous: true, candidateCount: candidates.length };
   }
-  const table = chosen.candidate;
-  if (!table) return { table: null, status: "missing", candidateCount: candidates.length };
+  const table = resolveStoredSourceDataTable(chosen.table, source);
+  if (!table) return { table: null, status: chosen.status || "missing", candidateCount: candidates.length };
   const identityWarnings = [];
   if (versioned && source.componentType && source.componentType !== tableComponentType(table)) identityWarnings.push("component-type-changed");
   if (versioned && source.containerSignature && source.containerSignature !== tableContainerSignature(table)) identityWarnings.push("container-signature-changed");
+  const headers = chosen.candidate?.headers || extractHeaders(table);
+  const headerDiff = analyzeHeaderDifferences(source?.headers || [], headers);
+  const detailOptions = resolveStoredSourceOptions(source, options);
+  const selectedColumnCoverageDetail = chosen.candidate?.selectedColumnCoverageDetail
+    || buildSelectedColumnCoverage(detailOptions.selectedColumns, headers);
   return {
     table,
-    status: "located",
+    status: chosen.status || "available",
     matchMethod: chosen.matchMethod,
     candidateCount: candidates.length,
-    identityWarnings
+    identityWarnings,
+    headers,
+    similarity: chosen.candidate?.headerCoverage || 0,
+    headerCoverage: chosen.candidate?.headerCoverage || 0,
+    selectedColumnCoverage: chosen.candidate?.selectedColumnCoverage || 0,
+    selectedColumnCoverageDetail,
+    score: chosen.candidate?.score || 0,
+    headerDiff,
+    expectedHeaders: (source?.headers || []).slice(0, 80),
+    actualHeaders: headers.slice(0, 80),
+    candidate: chosen.candidate || null
   };
 }
 
-function resolveStoredSource(source) {
-  const located = locateStoredSource(source);
+function resolveStoredSource(source, options = {}) {
+  const located = locateStoredSource(source, options);
   if (!located.table) return {
     found: false,
     status: located.status,
@@ -273,11 +660,17 @@ function resolveStoredSource(source) {
     frameUrl: pageKey(location.href)
   };
   const selected = located.table;
-  const headers = extractHeaders(selected);
-  const similarity = headerSimilarity(source?.headers || [], headers);
+  const headers = located.headers || extractHeaders(selected);
+  const similarity = located.headerCoverage ?? headerSimilarity(source?.headers || [], headers);
+  const resolvedOptions = resolveStoredSourceOptions(source, options);
+  const selectedColumnCoverage = buildSelectedColumnCoverage(resolvedOptions.selectedColumns, headers);
+  const headerDiff = analyzeHeaderDifferences(source?.headers || [], headers);
   const diagnostic = {
     frame: IS_TOP_FRAME ? "top" : "child",
     frameUrl: pageKey(location.href),
+    sourceId: source?.id || "",
+    sourceName: source?.displayName || source?.tableTitle || "",
+    sourceBusinessTabTitle: compactOneLine(source?.businessTabTitle || ""),
     selector: source?.selector || "",
     storedTableIndex: source?.tableIndex,
     candidateCount: located.candidateCount,
@@ -286,27 +679,71 @@ function resolveStoredSource(source) {
     expectedHeaders: (source?.headers || []).slice(0, 80),
     actualHeaderCount: headers.length,
     actualHeaders: headers.slice(0, 80),
+    headerDiff,
+    selectedColumnCoverage: {
+      total: selectedColumnCoverage.total,
+      matched: selectedColumnCoverage.matched,
+      ratio: selectedColumnCoverage.ratio,
+      missing: selectedColumnCoverage.missing
+    },
     similarity,
-    status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed"
+    status: located.status || (skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed"),
+    selectedTable: summarizeTableCandidate(selected)
   };
   // 单行 JSON 便于从复杂业务页面控制台直接复制；仅包含表头，不输出业务数据行。
-  SKILL_DIAGNOSTICS && console.info("[web2ai.skill] validated source", JSON.stringify(diagnostic));
+  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] resolve", JSON.stringify(diagnostic));
   return {
     found: true,
-    status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
+    status: located.status || (skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed"),
     headers,
     similarity,
+    headerCoverage: located.headerCoverage ?? similarity,
+    selectedColumnCoverage: located.selectedColumnCoverage ?? selectedColumnCoverage.ratio,
+    selectedColumnCoverageDetail: {
+      total: selectedColumnCoverage.total,
+      matched: selectedColumnCoverage.matched,
+      ratio: selectedColumnCoverage.ratio,
+      missing: selectedColumnCoverage.missing
+    },
+    score: located.score || 0,
+    expectedHeaders: (source?.headers || []).slice(0, 80),
+    actualHeaders: headers.slice(0, 80),
+    headerDiff,
     identityWarnings: located.identityWarnings
   };
 }
 
-function extractStoredSourceData(source, limit = 200) {
-  const located = locateStoredSource(source);
+function buildRowExtractionDiagnostics(rawRows = [], headers = [], allRows = [], uniqueRows = []) {
+  const summarizeRow = (row, index) => {
+    const cells = getRowCells(row);
+    const aligned = alignedRowCellTexts(cells, headers.length);
+    const nonEmptyValues = aligned.filter(Boolean);
+    return {
+      index,
+      tag: row.tagName?.toLowerCase?.() || "",
+      className: String(row.className || "").trim().split(/\s+/).slice(0, 4),
+      cellCount: cells.length,
+      alignedCellCount: aligned.length,
+      nonEmptyCellCount: nonEmptyValues.length
+    };
+  };
+  return {
+    headerCount: headers.length,
+    rawRowCount: rawRows.length,
+    alignedRowCount: allRows.length,
+    uniqueRowCount: uniqueRows.length,
+    sampleRows: rawRows.slice(0, 3).map(summarizeRow)
+  };
+}
+
+function extractStoredSourceData(source, limit = 200, options = {}) {
+  const located = locateStoredSource(source, options);
   const selected = located.table;
   if (!selected) return { found: false, status: located.status, ambiguous: located.ambiguous, candidateCount: located.candidateCount };
-  const headers = extractHeaders(selected);
-  const allRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
-    .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row))
+  const headers = located.headers || extractHeaders(selected);
+  const rawRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
+    .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row));
+  const allRows = rawRows
     .map((row) => alignedRowCellTexts(getRowCells(row), headers.length))
     .filter((cells) => cells.length && cells.some(Boolean));
   const uniqueRows = [];
@@ -318,6 +755,16 @@ function extractStoredSourceData(source, limit = 200) {
     uniqueRows.push(row);
   }
   const rows = uniqueRows.slice(0, limit);
+  const extractionDiagnostics = buildRowExtractionDiagnostics(rawRows, headers, allRows, uniqueRows);
+  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] extract-data", JSON.stringify({
+    sourceId: source?.id || "",
+    status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
+    found: true,
+    rowCount: rows.length,
+    totalRowCount: uniqueRows.length,
+    truncated: uniqueRows.length > rows.length,
+    extractionDiagnostics
+  }));
   return {
     found: true,
     status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
@@ -325,20 +772,32 @@ function extractStoredSourceData(source, limit = 200) {
     rows,
     rowCount: rows.length,
     totalRowCount: uniqueRows.length,
-    truncated: uniqueRows.length > rows.length
+    truncated: uniqueRows.length > rows.length,
+    extractionDiagnostics
   };
 }
 
-function extractStoredSourcePreviewData(source, limit = 20) {
-  const located = locateStoredSource(source);
+function extractStoredSourcePreviewData(source, limit = 20, options = {}) {
+  const located = locateStoredSource(source, options);
   const selected = located.table;
   if (!selected) return { found: false, status: located.status, ambiguous: located.ambiguous, candidateCount: located.candidateCount };
-  const headers = extractHeaders(selected);
-  const allRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
-    .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row))
+  const headers = located.headers || extractHeaders(selected);
+  const rawRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
+    .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row));
+  const allRows = rawRows
     .map((row) => alignedRowCellTexts(getRowCells(row), headers.length))
     .filter((cells) => cells.length && cells.some(Boolean));
   const rows = allRows.slice(0, Math.max(1, limit));
+  const extractionDiagnostics = buildRowExtractionDiagnostics(rawRows, headers, allRows, allRows);
+  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] extract-preview", JSON.stringify({
+    sourceId: source?.id || "",
+    status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
+    found: true,
+    rowCount: rows.length,
+    totalRowCount: allRows.length,
+    truncated: allRows.length > rows.length,
+    extractionDiagnostics
+  }));
   return {
     found: true,
     status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
@@ -346,12 +805,13 @@ function extractStoredSourcePreviewData(source, limit = 20) {
     rows,
     rowCount: rows.length,
     totalRowCount: allRows.length,
-    truncated: allRows.length > rows.length
+    truncated: allRows.length > rows.length,
+    extractionDiagnostics
   };
 }
 
-function inspectStoredSourcePagination(source) {
-  const located = locateStoredSource(source);
+function inspectStoredSourcePagination(source, options = {}) {
+  const located = locateStoredSource(source, options);
   const table = located.table;
   if (!table) return { found: false, status: located.status, ambiguous: located.ambiguous, multiPage: false };
   const anchorRow = table.querySelector?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");

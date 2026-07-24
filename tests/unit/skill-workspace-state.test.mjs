@@ -53,6 +53,8 @@ test("derives reuse, dirty-method and active-source state", () => {
   assert.equal(skillWorkspaceHasAllSourceData(session), false);
   session.dataSources.forEach((item) => { item.data = { rows: [] }; });
   assert.equal(skillWorkspaceHasAllSourceData(session), true);
+  session.dataSources[0].data.completeForRequest = false;
+  assert.equal(skillWorkspaceHasAllSourceData(session), false, "incomplete collection must trigger a fresh reload on retry");
   session.method = "分析\u00a0\n结果\n\n\n";
   assert.equal(skillWorkspaceMethodDirty(session), false, "layout whitespace uses the existing normalized comparison");
   session.method = "分析其他结果";

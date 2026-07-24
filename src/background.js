@@ -118,18 +118,24 @@ async function openSkillsPanelWhenReady(tabId) {
   return false;
 }
 
-async function focusSkillSourceWhenReady(tabId, source) {
-  if (!source) return false;
+// 切页后的技能面板可能关联多个数据源；依次尝试候选 source，直到命中
+// 第一个仍可定位的表格，避免因为首个技能失效而完全不聚焦。
+async function focusSkillSourceWhenReady(tabId, sourceOrSources) {
+  const candidates = (Array.isArray(sourceOrSources) ? sourceOrSources : [sourceOrSources])
+    .filter(Boolean);
+  if (!candidates.length) return false;
   for (let attempt = 0; attempt < 30; attempt++) {
     const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
-    const results = await Promise.all(frames.map(async (frame) => {
-      try {
-        return await sendToFrame(tabId, frame.frameId, { type: "FOCUS_SKILL_SOURCE", source });
-      } catch {
-        return null;
-      }
-    }));
-    if (results.some((result) => result?.ok && result.data?.found)) return true;
+    for (const source of candidates) {
+      const results = await Promise.all(frames.map(async (frame) => {
+        try {
+          return await sendToFrame(tabId, frame.frameId, { type: "FOCUS_SKILL_SOURCE", source });
+        } catch {
+          return null;
+        }
+      }));
+      if (results.some((result) => result?.ok && result.data?.found)) return true;
+    }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
   return false;
@@ -620,7 +626,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const ordered = frameSelection.frames;
         const frameResults = await Promise.all(ordered.map(async (frame) => {
           try {
-            const response = await sendToFrame(sender.tab.id, frame.frameId, { type: "CHECK_SKILL_SOURCE", source: message.source });
+            const response = await sendToFrame(sender.tab.id, frame.frameId, {
+              type: "CHECK_SKILL_SOURCE",
+              source: message.source,
+              options: message.options
+            });
             return response?.ok
               ? { ...(response.data || {}), frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url) }
               : { found: false, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url), error: response?.error || "check failed" };
@@ -637,11 +647,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!preferredFramePresent && attempt >= 2) break;
         const results = frameResults.filter((result) => result.found);
         const candidate = results.sort((a, b) => {
+          const scoreDiff = (b.score || 0) - (a.score || 0);
+          if (scoreDiff) return scoreDiff;
+          const selectedDiff = (b.selectedColumnCoverage || 0) - (a.selectedColumnCoverage || 0);
+          if (selectedDiff) return selectedDiff;
           const similarityDiff = (b.similarity || 0) - (a.similarity || 0);
           if (similarityDiff) return similarityDiff;
           return Number(normalizedPageKey(b.frameUrl) === preferredFrameUrl) - Number(normalizedPageKey(a.frameUrl) === preferredFrameUrl);
         })[0];
-        if (candidate && (!best || (candidate.similarity || 0) > (best.similarity || 0))) best = candidate;
+        if (candidate && (
+          !best ||
+          (candidate.score || 0) > (best.score || 0) ||
+          ((candidate.score || 0) === (best.score || 0) && (candidate.similarity || 0) > (best.similarity || 0))
+        )) best = candidate;
         if (best?.status === "available") break;
         if (candidate?.found) {
           const signature = JSON.stringify(candidate.headers || []);
@@ -684,7 +702,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             try {
               const validation = await sendToFrame(tabId, frame.frameId, {
                 type: "CHECK_SKILL_SOURCE",
-                source: message.source
+                source: message.source,
+                options: message.options
               });
               if (validation?.data?.status === "ambiguous") return { ambiguous: true };
               if (!validation?.ok || !validation.data?.found) continue;
@@ -698,7 +717,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   collectionId,
                   maxPages: Math.max(1, Math.min(MAX_SKILL_COLLECTION_PAGES, Number(message.maxPages) || 1)),
                   maxRows: Math.max(1, Math.min(MAX_SKILL_COLLECTION_ROWS, Number(message.maxRows) || MAX_SKILL_COLLECTION_ROWS)),
-                  waitForInitialRowsMs: SKILL_AUTO_OPENED_TABS.has(tabId) ? 8000 : 2500
+                  waitForInitialRowsMs: SKILL_AUTO_OPENED_TABS.has(tabId) ? 8000 : 2500,
+                  sourceOptions: message.options
                 }
               });
               if (response?.ok && response.data?.found) {
@@ -801,7 +821,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               const response = await sendToFrame(tabId, frame.frameId, {
                 type: "EXTRACT_SKILL_SOURCE_PREVIEW_DATA",
                 source: message.source,
-                limit: message.limit || 20
+                limit: message.limit || 20,
+                options: message.options
               });
               if (response?.ok && response.data?.found) return response.data;
               if (response?.ok && response.data) lastFound = response.data;

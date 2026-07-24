@@ -191,6 +191,26 @@ function buildRuntimeRows({
   const normalized = normalizeDerivedColumnSkill(skill);
   const resolved = resolveSelectedColumns(headers, normalized.selectedColumns);
   if (resolved.missing.length) {
+    logDerivedRuntime("selected-columns-mismatch", {
+      skillId: skill.id,
+      selectedColumns: (normalized.selectedColumns || []).map((item) => ({
+        index: Number(item?.index),
+        header: item?.header || "",
+        normalizedHeader: item?.normalizedHeader || "",
+        occurrence: Number(item?.occurrence) || 1
+      })),
+      currentHeaders: (headers || []).map((header, index) => ({
+        index,
+        header,
+        normalizedHeader: String(header || "").trim().toLowerCase().replace(/\s+/g, "")
+      })),
+      missingSelections: resolved.missing.map((item) => ({
+        index: Number(item?.index),
+        header: item?.header || "",
+        normalizedHeader: item?.normalizedHeader || "",
+        occurrence: Number(item?.occurrence) || 1
+      }))
+    }, "warn");
     throw new Error("字段已变化，请重新选择");
   }
   const selectedColumns = resolved.columns;
@@ -338,6 +358,18 @@ function buildRuntimeListSignature(rows = []) {
     .join("|");
 }
 
+function buildSourceChangeRetrySignature(located = {}) {
+  const headers = (located?.actualHeaders || located?.headers || [])
+    .map((header) => String(header || "").trim().toLowerCase().replace(/\s+/g, ""))
+    .filter(Boolean);
+  return [
+    String(located?.status || "missing"),
+    Boolean(located?.ambiguous) ? "1" : "0",
+    Number(located?.candidateCount || 0),
+    headers.join("|")
+  ].join("::");
+}
+
 function resolveControllerListSignature(controller, skill) {
   const root = controller?.root;
   if (!root?.isConnected || !skill) return "";
@@ -350,10 +382,24 @@ function resolveControllerListSignature(controller, skill) {
   return buildRuntimeListSignature(runtimeModel.rows);
 }
 
+function resolveControllerBlockedSignature(controller, skill) {
+  if (!skill) return "";
+  if (String(controller?.blockedReason || "") === "source-changed") {
+    const source = skill.sources?.[0] || skill.source;
+    if (!source) return "";
+    const located = locateStoredSource(source, {
+      skillType: SKILL_TYPE_DERIVED_COLUMN,
+      selectedColumns: skill.selectedColumns
+    });
+    return buildSourceChangeRetrySignature(located);
+  }
+  return resolveControllerListSignature(controller, skill);
+}
+
 function shouldRetryBlockedRuntimeForListChange(controller, skill) {
   if (!isRuntimeBlockedByCooldown(controller) || !skill) return false;
   try {
-    const currentListSignature = resolveControllerListSignature(controller, skill);
+    const currentListSignature = resolveControllerBlockedSignature(controller, skill);
     if (!currentListSignature) return false;
     return currentListSignature !== String(controller?.blockedListSignature || "");
   } catch {
@@ -451,16 +497,33 @@ async function locateRuntimeSource(skill) {
     selector: source.selector || "",
     tableIndex: Number(source.tableIndex) || 0
   });
-  const located = locateStoredSource(source);
-  if (!located.table) {
+  const located = locateStoredSource(source, {
+    skillType: SKILL_TYPE_DERIVED_COLUMN,
+    selectedColumns: skill.selectedColumns
+  });
+  if (!located.table || located.status !== "available") {
     logDerivedRuntime("locate-source-miss", {
       skillId: skill.id,
       sourceId: source.id,
       status: located.status || "missing",
       ambiguous: Boolean(located.ambiguous),
-      candidateCount: located.candidateCount || 0
+      candidateCount: located.candidateCount || 0,
+      headerCoverage: Number(located.headerCoverage || 0),
+      selectedColumnCoverage: Number(located.selectedColumnCoverage || 0),
+      score: Number(located.score || 0),
+      expectedHeaders: located.expectedHeaders || [],
+      actualHeaders: located.actualHeaders || [],
+      headerDiff: located.headerDiff || null,
+      missingSelectedColumns: located.selectedColumnCoverageDetail?.missing || []
     }, "warn");
-    throw new Error(located.status === "changed" ? "字段已变化，请重新选择" : "未找到当前数据源对应的表格");
+    if (located.status === "changed") {
+      const error = new Error("字段已变化，请重新选择");
+      error.code = "SOURCE_CHANGED";
+      error.blockedReason = "source-changed";
+      error.retrySignature = buildSourceChangeRetrySignature(located);
+      throw error;
+    }
+    throw new Error("未找到当前数据源对应的表格");
   }
   await waitForTableDataReady(located.table, "", 5000, source.tableIndex, {
     minWaitMs: 80,
@@ -469,13 +532,16 @@ async function locateRuntimeSource(skill) {
     compareContent: true,
     waitForLoading: true
   });
-  const headers = extractHeaders(located.table);
+  const headers = located.headers || extractHeaders(located.table);
   logDerivedRuntime("locate-source-hit", {
     skillId: skill.id,
     sourceId: source.id,
     headerCount: headers.length,
     matchMethod: located.matchMethod || "",
-    candidateCount: located.candidateCount || 0
+    candidateCount: located.candidateCount || 0,
+    headerCoverage: Number(located.headerCoverage || 0),
+    selectedColumnCoverage: Number(located.selectedColumnCoverage || 0),
+    score: Number(located.score || 0)
   });
   return { table: located.table, headers, source };
 }
@@ -776,6 +842,21 @@ async function runDerivedRuntimeSkill(controller) {
       status: controller.status
     }, hasFailures ? "warn" : "info");
   } catch (error) {
+    if (
+      error?.code === "SOURCE_CHANGED" &&
+      !runOptions.manual
+    ) {
+      controller.status = "blocked";
+      controller.blockedUntil = Number.MAX_SAFE_INTEGER;
+      controller.blockedReason = String(error?.blockedReason || "source-changed");
+      controller.blockedListSignature = String(error?.retrySignature || "");
+      controller.blockedGuardKey = "source-change";
+      logDerivedRuntime("source-changed-blocked", {
+        skillId,
+        blockedReason: controller.blockedReason,
+        blockedListSignature: controller.blockedListSignature
+      }, "warn");
+    }
     const blocked = controller.status === "blocked";
     controller.status = blocked ? "blocked" : "error";
     logDerivedRuntime("run-error", {
@@ -1064,6 +1145,7 @@ export {
 };
 
 export const __test = {
+  buildSourceChangeRetrySignature,
   clearStaleRuntimeController,
   normalizeRuntimeRunOptions,
   buildPageRequestGuardKey,

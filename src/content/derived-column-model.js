@@ -73,6 +73,31 @@ function normalizeDerivedColumnSelections(columns = []) {
   return normalized;
 }
 
+function reconcileDerivedColumnSelections(columns = [], headers = []) {
+  const normalized = normalizeDerivedColumnSelections(columns);
+  const sourceHeaders = Array.isArray(headers) ? headers : [];
+  if (!sourceHeaders.length) return normalized;
+  const available = new Map();
+  for (let index = 0; index < sourceHeaders.length; index++) {
+    const header = normalizeWhitespace(sourceHeaders[index]);
+    const normalizedHeader = normalizedHeaderText(header);
+    if (!normalizedHeader) continue;
+    const occurrence = sourceHeaders
+      .slice(0, index + 1)
+      .filter((item) => normalizedHeaderText(item) === normalizedHeader)
+      .length || 1;
+    available.set(`${normalizedHeader}#${occurrence}`, {
+      index,
+      header,
+      normalizedHeader,
+      occurrence
+    });
+  }
+  return normalized
+    .map((column) => available.get(derivedColumnSelectionKey(column)) || null)
+    .filter(Boolean);
+}
+
 function normalizeDerivedColumnAnalysisMethod(method = {}) {
   if (typeof method === "string") return { description: method.trim() };
   return { description: String(method?.description || "").replace(/\r\n?/g, "\n").trim() };
@@ -115,10 +140,11 @@ function normalizeDerivedColumnSkill(skill = {}) {
     skill.defaultMethodVersion || skill.analysisMethod?.defaultMethodVersion,
     DEFAULT_DERIVED_METHOD_VERSION
   );
+  const primarySource = (Array.isArray(skill.sources) && skill.sources.length ? skill.sources[0] : skill.source) || null;
   return {
     ...skill,
     type: SKILL_TYPE_DERIVED_COLUMN,
-    selectedColumns: normalizeDerivedColumnSelections(skill.selectedColumns),
+    selectedColumns: reconcileDerivedColumnSelections(skill.selectedColumns, primarySource?.headers || []),
     analysisMethod,
     defaultMethodVersion,
     output: normalizeDerivedColumnOutput(skill.output),
@@ -154,6 +180,7 @@ export {
   DEFAULT_DERIVED_MAX_BATCH_ROWS,
   derivedColumnSelectionKey,
   isDerivedColumnSkill,
+  reconcileDerivedColumnSelections,
   normalizeDerivedColumnAnalysisMethod,
   normalizeDerivedColumnExecution,
   normalizeDerivedColumnOutput,

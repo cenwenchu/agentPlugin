@@ -98,3 +98,16 @@ test("parseDerivedColumnResults supports fenced json and reports duplicate or mi
     ["缺少结果", "返回了未知 fingerprint", "返回了重复 fingerprint"].sort()
   );
 });
+
+test("parseDerivedColumnResults maps payload parse failure to every expected fingerprint", () => {
+  const parsed = parseDerivedColumnResults({
+    text: "模型返回了一段非 JSON 文本",
+    expectedFingerprints: ["sha256:a", "sha256:b"],
+    output: { maxChars: 10 }
+  });
+  assert.equal(parsed.results.length, 0);
+  assert.deepEqual(parsed.failures.map((item) => item.fingerprint), ["sha256:a", "sha256:b"]);
+  for (const failure of parsed.failures) {
+    assert.match(failure.error, /^结果解析失败：/);
+  }
+});

@@ -21,6 +21,7 @@ import {
 
 const activeCollections = new Map();
 const SKILL_COLLECTION_DIAGNOSTICS = DEBUG;
+const SKILL_PAGINATION_SELECTOR = ".ant-pagination,.arco-pagination,.vxe-pager,[class*='pagination'],[class*='pager'],[role='navigation']";
 
 // 普通跨页选择继续使用 table-pagination-dom 的保守默认值。技能采集已经先
 // 校验数据源身份，可按内容摘要自适应结束等待，避免每次滚动/翻页固定停两秒。
@@ -276,18 +277,40 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
   let headers = [];
   let added = 0;
   let scrollSteps = 0;
+  let lastExtractionDiagnostics = null;
+  let lastStatus = "";
+  let lastRenderedRowCount = 0;
+  let lastTotalRowCount = 0;
   const addRenderedRows = () => {
     const current = extractStoredSourceData(source, maxRows);
     if (!current.found) return current;
     headers = current.headers || headers;
+    lastStatus = current.status || lastStatus;
+    lastRenderedRowCount = Number(current.rowCount || 0);
+    lastTotalRowCount = Number(current.totalRowCount || 0);
+    lastExtractionDiagnostics = current.extractionDiagnostics || lastExtractionDiagnostics;
+    let newlyAdded = 0;
     for (const row of current.rows || []) {
       const signature = row.join("\u241f");
       if (seen.has(signature)) continue;
       seen.add(signature);
       rows.push(row);
       added++;
+      newlyAdded++;
       if (rows.length >= maxRows) break;
     }
+    logSkillCollection("extract rows snapshot", {
+      collectionId,
+      page,
+      found: Boolean(current.found),
+      status: current.status || "",
+      currentRowCount: current.rowCount || 0,
+      totalRowCount: current.totalRowCount || 0,
+      newlyAdded,
+      totalAdded: added,
+      totalRows: rows.length,
+      extractionDiagnostics: current.extractionDiagnostics || null
+    });
     return current;
   };
 
@@ -340,9 +363,21 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
   let current = addRenderedRows();
   logSkillCollection("first rendered rows", {
     collectionId, page, found: Boolean(current.found), renderedRows: current.rowCount || 0,
-    added, totalRows: rows.length, scrollTop: Math.round(scroller?.scrollTop || 0)
+    added, totalRows: rows.length, scrollTop: Math.round(scroller?.scrollTop || 0),
+    extractionDiagnostics: lastExtractionDiagnostics
   });
-  if (!current.found) return { found: false, headers, added, scrollSteps };
+  if (!current.found) {
+    return {
+      found: false,
+      headers,
+      added,
+      scrollSteps,
+      status: current.status || lastStatus,
+      rowCount: lastRenderedRowCount,
+      totalRowCount: lastTotalRowCount,
+      extractionDiagnostics: lastExtractionDiagnostics
+    };
+  }
   if (page === 1 && !current.rowCount && waitForInitialRowsMs > 0) {
     const startedAt = Date.now();
     while (!control.stopped && Date.now() - startedAt < waitForInitialRowsMs) {
@@ -351,11 +386,23 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
       });
       await new Promise((resolve) => setTimeout(resolve, 300));
       current = addRenderedRows();
-      if (!current.found) return { found: false, headers, added, scrollSteps };
+      if (!current.found) {
+        return {
+          found: false,
+          headers,
+          added,
+          scrollSteps,
+          status: current.status || lastStatus,
+          rowCount: lastRenderedRowCount,
+          totalRowCount: lastTotalRowCount,
+          extractionDiagnostics: lastExtractionDiagnostics
+        };
+      }
       if (current.rowCount > 0) break;
     }
     logSkillCollection("initial rows ready", {
-      collectionId, page, waitedMs: Date.now() - startedAt, renderedRows: current.rowCount || 0
+      collectionId, page, waitedMs: Date.now() - startedAt, renderedRows: current.rowCount || 0,
+      extractionDiagnostics: lastExtractionDiagnostics
     });
   }
   const scrollCollection = await resolvePageScrollCollection(source, table, page);
@@ -364,20 +411,42 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
   const scrollMode = scrollCollection.mode;
   // 等待期间首屏可能继续补行，先收录再开始滚动。
   current = addRenderedRows();
-  if (!current.found) return { found: false, headers, added, scrollSteps };
+  if (!current.found) {
+    return {
+      found: false,
+      headers,
+      added,
+      scrollSteps,
+      status: current.status || lastStatus,
+      rowCount: lastRenderedRowCount,
+      totalRowCount: lastTotalRowCount,
+      extractionDiagnostics: lastExtractionDiagnostics
+    };
+  }
   logSkillCollection("page scan", {
     collectionId, page, table: describeCollectionElement(table), scroller: describeCollectionElement(scroller),
     scrollMode, renderedRows: current.rowCount || 0, added, totalRows: rows.length,
     scrollTop: Math.round(scroller?.scrollTop || 0), clientHeight: scroller?.clientHeight || 0,
     scrollHeight: scroller?.scrollHeight || 0,
-    candidates: page === 1 ? describeScrollCandidates(table) : undefined
+    candidates: page === 1 ? describeScrollCandidates(table) : undefined,
+    extractionDiagnostics: lastExtractionDiagnostics
   });
   if (scrollMode === "none") {
     logSkillCollection("page scroll skipped", {
       collectionId, page, reason: "no-scroll-mode", renderedRows: current.rowCount || 0,
-      added, totalRows: rows.length, candidates: describeScrollCandidates(table)
+      added, totalRows: rows.length, candidates: describeScrollCandidates(table),
+      extractionDiagnostics: lastExtractionDiagnostics
     });
-    return { found: true, headers, added, scrollSteps };
+    return {
+      found: true,
+      headers,
+      added,
+      scrollSteps,
+      status: lastStatus,
+      rowCount: lastRenderedRowCount,
+      totalRowCount: lastTotalRowCount,
+      extractionDiagnostics: lastExtractionDiagnostics
+    };
   }
 
   try {
@@ -404,19 +473,44 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
         await waitForVirtualRows(source, table, beforeDigest, beforeRows);
         const addedBefore = added;
         current = addRenderedRows();
-        if (!current.found) return { found: false, headers, added, scrollSteps };
+        if (!current.found) {
+          return {
+            found: false,
+            headers,
+            added,
+            scrollSteps,
+            status: current.status || lastStatus,
+            rowCount: lastRenderedRowCount,
+            totalRowCount: lastTotalRowCount,
+            extractionDiagnostics: lastExtractionDiagnostics
+          };
+        }
         const newlyAdded = added - addedBefore;
         consecutiveEmptySteps = newlyAdded > 0 ? 0 : consecutiveEmptySteps + 1;
         logSkillCollection("scroll step", {
           collectionId, page, step: scrollSteps, mode: "into-view",
-          renderedRows: current.rowCount || 0, added: newlyAdded, consecutiveEmptySteps, totalRows: rows.length
+          renderedRows: current.rowCount || 0, added: newlyAdded, consecutiveEmptySteps, totalRows: rows.length,
+          extractionDiagnostics: lastExtractionDiagnostics
         });
         if (newlyAdded <= 0) stableBottomPasses++;
         else stableBottomPasses = 0;
         if (stableBottomPasses >= 2 || shouldStopAfterNoProgress(consecutiveEmptySteps, 2)) break;
       }
-      logSkillCollection("page scroll complete", { collectionId, page, scrollSteps, added, totalRows: rows.length, stopped: control.stopped, mode: "into-view" });
-      return { found: true, headers, added, scrollSteps, stopped: control.stopped };
+      logSkillCollection("page scroll complete", {
+        collectionId, page, scrollSteps, added, totalRows: rows.length, stopped: control.stopped,
+        mode: "into-view", extractionDiagnostics: lastExtractionDiagnostics
+      });
+      return {
+        found: true,
+        headers,
+        added,
+        scrollSteps,
+        stopped: control.stopped,
+        status: lastStatus,
+        rowCount: lastRenderedRowCount,
+        totalRowCount: lastTotalRowCount,
+        extractionDiagnostics: lastExtractionDiagnostics
+      };
     }
 
     let bounds = collectionScrollBounds(scroller, table);
@@ -426,7 +520,18 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
       setVerticalScrollTop(scroller, bounds.start);
       await waitForVirtualRows(source, table, beforeDigest, beforeRows);
       current = addRenderedRows();
-      if (!current.found) return { found: false, headers, added, scrollSteps };
+      if (!current.found) {
+        return {
+          found: false,
+          headers,
+          added,
+          scrollSteps,
+          status: current.status || lastStatus,
+          rowCount: lastRenderedRowCount,
+          totalRowCount: lastTotalRowCount,
+          extractionDiagnostics: lastExtractionDiagnostics
+        };
+      }
     }
 
     let stableBottomPasses = 0;
@@ -466,7 +571,18 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
       await waitForVirtualRows(source, table, beforeDigest, beforeRows);
       const addedBeforeScrollRead = added;
       current = addRenderedRows();
-      if (!current.found) return { found: false, headers, added, scrollSteps };
+      if (!current.found) {
+        return {
+          found: false,
+          headers,
+          added,
+          scrollSteps,
+          status: current.status || lastStatus,
+          rowCount: lastRenderedRowCount,
+          totalRowCount: lastTotalRowCount,
+          extractionDiagnostics: lastExtractionDiagnostics
+        };
+      }
       const newlyAdded = added - addedBeforeScrollRead;
       // `probe` 只表示初次缺少框架级虚拟滚动特征。一旦实际滚动获得了
       // 新数据，就已经用行为证明确实需要滚动；后续应容忍一个短暂空白
@@ -476,7 +592,8 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
       logSkillCollection("scroll step", {
         collectionId, page, step: scrollSteps, targetTop: Math.round(nextTop), actualTop: Math.round(scroller.scrollTop),
         clientHeight: scroller.clientHeight, scrollHeight: scroller.scrollHeight,
-        renderedRows: current.rowCount || 0, added: newlyAdded, consecutiveEmptySteps, scrollingConfirmed, totalRows: rows.length
+        renderedRows: current.rowCount || 0, added: newlyAdded, consecutiveEmptySteps, scrollingConfirmed, totalRows: rows.length,
+        extractionDiagnostics: lastExtractionDiagnostics
       });
       const emptyStepLimit = scrollingConfirmed ? 2 : 1;
       if (shouldStopAfterNoProgress(consecutiveEmptySteps, emptyStepLimit)) {
@@ -486,8 +603,21 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
         break;
       }
     }
-    logSkillCollection("page scroll complete", { collectionId, page, scrollSteps, added, totalRows: rows.length, stopped: control.stopped });
-    return { found: true, headers, added, scrollSteps, stopped: control.stopped };
+    logSkillCollection("page scroll complete", {
+      collectionId, page, scrollSteps, added, totalRows: rows.length, stopped: control.stopped,
+      extractionDiagnostics: lastExtractionDiagnostics
+    });
+    return {
+      found: true,
+      headers,
+      added,
+      scrollSteps,
+      stopped: control.stopped,
+      status: lastStatus,
+      rowCount: lastRenderedRowCount,
+      totalRowCount: lastTotalRowCount,
+      extractionDiagnostics: lastExtractionDiagnostics
+    };
   } finally {
     table = findStoredSourceTable(source);
     scroller = findStoredSourceVerticalScroller(table) || scroller;
@@ -508,10 +638,12 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
 function findStoredSourcePagination(table) {
   let scope = table;
   for (let depth = 0; depth < 9 && scope; depth++, scope = scope.parentElement) {
-    const candidates = Array.from(scope.querySelectorAll?.(".ant-pagination,.arco-pagination,[class*='pagination'],[role='navigation']") || []);
+    const candidates = Array.from(scope.querySelectorAll?.(SKILL_PAGINATION_SELECTOR) || []);
     const pagination = candidates.find((candidate) => {
       const text = compactOneLine(candidate.innerText || candidate.textContent || "");
-      return /(^|\s)1(\s|$)/.test(text) || candidate.querySelector("[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active");
+      return /(^|\s)1(\s|$)/.test(text) || candidate.querySelector(
+        "[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active,.vxe-pager--num-btn.is--active,.is--active[class*='num-btn']"
+      );
     });
     if (pagination) return pagination;
   }
@@ -519,7 +651,9 @@ function findStoredSourcePagination(table) {
 }
 
 function paginationIsOnFirstPage(pagination) {
-  const active = pagination?.querySelector?.("[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active");
+  const active = pagination?.querySelector?.(
+    "[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active,.vxe-pager--num-btn.is--active,.is--active[class*='num-btn']"
+  );
   return compactOneLine(active?.innerText || active?.textContent || "") === "1";
 }
 
@@ -573,7 +707,7 @@ async function restoreStoredSourceFirstPage(source) {
     return true;
   }
 
-  const pageOneContainer = Array.from(pagination.querySelectorAll("li,button,a,[role='button']"))
+  const pageOneContainer = Array.from(pagination.querySelectorAll("li,button,a,span,div,[role='button'],[class*='num-btn']"))
     .find((node) => compactOneLine(node.innerText || node.textContent || "") === "1");
   const pageOne = pageOneContainer?.matches?.("button,a,[role='button']")
     ? pageOneContainer
@@ -599,12 +733,14 @@ async function restoreStoredSourceFirstPage(source) {
     const previous = pagination.querySelector(
       ".ant-pagination-prev button,.ant-pagination-prev a,.ant-pagination-prev .ant-pagination-item-link," +
       ".arco-pagination-item-previous button,.arco-pagination-prev button," +
+      ".vxe-pager--prev-btn:not(.is--disabled),.vxe-pager .btn-prev:not(.is--disabled)," +
       "button[aria-label*='上一页'],a[aria-label*='上一页'],button[aria-label*='previous' i],a[aria-label*='previous' i]"
     );
-    const previousContainer = previous?.closest?.(".ant-pagination-prev,.arco-pagination-item-previous,.arco-pagination-prev");
+    const previousContainer = previous?.closest?.(".ant-pagination-prev,.arco-pagination-item-previous,.arco-pagination-prev,.vxe-pager--prev-btn,.btn-prev");
     const disabled = !previous || previous.disabled || previous.getAttribute?.("aria-disabled") === "true" ||
       previousContainer?.classList?.contains("ant-pagination-disabled") ||
-      previousContainer?.classList?.contains("arco-pagination-item-disabled");
+      previousContainer?.classList?.contains("arco-pagination-item-disabled") ||
+      previousContainer?.classList?.contains("is--disabled");
     if (disabled || !await clickPaginationAndWait(source, previous)) break;
   }
   table = findStoredSourceTable(source);
@@ -615,6 +751,7 @@ async function restoreStoredSourceFirstPage(source) {
 }
 
 async function collectStoredSourceData(source, options = {}) {
+  const runtimeSource = options?.sourceOptions ? { ...source, ...options.sourceOptions } : source;
   const collectionId = String(options.collectionId || uid());
   const maxPages = Math.max(1, Math.min(MAX_SKILL_COLLECTION_PAGES, Number(options.maxPages) || 1));
   const maxRows = Math.max(1, Math.min(MAX_SKILL_COLLECTION_ROWS, Number(options.maxRows) || MAX_SKILL_COLLECTION_ROWS));
@@ -627,18 +764,20 @@ async function collectStoredSourceData(source, options = {}) {
   let reason = "complete";
   let pageTurned = false;
   let restoredFirstPage = false;
+  let extractionDiagnostics = null;
   logSkillCollection("start", { collectionId, maxPages, maxRows });
   try {
     for (let page = 1; page <= maxPages; page++) {
       if (control.stopped) { reason = "stopped"; break; }
       logSkillCollection("page start", { collectionId, page, totalRows: rows.length });
       emitCollectionProgress(collectionId, { phase: "reading", page, pages, rowCount: rows.length, maxPages, maxRows });
-      const currentPage = await collectStoredSourcePage(source, {
+      const currentPage = await collectStoredSourcePage(runtimeSource, {
         collectionId, control, page, maxPages, maxRows, rows, seen,
         waitForInitialRowsMs: Number(options.waitForInitialRowsMs) || 0
       });
       if (!currentPage.found) throw new Error("数据源定位失败");
       headers = currentPage.headers || headers;
+      extractionDiagnostics = currentPage.extractionDiagnostics || extractionDiagnostics;
       pages = page;
       emitCollectionProgress(collectionId, {
         phase: "page-complete", page, pages, rowCount: rows.length,
@@ -646,12 +785,15 @@ async function collectStoredSourceData(source, options = {}) {
       });
       logSkillCollection("page complete", {
         collectionId, page, added: currentPage.added, scrollSteps: currentPage.scrollSteps,
-        totalRows: rows.length, stopped: control.stopped
+        totalRows: rows.length, stopped: control.stopped,
+        renderedRowCount: Number(currentPage.rowCount || 0),
+        pageTotalRowCount: Number(currentPage.totalRowCount || 0),
+        extractionDiagnostics: currentPage.extractionDiagnostics || null
       });
       if (control.stopped) { reason = "stopped"; break; }
       if (rows.length >= maxRows) { reason = "row-limit"; break; }
       if (page >= maxPages) { reason = "page-limit"; break; }
-      const table = findStoredSourceTable(source);
+      const table = findStoredSourceTable(runtimeSource);
       const anchorRow = table?.querySelector?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
       const next = findPaginationNextButton(anchorRow);
       const pagination = next?.closest?.(".ant-pagination,.arco-pagination,[class*='pagination'],[role='navigation']");
@@ -681,7 +823,7 @@ async function collectStoredSourceData(source, options = {}) {
         findLiveTableAfterPageTurn(table, tableIndex), beforeDigest, 8000, tableIndex,
         SKILL_PAGE_READY_OPTIONS
       );
-      const turnedTable = findStoredSourceTable(source);
+      const turnedTable = findStoredSourceTable(runtimeSource);
       logSkillCollection("page turn", {
         collectionId, page, success: ready, reason: ready ? "" : "table-not-ready",
         nextTable: describeCollectionElement(turnedTable),
@@ -694,11 +836,21 @@ async function collectStoredSourceData(source, options = {}) {
       restoredFirstPage = await restoreStoredSourceFirstPage(source);
     }
     emitCollectionProgress(collectionId, { phase: "complete", pages, rowCount: rows.length, maxPages, maxRows, reason });
-    logSkillCollection("complete", { collectionId, pages, rowCount: rows.length, uniqueSignatures: seen.size, reason, restoredFirstPage });
+    logSkillCollection("collection result", {
+      collectionId,
+      pages,
+      rowCount: rows.length,
+      totalRowCount: rows.length,
+      uniqueSignatures: seen.size,
+      reason,
+      restoredFirstPage,
+      extractionDiagnostics
+    });
     const completion = classifyCollectionCompletion(reason);
     return {
       found: true, status: "available", headers, rows, rowCount: rows.length,
       totalRowCount: rows.length, collectedPages: pages, collectionReason: reason,
+      extractionDiagnostics,
       ...completion,
       stopped: reason === "stopped", truncated: reason === "row-limit" || reason === "page-limit"
     };
