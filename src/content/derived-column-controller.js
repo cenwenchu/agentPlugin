@@ -61,18 +61,26 @@ const inflightDerivedBatchRequests = new Map();
 const derivedRuntimePageRequestGuards = new Map();
 // 滚动抑制：虚拟滚动会回收派生单元格，若 tick 落在滚动途中会误判"渲染缺失"
 // 触发全量重跑（逐行 insertBefore 整表重排）→ 滚动越滚越卡。滚动停止 600ms 后才允许重跑。
+// jtv1 额外难题：DOM 行回收换内容后，派生列 [data-web2ai-derived-column] 属性残留，
+// renderedCellCount === rowCount 假阳 → 观察器不重跑。scrollGeneration 计数器解决。
 let runtimeScrollQuietAt = 0;
+let runtimeScrollGeneration = 0;
 let runtimeScrollListenerInstalled = false;
+let lastObserverControllerCount = -1;
 const RUNTIME_SCROLL_QUIET_MS = 600;
+// 运行期诊断日志开关（区别于全局 DEBUG，独立控制 observer/jtv1 链路日志）
+const DRV_DIAG = true;
 
 function noteRuntimeScrolling() {
   runtimeScrollQuietAt = Date.now() + RUNTIME_SCROLL_QUIET_MS;
+  runtimeScrollGeneration += 1;
 }
 
 function ensureRuntimeScrollListener() {
   if (runtimeScrollListenerInstalled || typeof document?.addEventListener !== "function") return;
   runtimeScrollListenerInstalled = true;
   document.addEventListener("scroll", noteRuntimeScrolling, { passive: true, capture: true });
+  DRV_DIAG && console.log("[web2ai.drv-diag] scroll listener installed", { page: `${location.origin}${location.pathname}` });
 }
 
 function logDerivedRuntime(event, detail = {}, level = "info") {
@@ -585,6 +593,7 @@ async function runDerivedRuntimeSkill(controller) {
     runOptions
   });
   if (!currentSkill || skillTypeOf(currentSkill) !== SKILL_TYPE_DERIVED_COLUMN) {
+    DRV_DIAG && console.log("[web2ai.drv-diag] run-early-return", { skillId, reason: "no-skill" });
     logDerivedRuntime("run-skip-no-skill", {
       skillId,
       hasCurrentSkill: Boolean(currentSkill),
@@ -595,11 +604,13 @@ async function runDerivedRuntimeSkill(controller) {
     return;
   }
   if (!runOptions.manual && !skillAutoRunEnabled(currentSkill)) {
+    DRV_DIAG && console.log("[web2ai.drv-diag] run-early-return", { skillId, reason: "auto-disabled" });
     logDerivedRuntime("run-skip-auto-disabled", { skillId });
     controller.status = "idle";
     return;
   }
   if (!skillBelongsToCurrentFrame(currentSkill)) {
+    DRV_DIAG && console.log("[web2ai.drv-diag] run-early-return", { skillId, reason: "frame-mismatch" });
     logDerivedRuntime("run-skip-frame-mismatch", {
       skillId,
       currentPage: pageKey(location.href),
@@ -702,6 +713,7 @@ async function runDerivedRuntimeSkill(controller) {
     if (!pendingRows.length) {
       logDerivedRuntime("run-complete-from-cache", { skillId });
       controller.status = "complete";
+      controller.lastScrollGeneration = runtimeScrollGeneration;
       return;
     }
 
@@ -713,6 +725,7 @@ async function runDerivedRuntimeSkill(controller) {
       const renderableItems = buildRuntimeRenderableItems(pendingRows, recentRestored.resultMap, new Map());
       const renderedCount = renderDerivedRuntimeNotes(skillId, renderableItems, renderOptions);
       controller.status = "complete";
+      controller.lastScrollGeneration = runtimeScrollGeneration;
       logDerivedRuntime("run-complete-from-memory", {
         skillId,
         renderedCount,
@@ -864,11 +877,19 @@ async function runDerivedRuntimeSkill(controller) {
       controller.lastPendingRows = pendingRows;
     }
     controller.status = hasFailures ? "partial" : "complete";
+    controller.lastScrollGeneration = runtimeScrollGeneration;
     logDerivedRuntime("run-complete", {
       skillId,
       status: controller.status
     }, hasFailures ? "warn" : "info");
   } catch (error) {
+    DRV_DIAG && console.log("[web2ai.drv-diag] run-failed", {
+      skillId: controller.skillId,
+      error: String(error?.message ?? error),
+      code: error?.code || "(none)",
+      status: controller.status,
+      sessionId: controller.sessionId
+    });
     if (
       error?.code === "SOURCE_CHANGED" &&
       !runOptions.manual
@@ -962,7 +983,48 @@ function ensureRuntimeObserver() {
       const root = controller.root;
       const renderedCellCount = countRenderedRuntimeCells(controller);
       const rowCount = root?.isConnected ? countRenderableRuntimeRows(root) : 0;
-      if (!root || !root.isConnected || renderedCellCount < rowCount) {
+      // jtv1 虚拟滚动：DOM 行回收换内容后派生列 [data-web2ai-derived-column] 属性残留，
+      // renderedCellCount === rowCount 假阳。用 scrollGeneration 计数器判断自上次渲染后
+      // jtv1 虚拟滚动会回收 DOM 行换内容，但派生列 [data-web2ai-derived-column] 属性残留。
+      // 不清空单元格（避免闪烁），直接触发热重跑：renderDerivedRuntimeNote 会原地更新已有单元格。
+      const hasJtv1Head = root?.querySelector?.("#_jt_row_head");
+      const jtv1StaleSuppressed = Number(controller.jtv1StaleSuppressUntil || 0) > Date.now();
+      if (
+        renderedCellCount > 0 &&
+        root?.isConnected &&
+        controller.lastScrollGeneration !== runtimeScrollGeneration &&
+        !jtv1StaleSuppressed &&
+        hasJtv1Head
+      ) {
+        DRV_DIAG && console.log("[web2ai.drv-diag] jtv1 stale → rerun", {
+          skillId: controller.skillId,
+          renderedCellCount,
+          lastScrollGen: controller.lastScrollGeneration,
+          scrollGen: runtimeScrollGeneration
+        });
+        logDerivedRuntime("observer-jtv1-scroll-stale", {
+          skillId: controller.skillId,
+          renderedCellCount,
+          rowCount,
+          lastScrollGeneration: controller.lastScrollGeneration,
+          scrollGeneration: runtimeScrollGeneration
+        });
+        controller.lastScrollGeneration = runtimeScrollGeneration;
+        controller.jtv1StaleSuppressUntil = Date.now() + 3000;
+        controller.sessionId = nextRuntimeSessionId();
+        controller.runOptions = { manual: true };
+        void runDerivedRuntimeSkill(controller);
+        continue;
+      }
+      if (!root || !root.isConnected || countRenderedRuntimeCells(controller) < rowCount) {
+        const afterClearCount = countRenderedRuntimeCells(controller);
+        DRV_DIAG && console.log("[web2ai.drv-diag] rerun triggered", {
+          skillId: controller.skillId,
+          hasRoot: Boolean(root),
+          rootConnected: Boolean(root?.isConnected),
+          renderedCellCount: afterClearCount,
+          rowCount
+        });
         logDerivedRuntime("observer-rerun", {
           skillId: controller.skillId,
           hasRoot: Boolean(root),
@@ -971,8 +1033,16 @@ function ensureRuntimeObserver() {
           rowCount
         });
         controller.sessionId = nextRuntimeSessionId();
+        controller.runOptions = { manual: true };
         void runDerivedRuntimeSkill(controller);
       }
+    }
+    // 仅当控制器数量变化时输出摘要（低频，不刷屏）
+    const currentCount = runtimeControllers.size;
+    if (currentCount !== lastObserverControllerCount) {
+      lastObserverControllerCount = currentCount;
+      const ids = [...runtimeControllers.keys()].join(",") || "(none)";
+      DRV_DIAG && console.log("[web2ai.drv-diag] controllers changed", { count: currentCount, ids, scrollGen: runtimeScrollGeneration });
     }
   }, 1500);
 }
@@ -1055,7 +1125,9 @@ function scheduleDerivedColumnRuntime(skills = []) {
       blockedReason: "",
       blockedListSignature: "",
       blockedGuardKey: "",
-      lastListSignature: ""
+      lastListSignature: "",
+      lastScrollGeneration: 0,
+      jtv1StaleSuppressUntil: 0
     };
     if (nextController.status === "running") {
       nextController.skill = skill;
