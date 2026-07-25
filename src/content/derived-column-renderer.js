@@ -3,6 +3,7 @@
  */
 
 import { getRowCells, hasHeaderCells } from "./table-row-dom.js";
+import { resolveTableRootAdapter, resolveTableAdapter } from "./table-adapters.js";
 
 const RUNTIME_STYLE_ID = "web2ai_derived_runtime_style";
 const RUNTIME_CELL_ATTR = "data-web2ai-derived-column";
@@ -117,6 +118,17 @@ function getNonDerivedCells(rowEl) {
 }
 
 function resolveInsertChild(rowEl, insertIndex = 0, expectedCount = 0) {
+  // 仅当行适配器提供了 rowCells（如 _jtv1 聚水潭，会过滤隐藏列/序号列/复选框列，
+  // 得到与表头严格对齐的可见业务单元格序列）时，才用 getRowCells 基准直接定位参考节点——
+  // 此时 getNonDerivedCells 的"前导列推算"会把交错/尾随的隐藏列误算成前导列导致错位。
+  // 标准框架（无适配器 rowCells）：getRowCells 不过滤前置复选框，仍须沿用前导列启发式。
+  const { adapter } = resolveTableAdapter(rowEl);
+  if (adapter?.rowCells) {
+    const businessCells = getRowCells(rowEl).filter((cell) => !cell.matches?.(`[${RUNTIME_CELL_ATTR}]`));
+    if (businessCells.length) {
+      return businessCells[Math.max(0, Math.min(insertIndex, businessCells.length))] || null;
+    }
+  }
   const cells = getNonDerivedCells(rowEl);
   const extraLeadingCells = Math.max(0, cells.length - Math.max(0, expectedCount));
   const domIndex = Math.max(0, Math.min(insertIndex + extraLeadingCells, cells.length));
@@ -124,6 +136,13 @@ function resolveInsertChild(rowEl, insertIndex = 0, expectedCount = 0) {
 }
 
 function resolveHeaderRow(root, headerCount = 0) {
+  // jtv1（聚水潭 epaas）：表头是 #_jt_row_head（全 div 结构，无 thead/tr/th），
+  // 通用解析找不到，这里按适配器识别的根节点直接取 #_jt_row_head 作为表头行。
+  const rootAdapter = resolveTableRootAdapter(root);
+  if (rootAdapter?.name === "_jtv1") {
+    const jtv1Head = root?.querySelector?.("#_jt_row_head");
+    if (jtv1Head) return jtv1Head;
+  }
   const rows = Array.from(root?.querySelectorAll?.("thead tr, [role='row']") || []);
   const headerRows = rows.filter((row) => hasHeaderCells(row));
   if (!headerRows.length) return null;
@@ -173,6 +192,10 @@ function ensureDerivedHeader(root, {
 } = {}) {
   const headerRow = resolveHeaderRow(root, headerCount);
   if (!headerRow) return null;
+  // jtv1：表头单元格参考节点用适配器 headerCells（与取数表头同基准），
+  // getRowCells 对 #_jt_row_head 不走 _jtv1.rowCells，无法得到对齐的业务表头序列。
+  const rootAdapter = resolveTableRootAdapter(root);
+  const jtv1HeaderCells = rootAdapter?.name === "_jtv1" ? (rootAdapter.headerCells?.(root) || []) : null;
   let header = headerRow.querySelector(`[${RUNTIME_HEADER_ATTR}="${skillId}"]`);
   if (!header) {
     header = document.createElement(headerRow.tagName === "TR" ? "th" : "div");
@@ -181,8 +204,17 @@ function ensureDerivedHeader(root, {
     header.setAttribute(RUNTIME_HEADER_ATTR, skillId);
     header.setAttribute(RUNTIME_SKILL_ATTR, skillId);
     if (header.tagName === "TH") header.scope = "col";
-    const before = resolveInsertChild(headerRow, insertIndex, headerCount);
-    headerRow.insertBefore(header, before);
+    // jtv1 表头单元格沿用框架类名，保持 flex 布局与样式一致
+    if (rootAdapter?.name === "_jtv1") header.classList.add("_jt_cell_head");
+    const before = jtv1HeaderCells
+      ? (jtv1HeaderCells[Math.max(0, Math.min(insertIndex, jtv1HeaderCells.length))] || null)
+      : resolveInsertChild(headerRow, insertIndex, headerCount);
+    // jtv1：._jt_cell_head 参考节点是 #_jt_row_head_list 的子元素，而 headerRow
+    // 是 #_jt_row_head。插入父容器必须与参考节点同父，否则 insertBefore 找不到子节点。
+    const headerContainer = jtv1HeaderCells
+      ? (root.querySelector("#_jt_row_head_list") || headerRow)
+      : headerRow;
+    headerContainer.insertBefore(header, before);
   }
   header.textContent = String(outputColumnName || DEFAULT_OUTPUT_COLUMN_NAME).trim() || DEFAULT_OUTPUT_COLUMN_NAME;
   header.title = header.textContent;
@@ -197,6 +229,9 @@ function ensureDerivedBodyCell(rowEl, {
   let cell = rowEl.querySelector(`[${RUNTIME_CELL_ATTR}="${skillId}"]:not([${RUNTIME_HEADER_ATTR}])`);
   if (!cell) {
     cell = document.createElement(rowEl.tagName === "TR" ? "td" : "div");
+    // jtv1：派生列体单元格沿用框架 _jt_cell 类名，与表头的 _jt_cell_head 对称，
+    // 保持 flex 布局一致并避免 jtv1 框架的列宽同步逻辑因缺失类名而破坏原表格结构。
+    if (resolveTableAdapter(rowEl).adapter?.name === "_jtv1") cell.classList.add("_jt_cell");
     cell.setAttribute("data-web2ai-ui", "1");
     cell.setAttribute(RUNTIME_CELL_ATTR, skillId);
     cell.setAttribute(RUNTIME_SKILL_ATTR, skillId);

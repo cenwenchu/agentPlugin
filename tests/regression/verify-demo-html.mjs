@@ -109,7 +109,7 @@ function auditDebugLogs(files) {
       }
       if (/console\.(?:info|warn)\(\s*["']\[web2ai\.(?:ai\.request|skill)/.test(trimmed)) {
         const nearbyGuard = lines.slice(Math.max(0, i - 3), i + 1).join(" ");
-        if (!/(?:DEBUG|DIAGNOSTIC_LOGS|SKILL_DIAGNOSTICS|SKILL_COLLECTION_DIAGNOSTICS)\s*(?:\(\))?\s*(?:&&|\)|\}|return)/.test(nearbyGuard)) {
+        if (!/(?:DEBUG|DIAGNOSTIC_LOGS|SKILL_DIAGNOSTICS|SKILL_DIAGNOSTICS_VERBOSE|SKILL_COLLECTION_DIAGNOSTICS)\s*(?:\(\))?\s*(?:&&|\)|\}|return)/.test(nearbyGuard)) {
           unguardedDiagnostics.push(`L${i + 1}: ${trimmed.substring(0, 80)}`);
         }
       }

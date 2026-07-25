@@ -20,6 +20,10 @@ const TABLE_SELECTOR = [
   ".art-table", ".ant-table-wrapper", ".arco-table"
 ].join(",");
 const SKILL_DIAGNOSTICS = DEBUG;
+// 详细诊断：默认关闭。常规 DEBUG 日志保持轻量（locateStoredSource 每次渲染技能条都会跑，
+// 其 candidates 逐项序列化会对每个候选表做 innerText 提取 + getCssSelector + rect 读取，
+// 在大表上单次可达数百 ms）。需深挖定位细节时，控制台 window.__WEB2AI_DEBUG_VERBOSE = true。
+const SKILL_DIAGNOSTICS_VERBOSE = () => Boolean(globalThis.__WEB2AI_DEBUG_VERBOSE);
 const STORED_SOURCE_ACCEPT_HEADER_COVERAGE = 0.78;
 const STORED_SOURCE_CHANGED_HEADER_COVERAGE = 0.45;
 const STORED_SOURCE_AMBIGUOUS_SCORE_DELTA = 0.08;
@@ -217,7 +221,10 @@ function cellTexts(cells) {
 function alignedRowCellTexts(cells, expectedColumnCount) {
   const values = [];
   for (const cell of cells.slice(0, 80)) {
-    values.push(compactOneLine(cell.innerText || cell.textContent || ""));
+    // 热路径（逐行/滚动时高频）用 textContent 而非 innerText：调用方（getRowCells/适配器）
+    // 已过滤 display:none 单元格，无需 innerText 的可见性感知；innerText 会强制同步布局，
+    // 在几百行表格逐行调用时造成严重 layout thrashing。
+    values.push(compactOneLine(cell.textContent || ""));
     // 合并单元格只占一个 DOM 节点，但后续单元格仍需保持原列位置。
     const span = Math.max(1, Number(cell.colSpan || cell.getAttribute?.("colspan")) || 1);
     for (let index = 1; index < span; index++) values.push("");
@@ -638,21 +645,28 @@ function locateStoredSource(source, options = {}) {
     })
   ));
   const chosen = pickBestStoredSourceCandidate(scoredCandidates, source, resolvedOptions);
+  // 轻量摘要：每次渲染都跑，保持低开销
   SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] locate", JSON.stringify({
     page: pageKey(location.href),
     sourceId: source?.id || "",
     sourceName: source?.displayName || source?.tableTitle || "",
     sourceBusinessTabTitle: compactOneLine(source?.businessTabTitle || ""),
-    sourceSelector: source?.selector || "",
-    sourceTableIndex: Number.isInteger(source?.tableIndex) ? source.tableIndex : null,
-    locatorVersion: Number(source?.locatorVersion) || 0,
     selectorCandidateCount: selectorTables.length,
     visibleCandidateCount: visibleCandidates.length,
     candidateCount: candidates.length,
-    indexedCandidateVisible: Boolean(indexedTable && isVisibleElement(indexedTable)),
     chosenMatchMethod: chosen.matchMethod,
     chosenAmbiguous: Boolean(chosen.ambiguous),
-    chosenStatus: chosen.status || "missing",
+    chosenStatus: chosen.status || "missing"
+  }));
+  // 详细 candidates 序列化：对每个候选表做 innerText/getCssSelector/rect，开销大，
+  // 仅在显式开启 verbose 时执行，避免 DEBUG 排查本身造成卡顿。
+  SKILL_DIAGNOSTICS_VERBOSE() && console.info("[web2ai.skill-source] locate-detail", JSON.stringify({
+    page: pageKey(location.href),
+    sourceId: source?.id || "",
+    sourceSelector: source?.selector || "",
+    sourceTableIndex: Number.isInteger(source?.tableIndex) ? source.tableIndex : null,
+    locatorVersion: Number(source?.locatorVersion) || 0,
+    indexedCandidateVisible: Boolean(indexedTable && isVisibleElement(indexedTable)),
     businessTabs: readBusinessTabDomSnapshot(),
     candidates: candidates.map((table, index) => summarizeTableCandidate(table, index)),
     scoredCandidates: (chosen.candidates || scoredCandidates).map((candidate) => ({

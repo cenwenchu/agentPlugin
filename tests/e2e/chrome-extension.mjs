@@ -696,8 +696,20 @@ const browser = await puppeteer.launch({
   // Without this option Chrome starts, but Puppeteer rejects the launch before
   // the extension can be installed, so none of the browser regressions run.
   pipe: true,
-  enableExtensions: [extension]
+  enableExtensions: [extension],
+  // Restricted/sandboxed runners (CI, automated agents) cannot initialize
+  // Chrome's own setuid sandbox and crash before the extension loads. Gate the
+  // escape hatch behind an explicit env var; dev machines keep the sandbox.
+  args: /^(1|true)$/i.test(process.env.E2E_NO_SANDBOX || "")
+    ? ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+    : []
 });
+
+const HARD_TIMEOUT = setTimeout(() => {
+  console.error("[e2e] HARD TIMEOUT 120s - aborting");
+  process.exit(1);
+}, 120000);
+HARD_TIMEOUT.unref?.();
 
 try {
   const extensionTarget = await browser.waitForTarget(
@@ -754,6 +766,12 @@ try {
   // The Chat-level switch suppresses only new Ask AI hover actions. Chat,
   // existing context and the launcher remain available, and the setting is
   // synchronized to every frame through storage.sync.
+  // NOTE: the panel defaults to the Skills tab, so switch to Chat first to
+  // render the Chat-level Ask AI switch before toggling it.
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "Chat")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector("#web2ai_table_ask_toggle") != null, { timeout: 10000 });
   await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector("#web2ai_table_ask_toggle")?.click());
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector("#web2ai_table_ask_toggle")?.checked === false);
   await page.hover("#orders tbody tr");

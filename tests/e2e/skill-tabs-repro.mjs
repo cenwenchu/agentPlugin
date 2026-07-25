@@ -14,7 +14,7 @@ const chromeCandidates = [
 ].filter(Boolean);
 const CHROME = chromeCandidates.find((c) => nodeFs.existsSync(c));
 if (!CHROME) throw new Error("Chrome not found");
-const HEADLESS = false;
+const HEADLESS = /^(1|true)$/i.test(process.env.E2E_HEADLESS || "");
 
 const temp = await fs.mkdtemp(path.join(os.tmpdir(), "web2ai-tabs-repro-"));
 const extension = path.join(temp, "extension");
@@ -89,6 +89,9 @@ const browser = await puppeteer.launch({
   headless: HEADLESS,
   protocolTimeout: 600000,
   pipe: true,
+  args: /^(1|true)$/i.test(process.env.E2E_NO_SANDBOX || "")
+    ? ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+    : [],
   enableExtensions: [extension]
 });
 

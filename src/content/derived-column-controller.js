@@ -2,7 +2,7 @@
  * @fileoverview 按列分析运行期控制器。
  */
 
-import { STATE } from "./state.js";
+import { STATE, web2aiDiagnosticsEnabled } from "./state.js";
 import {
   DEFAULT_DERIVED_METHOD_VERSION,
   SKILL_TYPE_DERIVED_COLUMN,
@@ -41,16 +41,16 @@ import {
   renderDerivedRuntimeNotes
 } from "./derived-column-renderer.js";
 import { sendToBackground } from "./messaging.js";
-import { locateStoredSource, alignedRowCellTexts, extractHeaders, pageKey } from "./skill-source-dom.js";
+import { locateStoredSource, alignedRowCellTexts, extractHeaders, pageKey, dataRowsInTable } from "./skill-source-dom.js";
 import { getRowCells, isHeaderRow, isTableFooterOrSummaryRow } from "./table-row-dom.js";
 import { waitForTableDataReady } from "./table-pagination-dom.js";
 import { DEFAULT_MODEL_PROFILE } from "../shared.js";
 
 const DEFAULT_RUNTIME_RESULT_SCHEMA_VERSION = 1;
 const RUNTIME_TABLE_ROW_SELECTOR = "tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr";
-// 运行期日志当前默认开启，便于排查跨 frame、缓存恢复和页面频控问题。
-// 若后续改为统一调试开关控制，应同步更新 README / DESIGN 的日志说明。
-const DERIVED_RUNTIME_DIAGNOSTICS = true;
+// 运行期日志统一走全局诊断开关（控制台 __WEB2AI_DEBUG 或配置面板"诊断日志"）。
+// 默认关闭，不再后台常驻刷屏；排障时开启。README / DESIGN 的日志说明以此为准。
+const DERIVED_RUNTIME_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 const DERIVED_RUNTIME_RECENT_RESULT_TTL_MS = 60 * 1000;
 const DERIVED_RUNTIME_PAGE_WINDOW_MS = 60 * 1000;
 
@@ -59,9 +59,24 @@ let runtimeObserverTimer = null;
 const runtimeControllers = new Map();
 const inflightDerivedBatchRequests = new Map();
 const derivedRuntimePageRequestGuards = new Map();
+// 滚动抑制：虚拟滚动会回收派生单元格，若 tick 落在滚动途中会误判"渲染缺失"
+// 触发全量重跑（逐行 insertBefore 整表重排）→ 滚动越滚越卡。滚动停止 600ms 后才允许重跑。
+let runtimeScrollQuietAt = 0;
+let runtimeScrollListenerInstalled = false;
+const RUNTIME_SCROLL_QUIET_MS = 600;
+
+function noteRuntimeScrolling() {
+  runtimeScrollQuietAt = Date.now() + RUNTIME_SCROLL_QUIET_MS;
+}
+
+function ensureRuntimeScrollListener() {
+  if (runtimeScrollListenerInstalled || typeof document?.addEventListener !== "function") return;
+  runtimeScrollListenerInstalled = true;
+  document.addEventListener("scroll", noteRuntimeScrolling, { passive: true, capture: true });
+}
 
 function logDerivedRuntime(event, detail = {}, level = "info") {
-  if (!DERIVED_RUNTIME_DIAGNOSTICS) return;
+  if (!DERIVED_RUNTIME_DIAGNOSTICS()) return;
   const payload = {
     event,
     frame: window.top === window ? "top" : "child",
@@ -216,7 +231,13 @@ function buildRuntimeRows({
   const selectedColumns = resolved.columns;
   const expectedColumnCount = headers.length;
   const rows = [];
-  const candidates = Array.from(table?.querySelectorAll?.(RUNTIME_TABLE_ROW_SELECTOR) || []);
+  // 行枚举优先走适配器（dataRowsInTable）：jtv1 等表格的数据行是 ._jt_row._jt_rh div，
+  // 通用 RUNTIME_TABLE_ROW_SELECTOR 命中不到，反而误中根节点内嵌套的工具栏 table 行；
+  // 适配器能正确识别数据行并排除嵌套工具栏表。无适配器时回退通用选择器（标准框架不变）。
+  const adapterRows = dataRowsInTable(table);
+  const candidates = adapterRows.length
+    ? adapterRows
+    : Array.from(table?.querySelectorAll?.(RUNTIME_TABLE_ROW_SELECTOR) || []);
   for (const rowEl of candidates) {
     if (!rowEl?.isConnected || isHeaderRow(rowEl) || isTableFooterOrSummaryRow(rowEl)) continue;
     const cells = getRowCells(rowEl);
@@ -285,6 +306,12 @@ function buildRuntimeFailureMap(failures = []) {
 }
 
 function countRenderableRuntimeRows(root) {
+  // 与 buildRuntimeRows 同基准：优先适配器行枚举，回退通用选择器。
+  // jtv1 下若用通用选择器会数成工具栏行，导致虚拟滚动观察器误判"已渲染稳定"而永不重插。
+  const adapterRows = dataRowsInTable(root);
+  if (adapterRows.length) {
+    return adapterRows.filter((rowEl) => rowEl?.isConnected && !isHeaderRow(rowEl) && !isTableFooterOrSummaryRow(rowEl)).length;
+  }
   return Array.from(root?.querySelectorAll?.(RUNTIME_TABLE_ROW_SELECTOR) || [])
     .filter((rowEl) => rowEl?.isConnected && !isHeaderRow(rowEl) && !isTableFooterOrSummaryRow(rowEl))
     .length;
@@ -892,8 +919,15 @@ async function runDerivedRuntimeSkill(controller) {
 
 function ensureRuntimeObserver() {
   if (runtimeObserverTimer) return;
+  ensureRuntimeScrollListener();
   logDerivedRuntime("observer-start");
   runtimeObserverTimer = setInterval(() => {
+    // 滚动途中跳过重跑判定：虚拟滚动回收单元格造成的"渲染缺失"是暂时现象，
+    // 滚动停止后行会重建，届时再补插即可。避免滚动→重跑→重排→更卡的恶性循环。
+    if (Date.now() < runtimeScrollQuietAt) {
+      logDerivedRuntime("observer-skip-scrolling", { quietUntil: runtimeScrollQuietAt });
+      return;
+    }
     for (const controller of runtimeControllers.values()) {
       if (controller.status === "running") continue;
       const skill = resolveControllerSkill(controller);

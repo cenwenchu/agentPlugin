@@ -173,6 +173,71 @@ test("runtime renderer inserts native column before selected business column", (
   }
 });
 
+test("runtime renderer inserts jtv1 column before selected business column (not into trailing hidden cells)", () => {
+  // jtv1（聚水潭 epaas）：表头/表体分离，行内含序号列、复选框列与大量 display:none 隐藏列。
+  // 业务可见列：采购单号(389502)、供应商(DKW0001E1)、状态(已确认)。
+  // 选中"供应商"（业务列 index 1）插入，应落在其前，而非尾部隐藏列区。
+  const cleanup = installDom(`
+    <div id="_jt">
+      <div id="_jt_row_head"><div id="_jt_row_head_list">
+        <div class="_jt_cell_head _jt_cell_head_index">#</div>
+        <div class="_jt_cell_head _jt_cbx"><input type="checkbox"></div>
+        <div class="_jt_cell_head"><span>采购单号</span></div>
+        <div class="_jt_cell_head" style="display:none;"><span>隐藏A</span></div>
+        <div class="_jt_cell_head"><span>供应商</span></div>
+        <div class="_jt_cell_head"><span>状态</span></div>
+        <div class="_jt_cell_head" style="display:none;"><span>隐藏B</span></div>
+        <div class="_jt_cell_head" style="display:none;"><span>隐藏C</span></div>
+      </div></div>
+      <div id="_jt_body"><div id="_jt_body_list">
+        <div class="_jt_row _jt_rh" index="0" id="row">
+          <div class="_jt_cell _jt_cell_index">1</div>
+          <div class="_jt_cell"><input type="checkbox"></div>
+          <div class="_jt_cell" id="po-cell">389502</div>
+          <div class="_jt_cell" style="display:none;"></div>
+          <div class="_jt_cell" id="supplier-cell">DKW0001E1</div>
+          <div class="_jt_cell">已确认</div>
+          <div class="_jt_cell" style="display:none;"></div>
+          <div class="_jt_cell" style="display:none;"></div>
+        </div>
+      </div></div>
+    </div>
+  `);
+  try {
+    const root = document.querySelector("#_jt");
+    const row = document.querySelector("#row");
+    const rendered = renderDerivedRuntimeNotes("skill_jtv1", [{
+      rowEl: row,
+      status: "complete",
+      conclusion: "优先",
+      error: ""
+    }], {
+      root,
+      headerCount: 3,
+      insertIndex: 1,
+      outputColumnName: "AI结论"
+    });
+    assert.equal(rendered, 1);
+    // 表头：插入的"AI结论"应在"供应商"前
+    const headRow = document.querySelector("#_jt_row_head");
+    const insertedHeader = headRow.querySelector("[data-web2ai-derived-column-header]");
+    assert.ok(insertedHeader, "jtv1 表头应插入派生列表头");
+    assert.equal(insertedHeader.textContent.trim(), "AI结论");
+    // 表头"供应商"是插入节点的下一个可见兄弟
+    const headCells = Array.from(headRow.querySelectorAll("._jt_cell_head"));
+    const headerIdx = headCells.indexOf(insertedHeader);
+    assert.equal(headCells[headerIdx + 1].textContent.trim(), "供应商");
+    // 数据行：插入的单元格应在供应商单元格前（可见业务序列 index 1 处），不在尾部隐藏区
+    const bodyCells = Array.from(row.children);
+    const insertedBody = row.querySelector("[data-web2ai-derived-column]:not([data-web2ai-derived-column-header])");
+    assert.ok(insertedBody, "jtv1 数据行应插入派生列单元格");
+    const supplierCell = document.querySelector("#supplier-cell");
+    assert.equal(bodyCells.indexOf(insertedBody), bodyCells.indexOf(supplierCell) - 1, "派生列应紧邻供应商列前");
+  } finally {
+    cleanup();
+  }
+});
+
 test("runtime renderer cleanup removes generated header, colgroup and body cells", () => {
   const cleanup = installDom(`
     <table id="orders">

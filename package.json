@@ -12,7 +12,9 @@
     "test:e2e": "node tests/e2e/chrome-extension.mjs",
     "test:e2e:business-tab": "node tests/e2e/business-tab-source-status.mjs",
     "test:e2e:jtv1-tab-grouping": "node tests/e2e/jtv1-tab-skill-grouping.mjs",
-    "test:e2e:jtv1-table": "node tests/e2e/jtv1-table-recognition.mjs"
+    "test:e2e:jtv1-table": "node tests/e2e/jtv1-table-recognition.mjs",
+    "test:e2e:multi-table": "node tests/e2e/multi-table-source-fallback.mjs",
+    "test:e2e:diag": "node tests/e2e/chrome-extension.diag.mjs"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",

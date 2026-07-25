@@ -136,6 +136,9 @@ const OVERLAY_CSS = `
     .skillForm { border-color: #93c5fd; }
     .skillFormNotice { margin-bottom: 9px; padding: 10px 11px; border: 1px solid #bfdbfe; border-radius: 11px; background: #eff6ff; color: #1e3a8a; font-size: 11px; line-height: 1.6; }
     .skillTitle { font-size: 12px; font-weight: 650; color: #111827; }
+    .skillFormHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+    .skillFormHead .skillTitle { flex: 1 1 auto; }
+    .skillFormHead .skillActions { margin-top: 0; flex: 0 0 auto; }
     .skillTypeIcon {
       display: inline-flex;
       align-items: center;
@@ -1034,6 +1037,26 @@ function render() {
           }
         })
       ]),
+      el("label", {
+        class: "tableAskToggle",
+        title: "开启后输出技能/派生列的诊断日志到控制台，用于排障；默认关闭以减少后台开销"
+      }, [
+        el("span", {}, ["诊断日志"]),
+        el("input", {
+          id: "web2ai_diagnostics_toggle",
+          type: "checkbox",
+          role: "switch",
+          checked: STATE.diagnosticsEnabled ? true : null,
+          "aria-label": "开启诊断日志",
+          "aria-checked": STATE.diagnosticsEnabled ? "true" : "false",
+          onChange: (event) => {
+            const enabled = Boolean(event.target.checked);
+            STATE.diagnosticsEnabled = enabled;
+            chrome.storage.sync.set({ diagnosticsEnabled: enabled }).catch(() => void 0);
+            render();
+          }
+        })
+      ]),
       el("button", {
         class: "btn danger",
         disabled: STATE.pending || STATE.contexts.length === 0 ? true : null,
@@ -1392,8 +1415,15 @@ function render() {
       render();
     };
     const skillTypeLocked = Boolean(draft?.id);
+    const buildDraftActions = () => [
+      el("button", { class: "btn primary", onClick: () => saveSkillDraft() }, [draft.id ? "保存修改" : "保存"]),
+      el("button", { class: "btn", onClick: () => cancelSkillDraft() }, ["取消"])
+    ];
     const form = draft ? el("div", { class: "skillForm" }, [
-      el("div", { class: "skillTitle" }, [draft.id ? "修改技能" : "创建技能"]),
+      el("div", { class: "skillFormHead" }, [
+        el("div", { class: "skillTitle" }, [draft.id ? "修改技能" : "创建技能"]),
+        el("div", { class: "skillActions" }, buildDraftActions())
+      ]),
       el("div", { class: "skillField" }, [
         el("span", { class: "skillFieldLabel" }, ["技能类型"]),
         el("div", { class: "skillActions" }, [
@@ -1421,7 +1451,8 @@ function render() {
         ])
       ]),
       el("label", { class: "skillField" }, [
-        el("span", { class: "skillFieldLabel" }, ["技能名称"]),
+        // 字体大小与加粗跟"数据源"（skillBlockTitle）保持一致，视觉上同层级
+        el("span", { class: "skillFieldLabel", style: { fontSize: "12px", fontWeight: "650", color: "#1e3a8a" } }, ["技能名称"]),
         el("input", { class: "skillInput", value: draft.name, placeholder: "例如：异常订单分析", onInput: (event) => { draft.name = event.target.value; } })
       ]),
       el("div", { class: "skillSourceBlock" }, [
@@ -1573,10 +1604,7 @@ function render() {
           "列表变化后，自动执行会重新判断是否分析；如果当前页面已达到访问上限，本次仍会被保护。建议先通过“测试预览”确认字段、分析方法和结果样式，再决定是否开启自动执行。"
         ])
       ]) : null,
-      el("div", { class: "skillActions" }, [
-        el("button", { class: "btn primary", onClick: () => saveSkillDraft() }, [draft.id ? "保存修改" : "保存"]),
-        el("button", { class: "btn", onClick: () => cancelSkillDraft() }, ["取消"])
-      ])
+      el("div", { class: "skillActions" }, buildDraftActions())
     ]) : null;
     const draftNotice = draft ? el("div", { class: "skillFormNotice" }, [
       draft.id

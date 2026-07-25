@@ -8,7 +8,7 @@
  * 主流程位于 skill-workspace-controller.js，overlay.js 只保留壳层入口与渲染。
  */
 
-import { DEBUG, IS_TOP_FRAME, STATE, compactOneLine, refs, uid } from "./state.js";
+import { DEBUG, IS_TOP_FRAME, STATE, compactOneLine, refs, uid, web2aiDiagnosticsEnabled } from "./state.js";
 import { showToast } from "./toast.js";
 import { showConfirmDialog, showPromptDialog } from "./dialog.js";
 import { skillContentFingerprint } from "./skill-import-model.js";
@@ -52,9 +52,9 @@ let pendingBusinessTabTitle = "";
 let businessTabClickListenerInstalled = false;
 let businessTabRefreshGeneration = 0;
 let businessTabRefreshTimers = [];
-// 技能相关排障日志当前默认开启，便于定位跨 frame 校验、状态写入与面板渲染。
-// 日志只输出 frame、DOM 特征、页码、滚动尺寸和行数，不输出业务单元格内容。
-const SKILL_DIAGNOSTICS = true;
+// 技能相关排障日志，统一走全局诊断开关（控制台 __WEB2AI_DEBUG 或配置面板"诊断日志"）。
+// 默认关闭，不再后台常驻刷屏；排障时开启。日志只输出 frame、DOM 特征、页码、滚动尺寸和行数。
+const SKILL_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 const SKILL_SOURCE_VALIDATE_RETRY_DELAYS_MS = [400, 900, 1600, 2400];
 const SKILL_BUSINESS_TAB_REFRESH_DELAYS_MS = [180, 700, 1600];
 const EXTENSION_CONTEXT_INVALIDATED_MESSAGE = "扩展已更新，请刷新当前页面后重试";
@@ -237,6 +237,13 @@ async function anchorSkillSourceBar(source, fallbackPage = {}) {
 }
 
 function renderSkillBars(skills = []) {
+  const renderStart = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+  // 优化：本 frame 无任何匹配技能时，直接清掉残留横条后返回，
+  // 不做全文档表格定位与逐 source 校验（那些只为渲染横条服务，无匹配时纯属浪费）。
+  if (!frameHasMatchingSkill(skills)) {
+    document.querySelectorAll("[data-web2ai-skill-bar]").forEach((node) => node.remove());
+    return;
+  }
   document.querySelectorAll("[data-web2ai-skill-bar]").forEach((node) => node.remove());
   const grouped = new Map();
   // 某些技能在当前 frame 已不可用，但用户仍需要在表格上方看到它并获知原因。
@@ -248,7 +255,9 @@ function renderSkillBars(skills = []) {
     for (const source of (Array.isArray(skill.pageSources) ? skill.pageSources : skillSources(skill))) {
       const expectedFrameUrl = pageKey(source.frameUrl || "");
       const table = findStoredSourceTable(source);
-      const similarity = table ? headerSimilarity(source.headers || [], extractHeaders(table)) : 0;
+      // similarity 仅用于诊断 probes；extractHeaders 在大表上需 innerText 提取整个表头，
+      // 每次渲染技能条都跑会拖慢渲染。非 DEBUG 时跳过（probes 只在诊断输出中消费）。
+      const similarity = (table && SKILL_DIAGNOSTICS()) ? headerSimilarity(source.headers || [], extractHeaders(table)) : 0;
       const frameMatches = !expectedFrameUrl || expectedFrameUrl === pageKey(location.href);
       probes.push({
         skillId: skill.id,
@@ -501,13 +510,14 @@ function renderSkillBars(skills = []) {
     }
     bar.appendChild(listRow);
     table.parentNode?.insertBefore(bar, table);
-    if (fixedHeightScroller) {
+    if (fixedHeightScroller && !fixedHeightScroller.dataset.web2aiShrunk) {
       // jtv1 的容器链写死高度且随视口/手动拖拽动态变化（#_jt_row_foot 有 resize 把手）。
       // 不能缓存"原始高度"做固定减法——屏幕变化或拖拽后基准会过期。
       // 改为每次基于容器当前实测高度、按 bar 高度占比做比例压缩，跟得上动态尺寸。
       // 用 dataset 标记已压缩，bar 每 3s 重建时若已压过则不重复压缩（幂等）。
+      // getBoundingClientRect 强制同步布局，仅在确实需要压缩（未 shrunk）时才读。
       const barHeight = bar.getBoundingClientRect().height;
-      if (barHeight > 0 && !fixedHeightScroller.dataset.web2aiShrunk) {
+      if (barHeight > 0) {
         const tableNow = table.getBoundingClientRect().height;
         const scrollerNow = fixedHeightScroller.getBoundingClientRect().height;
         if (tableNow > 0 && scrollerNow > 0) {
@@ -522,7 +532,10 @@ function renderSkillBars(skills = []) {
       }
     }
   }
-  const diagnostic = JSON.stringify({
+  const durationMs = renderStart ? Math.round(((typeof performance !== "undefined" && performance.now) ? performance.now() : 0) - renderStart) : 0;
+  // 去重用的签名不含 durationMs——它每次都变，会导致日志去重失效、每 1.5s 刷屏。
+  // 只有内容（技能/匹配/表格/probes）真正变化，或未匹配技能超 10s 时才打印。
+  const diagnosticSignature = JSON.stringify({
     frame: IS_TOP_FRAME ? "top" : "child",
     frameUrl: pageKey(location.href),
     skillCount: skills.length,
@@ -531,17 +544,33 @@ function renderSkillBars(skills = []) {
     tableCandidateCount: tableCandidates().length,
     probes
   });
+  const diagnostic = JSON.stringify({ ...JSON.parse(diagnosticSignature), durationMs });
   const now = Date.now();
   const hasUnmatchedSkills = skills.length > 0 && grouped.size === 0;
-  if (diagnostic !== lastSkillBarDiagnostic || (hasUnmatchedSkills && now - lastSkillBarDiagnosticAt >= 10000)) {
-    lastSkillBarDiagnostic = diagnostic;
+  if (diagnosticSignature !== lastSkillBarDiagnostic || (hasUnmatchedSkills && now - lastSkillBarDiagnosticAt >= 10000)) {
+    lastSkillBarDiagnostic = diagnosticSignature;
     lastSkillBarDiagnosticAt = now;
     if (hasUnmatchedSkills) {
-      SKILL_DIAGNOSTICS && console.warn("[web2ai.skill-bar] sync", diagnostic);
+      SKILL_DIAGNOSTICS() && console.warn("[web2ai.skill-bar] sync", diagnostic);
     } else {
-      SKILL_DIAGNOSTICS && console.info("[web2ai.skill-bar] sync", diagnostic);
+      SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-bar] sync", diagnostic);
     }
   }
+}
+
+// 当前 frame 是否可能渲染任一技能的横条：只看 source.frameUrl 是否匹配本 frame URL
+//（字符串比较，不定位表格，开销可忽略）。frameUrl 为空的 source 视为可跨 frame 展示。
+// 用于让"本 frame 无任何匹配技能"时跳过定时重建与运行期调度，避免全 frame 空转。
+function frameHasMatchingSkill(skills = []) {
+  const current = pageKey(location.href);
+  for (const skill of skills) {
+    const sources = Array.isArray(skill.pageSources) ? skill.pageSources : skillSources(skill);
+    for (const source of sources) {
+      const expected = pageKey(source?.frameUrl || "");
+      if (!expected || expected === current) return true;
+    }
+  }
+  return false;
 }
 
 function scheduleSkillBars(skills = []) {
@@ -553,20 +582,25 @@ function scheduleSkillBars(skills = []) {
   // 前者兜底表格 DOM 替换、晚加载和跨 frame 同步，后者兜底结果列恢复与自动执行。
   renderSkillBars(skills);
   scheduleDerivedColumnRuntime(skills);
-  if (skills.length) {
+  // 优化：本 frame 无任何匹配技能时，不启动低频重建定时器。
+  // frameUrl 不匹配的技能在本 frame 永远不会渲染横条（renderSkillBars 也会过滤），
+  // 启动 3s 轮询只会对每个 frame 做无谓的全文档扫描。顶层广播定时器不受此限——
+  // 它负责把技能列表同步给所有子 frame，与"本 frame 是否匹配"无关。
+  const hasMatch = frameHasMatchingSkill(skills);
+  if (skills.length && hasMatch) {
     // 业务表可能在页面加载十几秒后才出现，也可能被 SPA/虚拟列表整体替换。
     // 低频重建只在当前页面存在技能时运行，确保横条最终出现并持续存在。
     skillBarTimer = setInterval(() => renderSkillBars(skills), 3000);
-    if (IS_TOP_FRAME) {
-      // 子 frame 的 main.js 通过动态 import 初始化，首次广播可能早于监听器注册。
-      // 顶层低频重发，使延迟加载、重新导航或后创建的 iframe 最终都能收到技能列表。
-      skillBarBroadcastTimer = setInterval(() => {
-        sendRuntimeMessageSafely({
-          type: "BROADCAST_TO_TAB",
-          payload: { message: { type: "SYNC_SKILL_BARS", skills } }
-        }).catch(() => void 0);
-      }, 3000);
-    }
+  }
+  if (skills.length && IS_TOP_FRAME) {
+    // 子 frame 的 main.js 通过动态 import 初始化，首次广播可能早于监听器注册。
+    // 顶层低频重发，使延迟加载、重新导航或后创建的 iframe 最终都能收到技能列表。
+    skillBarBroadcastTimer = setInterval(() => {
+      sendRuntimeMessageSafely({
+        type: "BROADCAST_TO_TAB",
+        payload: { message: { type: "SYNC_SKILL_BARS", skills } }
+      }).catch(() => void 0);
+    }, 3000);
   }
 }
 
@@ -934,11 +968,22 @@ function startSkillTablePickInFrame(sessionId) {
   };
   const onDown = (event) => {
     if (event.button !== 0) return;
-    const clickedTable = hovered || resolveTableFromTarget(event.target);
+    // SPA 换页或表格自动重渲染后，hovered 可能仍指向上一页已离屏的表格子树
+    //（指针静止时 pointermove 不触发，hovered 不刷新）。用 isConnected 校验，
+    // 离屏则弃用缓存引用，改用对 event.target 的实时解析，避免读到旧页的名称+字段。
+    let clickedTable = hovered;
+    if (clickedTable && !clickedTable.isConnected) {
+      SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-pick] discard stale hovered (disconnected)", JSON.stringify({
+        frame: IS_TOP_FRAME ? "top" : "child", frameUrl: pageKey(location.href)
+      }));
+      clickedTable = null;
+      hovered = null;
+    }
+    if (!clickedTable) clickedTable = resolveTableFromTarget(event.target);
     if (!clickedTable) {
       const target = event.target instanceof Element ? event.target : null;
       const drawer = target?.closest?.(".ant-drawer,.ant-modal,.arco-drawer,.arco-modal,[role='dialog'],[class*='drawer' i],[class*='modal' i]");
-      SKILL_DIAGNOSTICS && console.info("[web2ai.skill-pick] unresolved click", JSON.stringify({
+      SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-pick] unresolved click", JSON.stringify({
         frame: IS_TOP_FRAME ? "top" : "child",
         frameUrl: pageKey(location.href),
         target: target ? `${target.tagName.toLowerCase()}#${target.id || ""}.${String(target.className || "").trim().split(/\s+/).filter(Boolean).slice(0, 5).join(".")}` : "none",
@@ -992,6 +1037,18 @@ function acceptSkillTablePickResult(payload) {
       selectedSource.displayName = autoSourceDisplayName(selectedSource, STATE.skillDraft.sources.length);
       selectedSource.displayNameOrigin = "auto";
     }
+    // 诊断：记录数据源名称的最终来源，便于排查"名称串到上一页"问题
+    SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-pick] source accepted", JSON.stringify({
+      frame: IS_TOP_FRAME ? "top" : "child",
+      pageKey: selectedSource.pageKey,
+      displayName: selectedSource.displayName,
+      displayNameOrigin: selectedSource.displayNameOrigin || "manual",
+      tableTitle: selectedSource.tableTitle || "",
+      businessTabTitle: selectedSource.businessTabTitle || "",
+      pageTitle: selectedSource.pageTitle || "",
+      headerCount: (selectedSource.headers || []).length,
+      headersPreview: (selectedSource.headers || []).slice(0, 4)
+    }));
     const source = normalizeSkillSource(selectedSource, STATE.skillDraft.sources.length);
     // “添加数据源”和用户主动“重新选择”走同一套快照逻辑：名称、页面
     // 展示信息和表头都以本次明确选择为准。日常读取与校验仍不会自动改名。
@@ -1009,7 +1066,7 @@ function acceptSkillTablePickResult(payload) {
       Number(item.tableIndex) === Number(source.tableIndex)
     ));
     if (duplicateIndex >= 0) {
-      SKILL_DIAGNOSTICS && console.info("[web2ai.skill-pick] duplicate source", JSON.stringify({
+      SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-pick] duplicate source", JSON.stringify({
         existingSourceId: STATE.skillDraft.sources[duplicateIndex].id,
         selectedSourceId: source.id,
         pageKey: source.pageKey,
@@ -1098,7 +1155,7 @@ async function saveSkillDraft() {
     createdAt: existing?.createdAt || now,
     updatedAt: now
   };
-  SKILL_DIAGNOSTICS && console.info("[web2ai.skill] saved skill", JSON.stringify({
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill] saved skill", JSON.stringify({
     skillId: skill.id,
     skillName: skill.name,
     primaryPageKey: skill.pageKey,
@@ -1284,7 +1341,7 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
           }
         });
         validated = response?.data || { status: "missing" };
-        SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] validate-attempt", JSON.stringify({
+        SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] validate-attempt", JSON.stringify({
           skillId: skill.id,
           skillName: skill.name,
           sourceId: source.id,
@@ -1325,7 +1382,7 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
         }
       }
       if (!statuses[source.id]?.found) {
-        SKILL_DIAGNOSTICS && console.info("[web2ai.skill] validation result", JSON.stringify({
+        SKILL_DIAGNOSTICS() && console.info("[web2ai.skill] validation result", JSON.stringify({
           skillId: skill.id,
           skillName: skill.name,
           sourceId: source.id,
@@ -1334,7 +1391,7 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
           probes: statuses[source.id]?.probes || []
         }));
       }
-      SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] validate-final", JSON.stringify({
+      SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] validate-final", JSON.stringify({
         skillId: skill.id,
         skillName: skill.name,
         sourceId: source.id,
@@ -1355,7 +1412,7 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
       }));
     } catch {
       statuses[source.id] = { status: "missing" };
-      SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] validate-final", JSON.stringify({
+      SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] validate-final", JSON.stringify({
         skillId: skill.id,
         skillName: skill.name,
         sourceId: source.id,
@@ -1372,7 +1429,7 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
   STATE.skillSourceStatuses[skill.id] = statuses;
   const stateSnapshot = buildSkillStatusStateSnapshot(skill, statuses);
   const stateSignature = JSON.stringify(stateSnapshot);
-  if (SKILL_DIAGNOSTICS && refs.lastSkillStatusStateLog !== stateSignature) {
+  if (SKILL_DIAGNOSTICS() && refs.lastSkillStatusStateLog !== stateSignature) {
     refs.lastSkillStatusStateLog = stateSignature;
     console.info("[web2ai.skill-panel] state", stateSignature);
   }
@@ -1415,7 +1472,16 @@ function initSkills(onRender) {
       const currentPageKey = pageKey();
       if (currentPageKey === observedPageKey) return;
       if (currentPageKey !== observedPageKey) {
-        confirmedBusinessTabTitle = pendingBusinessTabTitle || "";
+        // 切页：confirmed/pendingBusinessTabTitle 是上一页的页签标题，
+        // 不能结转到新页面（否则新页面读不到 DOM 激活标记时会沿用旧页名称 → 数据源名称串页）。
+        // 清空后让新页面从 DOM 重新检测激活页签。
+        if (confirmedBusinessTabTitle || pendingBusinessTabTitle) {
+          SKILL_DIAGNOSTICS() && console.info("[web2ai.page-switch] clear business tab fallback", JSON.stringify({
+            from: observedPageKey, to: currentPageKey,
+            clearedConfirmed: confirmedBusinessTabTitle, clearedPending: pendingBusinessTabTitle
+          }));
+        }
+        confirmedBusinessTabTitle = "";
         pendingBusinessTabTitle = "";
       }
       observedPageKey = currentPageKey;
@@ -1426,6 +1492,10 @@ function initSkills(onRender) {
     }, 400);
   }
   loadSkills().catch(() => void 0);
+  // jtv1: 多页签框架的业务 Tab 由 React/框架异步渲染，content script 首次执行时
+  // ant-design Tabs 可能尚未挂载到 DOM。调度 3 次短间隔重试（180ms / 700ms / 1600ms），
+  // 确保业务页面初次打开时无需用户手动展开 Chat 即可渲染技能列表。
+  if (IS_TOP_FRAME && isJtv1LikePage()) scheduleBusinessTabSkillRefresh();
 }
 
 const reloadSkills = loadSkills;
@@ -1438,3 +1508,7 @@ export {
   saveSkillAnalysisMethod, updateSkillSourceHeaders, scheduleSkillBars,
   downloadSkillsExport, previewSkillsImport, applySkillsImport, getBusinessPageTabs
 };
+
+// 仅供单元测试访问内部辅助逻辑
+const __test = { frameHasMatchingSkill };
+export { __test };

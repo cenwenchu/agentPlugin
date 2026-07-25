@@ -546,6 +546,32 @@ const waitForWorkerTabsApi = async (worker, { timeoutMs = 10000, intervalMs = 20
   throw new Error("extension worker tabs api did not become ready in time");
 };
 
+const isExtensionServiceWorker = (target) =>
+  target.type() === "service_worker" && /^chrome-extension:\/\/[^/]+\/src\/background\.js$/.test(target.url());
+
+const freshWorker = async (browser) => {
+  const target = await browser.waitForTarget(isExtensionServiceWorker, { timeout: 15000 }).catch(() => null);
+  const handle = target ? await target.worker().catch(() => null) : null;
+  if (!handle) throw new Error("extension service worker is not available");
+  return handle;
+};
+
+const setStoredSkillsWithFreshWorker = async (browser, { skills, pageNames = {} }) => {
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const worker = await freshWorker(browser);
+  await Promise.race([
+    worker.evaluate(async ({ nextSkills, nextPageNames }) => {
+      const SKILL_STORAGE_KEY = "web2aiSkills";
+      const SKILL_PAGE_NAMES_STORAGE_KEY = "web2aiSkillPageNames";
+      await chrome.storage.local.set({
+        [SKILL_STORAGE_KEY]: nextSkills,
+        [SKILL_PAGE_NAMES_STORAGE_KEY]: nextPageNames
+      });
+    }, { nextSkills: skills, nextPageNames: pageNames }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("setStoredSkills timed out")), 15000))
+  ]);
+};
+
 const readWorkspaceDataSourceDiagnostics = (page, workspaceSelector) => page.$eval(
   "#web2ai_overlay_host",
   (host, selector) => {
@@ -691,6 +717,9 @@ const browser = await puppeteer.launch({
   // Without this option Chrome starts, but Puppeteer rejects the launch before
   // the extension can be installed, so none of the browser regressions run.
   pipe: true,
+  args: /^(1|true)$/i.test(process.env.E2E_NO_SANDBOX || "")
+    ? ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+    : [],
   enableExtensions: [extension]
 });
 
@@ -759,6 +788,12 @@ try {
   // The Chat-level switch suppresses only new Ask AI hover actions. Chat,
   // existing context and the launcher remain available, and the setting is
   // synchronized to every frame through storage.sync.
+  // NOTE: the panel defaults to the Skills tab, so switch to Chat first to
+  // render the Chat-level Ask AI switch before toggling it.
+  await page.$eval("#web2ai_overlay_host", (host) => {
+    Array.from(host.shadowRoot.querySelectorAll(".sideTab")).find((button) => button.textContent?.trim() === "Chat")?.click();
+  });
+  await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector("#web2ai_table_ask_toggle") != null, { timeout: 10000 });
   await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector("#web2ai_table_ask_toggle")?.click());
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelector("#web2ai_table_ask_toggle")?.checked === false);
   await page.hover("#orders tbody tr");
@@ -1832,7 +1867,7 @@ try {
   reportE2eSection("options model draft passed");
   console.log("[diag] T7 start");
   const tabbedSkillPage = `${url}skill-source-tabs`;
-  await setStoredSkills(worker, {
+  await setStoredSkillsWithFreshWorker(browser, {
     skills: [
       makeLocatorDerivedSkill({
         id: "plan-locator-skill",
@@ -1852,35 +1887,38 @@ try {
       })
     ]
   });
-  console.log("[diag] T7 setStoredSkills done, goto");
-  await page.goto(tabbedSkillPage);
+  console.log("[diag] T7 setStoredSkills done, newPage");
+  const tabbedStatusPage = await browser.newPage();
+  tabbedStatusPage.on("pageerror", (error) => console.log(`[diag][business-tab][pageerror] ${error.message}`));
+  await tabbedStatusPage.goto(tabbedSkillPage);
   console.log("[diag] T7 goto done, waitForSelector overlay");
-  await page.waitForSelector("#web2ai_overlay_host");
+  await tabbedStatusPage.waitForSelector("#web2ai_overlay_host");
   console.log("[diag] T7 overlay present, openSkillsPanel");
-  await openSkillsPanel(page);
+  await openSkillsPanel(tabbedStatusPage);
   console.log("[diag] T7 panel opened, wait available(plan)");
-  await waitForSkillStatusClass(page, "计划表定位", "available");
+  await waitForSkillStatusClass(tabbedStatusPage, "计划表定位", "available");
   console.log("[diag] T7 plan available, wait changed(link)");
-  await waitForSkillStatusClass(page, "链接表定位", "changed");
+  await waitForSkillStatusClass(tabbedStatusPage, "链接表定位", "changed");
   console.log("[diag] T7 link changed, readStatuses");
-  let tabStatuses = await readSkillStatuses(page);
+  let tabStatuses = await readSkillStatuses(tabbedStatusPage);
   assert.ok(tabStatuses.find((item) => item.name === "计划表定位" && item.statusClass.includes("available")));
   assert.ok(tabStatuses.find((item) => item.name === "链接表定位" && item.statusClass.includes("changed")));
   console.log("[diag] T7 asserts ok, click link-realTab");
-  await page.click(".link-realTab");
+  await tabbedStatusPage.click(".link-realTab");
   console.log("[diag] T7 clicked tab, wait available(link)");
-  await waitForSkillStatusClass(page, "链接表定位", "available");
+  await waitForSkillStatusClass(tabbedStatusPage, "链接表定位", "available");
   console.log("[diag] T7 link available, wait changed(plan)");
-  await waitForSkillStatusClass(page, "计划表定位", "changed");
+  await waitForSkillStatusClass(tabbedStatusPage, "计划表定位", "changed");
   console.log("[diag] T7 plan changed, readStatuses2");
-  tabStatuses = await readSkillStatuses(page);
+  tabStatuses = await readSkillStatuses(tabbedStatusPage);
   assert.ok(tabStatuses.find((item) => item.name === "链接表定位" && item.statusClass.includes("available")));
   assert.ok(tabStatuses.find((item) => item.name === "计划表定位" && item.statusClass.includes("changed")));
+  await tabbedStatusPage.close();
 
   reportE2eSection("business-tab source status passed");
   console.log("[diag] T8 start");
   const multiTableSkillPage = `${url}skill-source-multi`;
-  await setStoredSkills(worker, {
+  await setStoredSkillsWithFreshWorker(browser, {
     skills: [
       makeLocatorDerivedSkill({
         id: "multi-table-derv",
@@ -1892,15 +1930,17 @@ try {
       })
     ]
   });
-  await page.goto(multiTableSkillPage);
-  await page.waitForSelector("#web2ai_overlay_host");
-  await openSkillsPanel(page);
-  await waitForSkillStatusClass(page, "多表定位恢复", "available");
-  const multiTableStatus = await readSkillStatuses(page);
+  const multiTableStatusPage = await browser.newPage();
+  await multiTableStatusPage.goto(multiTableSkillPage);
+  await multiTableStatusPage.waitForSelector("#web2ai_overlay_host");
+  await openSkillsPanel(multiTableStatusPage);
+  await waitForSkillStatusClass(multiTableStatusPage, "多表定位恢复", "available");
+  const multiTableStatus = await readSkillStatuses(multiTableStatusPage);
   assert.ok(
     multiTableStatus.find((item) => item.name === "多表定位恢复" && item.statusClass.includes("available")),
     "multi-table fallback should recover the exact-header table even when the selector drifts to another table"
   );
+  await multiTableStatusPage.close();
 
 console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, runtime CSV/XLSX sources, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing, derived runtime auto/manual/page-guard coverage");
 } finally {

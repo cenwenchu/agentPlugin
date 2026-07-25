@@ -50,7 +50,7 @@ const STATE = {
   tableAskAiEnabled: true,
   modelOptions: [],
   activeModelId: "",
-  activePanelTab: "chat",
+  activePanelTab: "skills",
   skills: [],
   skillCatalog: [],
   skillPageNames: {},
@@ -64,7 +64,9 @@ const STATE = {
   skillPickSession: "",
   /** 重新选择时被替换的数据源 ID；空字符串表示追加数据源。 */
   skillPickSourceId: "",
-  skillSourceStatuses: {}
+  skillSourceStatuses: {},
+  /** 诊断日志开关：由配置面板写入，控制所有技能/派生列诊断日志输出。 */
+  diagnosticsEnabled: false
 };
 
 /** 表格列分隔符 */
@@ -240,4 +242,16 @@ export {
  */
 const DEBUG = false;
 
-export { DEBUG };
+/**
+ * 统一的运行时诊断日志开关。
+ * 两个硬编码的常驻日志（skills.js SKILL_DIAGNOSTICS、derived-column-controller
+ * DERIVED_RUNTIME_DIAGNOSTICS）原本不受控制、对所有用户刷屏。现统一走这里：
+ *   1. 控制台 window.__WEB2AI_DEBUG = true —— 临时调试，页面级，刷新失效；
+ *   2. 配置面板"诊断日志"开关 → STATE.diagnosticsEnabled —— 持久化。
+ * 任一为真即输出诊断日志；默认（都未开）完全关闭，不再后台刷屏。
+ */
+function web2aiDiagnosticsEnabled() {
+  return globalThis.__WEB2AI_DEBUG === true || STATE.diagnosticsEnabled === true;
+}
+
+export { DEBUG, web2aiDiagnosticsEnabled };

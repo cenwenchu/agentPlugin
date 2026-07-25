@@ -240,7 +240,7 @@ Chat 的“全部技能”区域继续按全局统一顺序编号。当前页面
 
 **跳转与重开**。点击“其他页面技能”分组走 `switchToSkillPage` → background `SWITCH_TO_SKILL_PAGE`：先按 pageKey 找到目标浏览器 tab，若 source 带 `businessTabTitle` 则向顶帧发 `ACTIVATE_BUSINESS_PAGE_TAB` 激活对应业务页签（`main.js` 在 `findBusinessTabElements` 里按标题找页签并 dispatch click，realTab 优先于 ant Tabs）；激活失败（页签已关闭）时用 `?n=` 直达 URL 导航重开，再打开技能面板并聚焦高亮数据源表格。前端传单个 source 对象（不是 `focusSources` 数组），background 据此读取 `businessTabTitle`；`focusSources` 数组仅作聚焦兜底。
 
-**执行链路的页签激活**。采集（`LOAD_SKILL_SOURCE_DATA`）、预览（`EXTRACT_SKILL_SOURCE_PREVIEW_DATA`）、分页探测（`INSPECT_SKILL_SOURCE_PAGINATION`）在定位数据源前，若 source 带 `businessTabTitle` 会先尝试激活对应业务页签再校验。技能横条（`renderSkillBars`）按 `frameUrl === pageKey(location.href)` 定位目标 frame，jtv1 每个业务页签 iframe 的 src 不同，天然按页签区分，无需特殊处理。jtv1 表格（`#_jt` 写死高度的虚拟滚动表）上方注入技能横条时，会按横条实际高度等量压缩 `#_jt` 与 `#_jt_body` 高度，保持底部翻页器可见；压缩基于容器当前实测高度按比例计算、幂等（横条每 3s 重建不叠加误差），以适配框架按视口/手动拖拽动态算高的特性。
+**执行链路的页签激活**。采集（`LOAD_SKILL_SOURCE_DATA`）、预览（`EXTRACT_SKILL_SOURCE_PREVIEW_DATA`）、分页探测（`INSPECT_SKILL_SOURCE_PAGINATION`）在定位数据源前，若 source 带 `businessTabTitle` 会先尝试激活对应业务页签再校验。技能横条（`renderSkillBars`）按 `frameUrl === pageKey(location.href)` 定位目标 frame，jtv1 每个业务页签 iframe 的 src 不同，天然按页签区分，无需特殊处理。**性能**：`renderSkillBars` 与 3s 低频重建定时器先做 `frameHasMatchingSkill` 判断（仅比较 `source.frameUrl` 与本 frame URL，不定位表格）——当前 frame 无任何匹配技能时直接早退/不启动定时器，避免无技能 frame 每 3s 空转全文档扫描；有匹配的 frame 仍保留 3s 重建以兜底业务框架整块替换表格 DOM（横条丢失需重建，不能按"技能/页面无变化"跳过）。jtv1 表格（`#_jt` 写死高度的虚拟滚动表）上方注入技能横条时，会按横条实际高度等量压缩 `#_jt` 与 `#_jt_body` 高度，保持底部翻页器可见；压缩基于容器当前实测高度按比例计算、幂等（横条每 3s 重建不叠加误差），以适配框架按视口/手动拖拽动态算高的特性。
 
 ### 按列分析运行时
 

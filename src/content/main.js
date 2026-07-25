@@ -393,11 +393,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // ========== 监听 storage 变更 ==========
 
 chrome.storage.sync
-  .get(["panelMaximized", "launcherHidden", "lastPanelTab", "tableAskAiEnabled"])
+  .get(["panelMaximized", "launcherHidden", "lastPanelTab", "tableAskAiEnabled", "diagnosticsEnabled"])
   .then((data) => {
     if (typeof data?.panelMaximized === "boolean") STATE.maximized = data.panelMaximized;
     if (data?.lastPanelTab === "chat" || data?.lastPanelTab === "skills") STATE.activePanelTab = data.lastPanelTab;
     STATE.launcherVisible = data?.launcherHidden !== true;
+    STATE.diagnosticsEnabled = data?.diagnosticsEnabled === true;
     setTableAskAiEnabled(data?.tableAskAiEnabled !== false);
     setTableSelectionEnabled(STATE.launcherVisible);
     render();
@@ -417,6 +418,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.tableAskAiEnabled) {
     // 删除同步键时回到默认开启，避免当前 frame 一直保留旧的关闭状态。
     setTableAskAiEnabled(changes.tableAskAiEnabled.newValue !== false);
+  }
+  if (changes.diagnosticsEnabled) {
+    // 诊断日志开关：删除同步键时回到默认关闭。
+    STATE.diagnosticsEnabled = changes.diagnosticsEnabled.newValue === true;
   }
   if (changes.lastPanelTab && (changes.lastPanelTab.newValue === "chat" || changes.lastPanelTab.newValue === "skills")) {
     STATE.activePanelTab = changes.lastPanelTab.newValue;

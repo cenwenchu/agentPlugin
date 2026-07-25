@@ -1343,6 +1343,10 @@ function getRenderedTableRows() {
 
 function restoreRenderedSelectionState() {
   if (!STATE.launcherVisible) return;
+  // 空选择早退：没有任何已选行/钉住覆盖层/批量锚点时，逐行恢复无任何实际作用，
+  // 但 isHeaderRow（每行 3 次 querySelectorAll）+ 全文档行扫描在滚动每帧都要跑，
+  // 派生列等重行结构下直接造成滚动掉帧。状态为空时整段跳过。
+  if (!refs.selectedRowRef?.size && !refs.pinnedRowOverlays?.size && !refs.batchAnchorRow) return;
   for (const rowEl of getRenderedTableRows()) {
     if (!rowEl?.isConnected || isHeaderRow(rowEl)) continue;
     reconcileRecycledRow(rowEl);

@@ -220,7 +220,11 @@ npm run test:e2e  # 启动有界面 Google Chrome，并加载临时扩展副本
 
 ### 技能采集排障
 
-AI 和基础表格诊断日志默认仍跟随 `background.js` 的 `DIAGNOSTIC_LOGS` 与内容脚本 `state.js` 的 `DEBUG`。技能排障日志目前保持较高可见性：`web2ai.skill-source`、`web2ai.skill-panel`、`web2ai.skill-workspace` 与 `web2ai.derived-runtime` 默认开启，用于排查跨 frame 调度、数据源校验、分页采集、缓存恢复与结果列重建。所有日志都只允许包含 frame、DOM 特征、页码、滚动尺寸、行数和消息长度，不得输出业务单元格、完整提示词或 API Key；排障后如无必要应继续收敛到结果级日志。
+AI 和基础表格诊断日志默认仍跟随 `background.js` 的 `DIAGNOSTIC_LOGS` 与内容脚本 `state.js` 的 `DEBUG`。技能与派生列排障日志（`web2ai.skill-bar`、`web2ai.skill-source`、`web2ai.skill-panel`、`web2ai.skill-workspace`、`web2ai.derived-runtime`）**统一走全局诊断开关，默认关闭**，避免后台常驻刷屏与额外的 DOM 扫描/序列化开销。开启方式（任一为真即生效）：扩展面板"诊断日志"开关（持久化到 `chrome.storage.sync`，由 `STATE.diagnosticsEnabled` 读取），或控制台 `window.__WEB2AI_DEBUG = true`（页面级临时，刷新失效）。所有日志都只允许包含 frame、DOM 特征、页码、滚动尺寸、行数和消息长度，不得输出业务单元格、完整提示词或 API Key；定位细节（候选表逐项 innerText/选择器/尺寸）需再开 `window.__WEB2AI_DEBUG_VERBOSE`。排障后如无必要应继续收敛到结果级日志。
+
+### 技能渲染的性能约束
+
+技能横条（`renderSkillBars`）与按列分析运行期调度（`scheduleDerivedColumnRuntime`）按 frame 隔离：当前 frame 无任何技能数据源的 `frameUrl` 匹配时（`frameHasMatchingSkill`，仅字符串比较、不定位表格），该 frame 不做全文档表格定位，也不启动 3s 低频重建定时器——避免"在 A 页建了技能后，B 页/顶层/空 frame 也每 1.5s 空转扫描"。frameUrl 匹配的技能所在 frame 仍保留 3s 重建，用于兜底业务框架整块替换表格 DOM 导致横条丢失的场景（这是正确性兜底，不能按"技能/页面无变化"跳过）。顶层 frame 的跨 frame 广播定时器与"本 frame 是否匹配"无关，始终保留以确保子 frame 收到技能列表。
 
 ## 表格行为说明
 

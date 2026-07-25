@@ -1,0 +1,1343 @@
+{
+  "format": "web2ai-skills",
+  "version": 1,
+  "exportedAt": "2026-07-25T02:14:02.159Z",
+  "skills": [
+    {
+      "analysisMethod": {
+        "description": ""
+      },
+      "createdAt": 1784944746747,
+      "defaultMethodVersion": 1,
+      "execution": {
+        "scope": "current-page",
+        "maxRows": 100,
+        "maxBatchRows": 20
+      },
+      "id": "19f96ff60fb_06c10df867edd8",
+      "name": "采购单AI字段",
+      "output": {
+        "columnName": "采购备注分析",
+        "position": "before-first-selected-column",
+        "maxChars": 1000
+      },
+      "pageKey": "https://www.erp321.com/epaas",
+      "pageTitle": "聚水潭 ERP",
+      "pageUrl": "https://www.erp321.com/epaas?n=%E9%87%87%E8%B4%AD%E5%8D%95%E7%AE%A1%E7%90%86",
+      "revision": 1,
+      "selectedColumns": [
+        {
+          "index": 18,
+          "header": "备注",
+          "normalizedHeader": "备注",
+          "occurrence": 1
+        }
+      ],
+      "source": {
+        "businessTabTitle": "采购单管理",
+        "capturedAt": 1784944690515,
+        "capturedPageUrl": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx?_c=jst-epaas&epaas=true",
+        "componentType": "generic",
+        "containerSignature": "id:_jt|id:purchase_main_div",
+        "displayName": "采购单管理",
+        "displayNameCustomized": false,
+        "displayNameOrigin": "auto",
+        "frameId": 3228,
+        "framePathHint": [
+          {
+            "sameUrlIndex": 0,
+            "url": "https://www.erp321.com/epaas"
+          },
+          {
+            "sameUrlIndex": 0,
+            "url": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx"
+          }
+        ],
+        "frameUrl": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx",
+        "headerFingerprint": "采购单号|采购日期|供应商|状态|编辑|标记|多标签|商品信息|总商品量|总金额|最早预计到货日期|预计到货数量|总入库数|差异数|退货数|质检数|质检正品数|质检次品数|收货状态|备注|收货地址|采购单类型|仓储方|运营云仓|物流单号|物流公司|物流状态|运费|采购员|审核日期|最后修改日期",
+        "headers": [
+          "采购单号",
+          "采购日期",
+          "供应商",
+          "状态",
+          "编辑",
+          "标记|多标签",
+          "商品信息",
+          "总商品量",
+          "总金额",
+          "最早预计到货日期",
+          "预计到货数量",
+          "总入库数",
+          "差异数",
+          "退货数",
+          "质检数",
+          "质检正品数",
+          "质检次品数",
+          "收货状态",
+          "备注",
+          "收货地址",
+          "采购单类型",
+          "仓储方",
+          "运营云仓",
+          "物流单号",
+          "物流公司",
+          "物流状态",
+          "运费",
+          "采购员",
+          "审核日期",
+          "最后修改日期"
+        ],
+        "id": "19f96fe855d_2154068fd2df",
+        "isTopFrame": false,
+        "locatorVersion": 2,
+        "pageKey": "https://www.erp321.com/epaas",
+        "pageTitle": "聚水潭 ERP",
+        "pageUrl": "https://www.erp321.com/epaas?n=%E9%87%87%E8%B4%AD%E5%8D%95%E7%AE%A1%E7%90%86",
+        "preview": "采购单号、采购日期、供应商、状态、编辑、标记|多标签、商品信息、总商品量、总金额、最早预计到货日期、预计到货数量、总入库数、差异数、退货数、质检数、质检正品数、质检次品数、收货状态、备注、收货地址、采购单类型、仓储方、运营云仓、物流单号、物流公司、物流状态、运费、采购员、审核日期、最后修改日期",
+        "selector": "#_jt",
+        "selectorStrength": "stable-id",
+        "tableIndex": 8,
+        "tableTitle": ""
+      },
+      "sourceName": "采购单管理",
+      "sources": [
+        {
+          "businessTabTitle": "采购单管理",
+          "capturedAt": 1784944690515,
+          "capturedPageUrl": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx?_c=jst-epaas&epaas=true",
+          "componentType": "generic",
+          "containerSignature": "id:_jt|id:purchase_main_div",
+          "displayName": "采购单管理",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 3228,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://www.erp321.com/epaas"
+            },
+            {
+              "sameUrlIndex": 0,
+              "url": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx"
+            }
+          ],
+          "frameUrl": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx",
+          "headerFingerprint": "采购单号|采购日期|供应商|状态|编辑|标记|多标签|商品信息|总商品量|总金额|最早预计到货日期|预计到货数量|总入库数|差异数|退货数|质检数|质检正品数|质检次品数|收货状态|备注|收货地址|采购单类型|仓储方|运营云仓|物流单号|物流公司|物流状态|运费|采购员|审核日期|最后修改日期",
+          "headers": [
+            "采购单号",
+            "采购日期",
+            "供应商",
+            "状态",
+            "编辑",
+            "标记|多标签",
+            "商品信息",
+            "总商品量",
+            "总金额",
+            "最早预计到货日期",
+            "预计到货数量",
+            "总入库数",
+            "差异数",
+            "退货数",
+            "质检数",
+            "质检正品数",
+            "质检次品数",
+            "收货状态",
+            "备注",
+            "收货地址",
+            "采购单类型",
+            "仓储方",
+            "运营云仓",
+            "物流单号",
+            "物流公司",
+            "物流状态",
+            "运费",
+            "采购员",
+            "审核日期",
+            "最后修改日期"
+          ],
+          "id": "19f96fe855d_2154068fd2df",
+          "isTopFrame": false,
+          "locatorVersion": 2,
+          "pageKey": "https://www.erp321.com/epaas",
+          "pageTitle": "聚水潭 ERP",
+          "pageUrl": "https://www.erp321.com/epaas?n=%E9%87%87%E8%B4%AD%E5%8D%95%E7%AE%A1%E7%90%86",
+          "preview": "采购单号、采购日期、供应商、状态、编辑、标记|多标签、商品信息、总商品量、总金额、最早预计到货日期、预计到货数量、总入库数、差异数、退货数、质检数、质检正品数、质检次品数、收货状态、备注、收货地址、采购单类型、仓储方、运营云仓、物流单号、物流公司、物流状态、运费、采购员、审核日期、最后修改日期",
+          "selector": "#_jt",
+          "selectorStrength": "stable-id",
+          "tableIndex": 8,
+          "tableTitle": ""
+        }
+      ],
+      "trigger": {
+        "mode": "page-load",
+        "autoRunEnabled": false
+      },
+      "type": "derived-column",
+      "updatedAt": 1784944746748,
+      "version": 3
+    },
+    {
+      "analysisMethod": {
+        "description": "请帮我分析标题含有物流问题的工单，并且大致归类"
+      },
+      "createdAt": 1784943900720,
+      "id": "19f96f27830_5138f5dd14e08",
+      "name": "物流问题监控",
+      "pageKey": "https://tool.jushuitan.com/ticket",
+      "pageTitle": "聚宝盆",
+      "pageUrl": "https://tool.jushuitan.com/ticket",
+      "revision": 1,
+      "source": {
+        "businessTabTitle": "",
+        "capturedAt": 1784943855673,
+        "capturedPageUrl": "https://tool.jushuitan.com/ticket",
+        "componentType": "native",
+        "containerSignature": "",
+        "displayName": "工单号、创建时间等数据",
+        "displayNameCustomized": false,
+        "displayNameOrigin": "auto",
+        "frameId": 0,
+        "framePathHint": [
+          {
+            "sameUrlIndex": 0,
+            "url": "https://tool.jushuitan.com/ticket"
+          }
+        ],
+        "frameUrl": "https://tool.jushuitan.com/ticket",
+        "headerFingerprint": "工单号|创建时间|公司名|标题|状态|模块|子模块|erp版本|快捷回复|最后一次回复内容|备注|需求号|标签|店铺|单据号/商品|解决方案|当前处理人|开发人员|产品|发起人|禅道|平台|创建人|用户类型|审核人|抄送人|系统开发者|系统测试者|系统产品者|关联工单号|运行环境|测试|是否历史工单|操作",
+        "headers": [
+          "工单号",
+          "创建时间",
+          "公司名",
+          "标题",
+          "状态",
+          "模块",
+          "子模块",
+          "ERP版本",
+          "快捷回复",
+          "最后一次回复内容",
+          "备注",
+          "需求号",
+          "标签",
+          "店铺",
+          "单据号/商品",
+          "解决方案",
+          "当前处理人",
+          "开发人员",
+          "产品",
+          "发起人",
+          "禅道",
+          "平台",
+          "创建人",
+          "用户类型",
+          "审核人",
+          "抄送人",
+          "系统开发者",
+          "系统测试者",
+          "系统产品者",
+          "关联工单号",
+          "运行环境",
+          "测试",
+          "是否历史工单",
+          "操作"
+        ],
+        "id": "19f96f1c83f_c41e51ac23dd78",
+        "isTopFrame": true,
+        "locatorVersion": 2,
+        "pageKey": "https://tool.jushuitan.com/ticket",
+        "pageTitle": "聚宝盆",
+        "pageUrl": "https://tool.jushuitan.com/ticket",
+        "preview": "工单号、创建时间、公司名、标题、状态、模块、子模块、ERP版本、快捷回复、最后一次回复内容、备注、需求号、标签、店铺、单据号/商品、解决方案、当前处理人、开发人员、产品、发起人、禅道、平台、创建人、用户类型、审核人、抄送人、系统开发者、系统测试者、系统产品者、关联工单号、运行环境、测试、是否历史工单、操作",
+        "selector": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > table",
+        "selectorStrength": "positional",
+        "tableIndex": 0,
+        "tableTitle": ""
+      },
+      "sourceName": "工单号、创建时间等数据",
+      "sources": [
+        {
+          "businessTabTitle": "",
+          "capturedAt": 1784943855673,
+          "capturedPageUrl": "https://tool.jushuitan.com/ticket",
+          "componentType": "native",
+          "containerSignature": "",
+          "displayName": "工单号、创建时间等数据",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 0,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://tool.jushuitan.com/ticket"
+            }
+          ],
+          "frameUrl": "https://tool.jushuitan.com/ticket",
+          "headerFingerprint": "工单号|创建时间|公司名|标题|状态|模块|子模块|erp版本|快捷回复|最后一次回复内容|备注|需求号|标签|店铺|单据号/商品|解决方案|当前处理人|开发人员|产品|发起人|禅道|平台|创建人|用户类型|审核人|抄送人|系统开发者|系统测试者|系统产品者|关联工单号|运行环境|测试|是否历史工单|操作",
+          "headers": [
+            "工单号",
+            "创建时间",
+            "公司名",
+            "标题",
+            "状态",
+            "模块",
+            "子模块",
+            "ERP版本",
+            "快捷回复",
+            "最后一次回复内容",
+            "备注",
+            "需求号",
+            "标签",
+            "店铺",
+            "单据号/商品",
+            "解决方案",
+            "当前处理人",
+            "开发人员",
+            "产品",
+            "发起人",
+            "禅道",
+            "平台",
+            "创建人",
+            "用户类型",
+            "审核人",
+            "抄送人",
+            "系统开发者",
+            "系统测试者",
+            "系统产品者",
+            "关联工单号",
+            "运行环境",
+            "测试",
+            "是否历史工单",
+            "操作"
+          ],
+          "id": "19f96f1c83f_c41e51ac23dd78",
+          "isTopFrame": true,
+          "locatorVersion": 2,
+          "pageKey": "https://tool.jushuitan.com/ticket",
+          "pageTitle": "聚宝盆",
+          "pageUrl": "https://tool.jushuitan.com/ticket",
+          "preview": "工单号、创建时间、公司名、标题、状态、模块、子模块、ERP版本、快捷回复、最后一次回复内容、备注、需求号、标签、店铺、单据号/商品、解决方案、当前处理人、开发人员、产品、发起人、禅道、平台、创建人、用户类型、审核人、抄送人、系统开发者、系统测试者、系统产品者、关联工单号、运行环境、测试、是否历史工单、操作",
+          "selector": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > table",
+          "selectorStrength": "positional",
+          "tableIndex": 0,
+          "tableTitle": ""
+        }
+      ],
+      "type": "table-analysis",
+      "updatedAt": 1784943900722,
+      "version": 3
+    },
+    {
+      "analysisMethod": {
+        "description": "分析需要关注的采购单，按分类罗列原因和采购单号，用表格的形式来呈现结果"
+      },
+      "createdAt": 1784937518453,
+      "id": "19f96911575_0264360bfc98f",
+      "name": "采购单智能分析",
+      "pageKey": "https://www.erp321.com/epaas",
+      "pageTitle": "聚水潭 ERP",
+      "pageUrl": "https://www.erp321.com/epaas",
+      "revision": 1,
+      "source": {
+        "businessTabTitle": "采购单管理",
+        "capturedAt": 1784937503701,
+        "capturedPageUrl": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx?_c=jst-epaas&epaas=true",
+        "componentType": "generic",
+        "containerSignature": "id:_jt|id:purchase_main_div",
+        "displayName": "采购单管理",
+        "displayNameCustomized": false,
+        "displayNameOrigin": "auto",
+        "frameId": 2265,
+        "framePathHint": [
+          {
+            "sameUrlIndex": 0,
+            "url": "https://www.erp321.com/epaas"
+          },
+          {
+            "sameUrlIndex": 0,
+            "url": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx"
+          }
+        ],
+        "frameUrl": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx",
+        "headerFingerprint": "采购单号|采购日期|供应商|状态|编辑|标记|多标签|商品信息|总商品量|总金额|最早预计到货日期|预计到货数量|总入库数|差异数|退货数|质检数|质检正品数|质检次品数|收货状态|备注|收货地址|采购单类型|仓储方|运营云仓|物流单号|物流公司|物流状态|运费|采购员|审核日期|最后修改日期",
+        "headers": [
+          "采购单号",
+          "采购日期",
+          "供应商",
+          "状态",
+          "编辑",
+          "标记|多标签",
+          "商品信息",
+          "总商品量",
+          "总金额",
+          "最早预计到货日期",
+          "预计到货数量",
+          "总入库数",
+          "差异数",
+          "退货数",
+          "质检数",
+          "质检正品数",
+          "质检次品数",
+          "收货状态",
+          "备注",
+          "收货地址",
+          "采购单类型",
+          "仓储方",
+          "运营云仓",
+          "物流单号",
+          "物流公司",
+          "物流状态",
+          "运费",
+          "采购员",
+          "审核日期",
+          "最后修改日期"
+        ],
+        "id": "19f9690dbdf_b177ec614adb8",
+        "isTopFrame": false,
+        "locatorVersion": 2,
+        "pageKey": "https://www.erp321.com/epaas",
+        "pageTitle": "聚水潭 ERP",
+        "pageUrl": "https://www.erp321.com/epaas",
+        "preview": "采购单号、采购日期、供应商、状态、编辑、标记|多标签、商品信息、总商品量、总金额、最早预计到货日期、预计到货数量、总入库数、差异数、退货数、质检数、质检正品数、质检次品数、收货状态、备注、收货地址、采购单类型、仓储方、运营云仓、物流单号、物流公司、物流状态、运费、采购员、审核日期、最后修改日期",
+        "selector": "#_jt",
+        "selectorStrength": "stable-id",
+        "tableIndex": 8,
+        "tableTitle": ""
+      },
+      "sourceName": "采购单管理",
+      "sources": [
+        {
+          "businessTabTitle": "采购单管理",
+          "capturedAt": 1784937503701,
+          "capturedPageUrl": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx?_c=jst-epaas&epaas=true",
+          "componentType": "generic",
+          "containerSignature": "id:_jt|id:purchase_main_div",
+          "displayName": "采购单管理",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 2265,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://www.erp321.com/epaas"
+            },
+            {
+              "sameUrlIndex": 0,
+              "url": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx"
+            }
+          ],
+          "frameUrl": "https://www.erp321.com/app/scm/purchase/purchasemode.aspx",
+          "headerFingerprint": "采购单号|采购日期|供应商|状态|编辑|标记|多标签|商品信息|总商品量|总金额|最早预计到货日期|预计到货数量|总入库数|差异数|退货数|质检数|质检正品数|质检次品数|收货状态|备注|收货地址|采购单类型|仓储方|运营云仓|物流单号|物流公司|物流状态|运费|采购员|审核日期|最后修改日期",
+          "headers": [
+            "采购单号",
+            "采购日期",
+            "供应商",
+            "状态",
+            "编辑",
+            "标记|多标签",
+            "商品信息",
+            "总商品量",
+            "总金额",
+            "最早预计到货日期",
+            "预计到货数量",
+            "总入库数",
+            "差异数",
+            "退货数",
+            "质检数",
+            "质检正品数",
+            "质检次品数",
+            "收货状态",
+            "备注",
+            "收货地址",
+            "采购单类型",
+            "仓储方",
+            "运营云仓",
+            "物流单号",
+            "物流公司",
+            "物流状态",
+            "运费",
+            "采购员",
+            "审核日期",
+            "最后修改日期"
+          ],
+          "id": "19f9690dbdf_b177ec614adb8",
+          "isTopFrame": false,
+          "locatorVersion": 2,
+          "pageKey": "https://www.erp321.com/epaas",
+          "pageTitle": "聚水潭 ERP",
+          "pageUrl": "https://www.erp321.com/epaas",
+          "preview": "采购单号、采购日期、供应商、状态、编辑、标记|多标签、商品信息、总商品量、总金额、最早预计到货日期、预计到货数量、总入库数、差异数、退货数、质检数、质检正品数、质检次品数、收货状态、备注、收货地址、采购单类型、仓储方、运营云仓、物流单号、物流公司、物流状态、运费、采购员、审核日期、最后修改日期",
+          "selector": "#_jt",
+          "selectorStrength": "stable-id",
+          "tableIndex": 8,
+          "tableTitle": ""
+        }
+      ],
+      "type": "table-analysis",
+      "updatedAt": 1784943378835,
+      "version": 3
+    },
+    {
+      "analysisMethod": {
+        "description": "分析工单需要跟进关注的，按关注类型分"
+      },
+      "createdAt": 1784883442502,
+      "id": "19f9357f346_6662d0ec3efa3",
+      "name": "工单分析",
+      "pageKey": "https://tool.jushuitan.com/ticket",
+      "pageTitle": "聚宝盆",
+      "pageUrl": "https://tool.jushuitan.com/ticket",
+      "revision": 1,
+      "source": {
+        "businessTabTitle": "",
+        "capturedAt": 1784867902585,
+        "capturedPageUrl": "https://tool.jushuitan.com/ticket",
+        "componentType": "native",
+        "containerSignature": "",
+        "displayName": "工单号、创建时间等数据",
+        "displayNameCustomized": false,
+        "displayNameOrigin": "auto",
+        "frameId": 0,
+        "framePathHint": [
+          {
+            "sameUrlIndex": 0,
+            "url": "https://tool.jushuitan.com/ticket"
+          }
+        ],
+        "frameUrl": "https://tool.jushuitan.com/ticket",
+        "headerFingerprint": "工单号|创建时间|公司名|标题|状态|模块|子模块|erp版本|快捷回复|最后一次回复内容|备注|需求号|标签|店铺|单据号/商品|解决方案|当前处理人|开发人员|产品|发起人|禅道|平台|创建人|用户类型|审核人|抄送人|系统开发者|系统测试者|系统产品者|关联工单号|运行环境|测试|是否历史工单|操作",
+        "headers": [
+          "工单号",
+          "创建时间",
+          "公司名",
+          "标题",
+          "状态",
+          "模块",
+          "子模块",
+          "ERP版本",
+          "快捷回复",
+          "最后一次回复内容",
+          "备注",
+          "需求号",
+          "标签",
+          "店铺",
+          "单据号/商品",
+          "解决方案",
+          "当前处理人",
+          "开发人员",
+          "产品",
+          "发起人",
+          "禅道",
+          "平台",
+          "创建人",
+          "用户类型",
+          "审核人",
+          "抄送人",
+          "系统开发者",
+          "系统测试者",
+          "系统产品者",
+          "关联工单号",
+          "运行环境",
+          "测试",
+          "是否历史工单",
+          "操作"
+        ],
+        "id": "source_19f9357f346_6662d0ec3efa3_1",
+        "isTopFrame": true,
+        "legacyPageOwnership": true,
+        "locatorVersion": 2,
+        "pageKey": "https://tool.jushuitan.com/ticket",
+        "pageTitle": "聚宝盆",
+        "pageUrl": "https://tool.jushuitan.com/ticket",
+        "preview": "工单号、创建时间、公司名、标题、状态、模块、子模块、ERP版本、快捷回复、最后一次回复内容、备注、需求号、标签、店铺、单据号/商品、解决方案、当前处理人、开发人员、产品、发起人、禅道、平台、创建人、用户类型、审核人、抄送人、系统开发者、系统测试者、系统产品者、关联工单号、运行环境、测试、是否历史工单、操作",
+        "selector": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > table",
+        "selectorStrength": "positional",
+        "tableIndex": 0,
+        "tableTitle": ""
+      },
+      "sourceName": "工单号、创建时间等数据",
+      "sources": [
+        {
+          "businessTabTitle": "",
+          "capturedAt": 1784867902585,
+          "capturedPageUrl": "https://tool.jushuitan.com/ticket",
+          "componentType": "native",
+          "containerSignature": "",
+          "displayName": "工单号、创建时间等数据",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 0,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://tool.jushuitan.com/ticket"
+            }
+          ],
+          "frameUrl": "https://tool.jushuitan.com/ticket",
+          "headerFingerprint": "工单号|创建时间|公司名|标题|状态|模块|子模块|erp版本|快捷回复|最后一次回复内容|备注|需求号|标签|店铺|单据号/商品|解决方案|当前处理人|开发人员|产品|发起人|禅道|平台|创建人|用户类型|审核人|抄送人|系统开发者|系统测试者|系统产品者|关联工单号|运行环境|测试|是否历史工单|操作",
+          "headers": [
+            "工单号",
+            "创建时间",
+            "公司名",
+            "标题",
+            "状态",
+            "模块",
+            "子模块",
+            "ERP版本",
+            "快捷回复",
+            "最后一次回复内容",
+            "备注",
+            "需求号",
+            "标签",
+            "店铺",
+            "单据号/商品",
+            "解决方案",
+            "当前处理人",
+            "开发人员",
+            "产品",
+            "发起人",
+            "禅道",
+            "平台",
+            "创建人",
+            "用户类型",
+            "审核人",
+            "抄送人",
+            "系统开发者",
+            "系统测试者",
+            "系统产品者",
+            "关联工单号",
+            "运行环境",
+            "测试",
+            "是否历史工单",
+            "操作"
+          ],
+          "id": "source_19f9357f346_6662d0ec3efa3_1",
+          "isTopFrame": true,
+          "legacyPageOwnership": true,
+          "locatorVersion": 2,
+          "pageKey": "https://tool.jushuitan.com/ticket",
+          "pageTitle": "聚宝盆",
+          "pageUrl": "https://tool.jushuitan.com/ticket",
+          "preview": "工单号、创建时间、公司名、标题、状态、模块、子模块、ERP版本、快捷回复、最后一次回复内容、备注、需求号、标签、店铺、单据号/商品、解决方案、当前处理人、开发人员、产品、发起人、禅道、平台、创建人、用户类型、审核人、抄送人、系统开发者、系统测试者、系统产品者、关联工单号、运行环境、测试、是否历史工单、操作",
+          "selector": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > table",
+          "selectorStrength": "positional",
+          "tableIndex": 0,
+          "tableTitle": ""
+        }
+      ],
+      "type": "table-analysis",
+      "updatedAt": 1784905716742,
+      "version": 3
+    },
+    {
+      "analysisMethod": {
+        "description": "总成交单数/点击次数 * 90%，只需要输出结果值xx%"
+      },
+      "createdAt": 1784883442503,
+      "defaultMethodVersion": 1,
+      "execution": {
+        "scope": "current-page",
+        "maxRows": 100,
+        "maxBatchRows": 20
+      },
+      "id": "19f9357f347_9404b11978fb",
+      "name": "计划性广告特殊字段增加",
+      "output": {
+        "columnName": "点击转化率修正",
+        "position": "before-first-selected-column",
+        "maxChars": 1000
+      },
+      "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+      "pageSources": [
+        {
+          "businessTabTitle": "广告智能投放控制台",
+          "capturedAt": 1784855952900,
+          "capturedPageUrl": "https://src-sc.scm121.com/erp-data/adConsole/home?terminalName=SUPPLIER&_c=jst-gyl-supplier&gyl_env=supplier&erpToken=CS%40GYL.188bb1952ccd4b5686fa75db1aba4ce3&gylToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiIyMjE1MjEwMiIsInJvbGVJZHMiOlsiQzYzN0IwQTkzN0FENDc1MUExMDcyMDI1MUY2Rjc5REQiLCJDNTI3MEZBRUVFM0U0OTE2ODZDN0NCNUY5MDYwNzUwRSIsIjExRDREMUUxNDNGMjQ3MUJBMDJBQjZCQjk4MkE5REYyIiwiOEJGODBCM0UwQzgzNEE3NjgxM0QwNEM4ODNENkQxMkQiLCJBQTkwOTRFNDIwRjE0QTE1OERDMTc2NThENzU3MjU0RCIsIkM4NTNBQzMxNDZCNzRFQUE5OUNGQzcwQTBDMEVCNUM4IiwiMzJCNzVERUY4OEU5NDJBNzg5N0I2ODY1QThCMDMyREQiLCJDNjYzMDEwRDI5NUM0NUMzOTI0QTY4NzFERUQ5QkRGNyJdLCJ1c2VyX25hbWUiOiJmYW5nd2VuZ0BqdXNodWl0YW4uY29tIiwiY3VycmVudF91c2VyX29yZ19pZCI6Ik9SRzAwMSIsImNvSWQiOiIxNTQ4OTQ4MyIsImV4cGlyYXRpb24iOjE3ODQ4NjA4MTQ3NDIsInVzZXIiOnsiY29JZCI6IjE1NDg5NDgzIiwibG9naW5OYW1lIjoiMTk5MjU3MjEyNTAiLCJsb2dpbldheSI6IkFHRU5UIiwibmlja05hbWUiOiLooazooavogIHnvZciLCJwcm94eUxvZ2luTmFtZSI6ImZhbmd3ZW5nQGp1c2h1aXRhbi5jb20iLCJyb2xlSWRzIjoiMTEsMTIsMzkiLCJ1aWQiOiIyMjE1MjEwMiJ9LCJhdXRob3JpdGllcyI6WyJKU1Qtemhvbmd0YWkteXVueWluZ2Z1emVyZW4iLCJPUC1GaW5hbmNlIiwiSlNULWNoYW5uZWwiLCJKU1Qtc3VwcGxpZXIiLCJKU1QtT1AtRFJIWiIsIm11bHRpTG9naW4iLCIgT1AtRFNGTSIsIk9QLVJlY2VpcHQtcGF5bWVudCJdLCJjdXJyZW50X3VzZXJfb3JnX2NvZGUiOiJKU1QiLCJjbGllbnRfaWQiOiJhZ2VudCIsImp0aSI6IjlhZjQwY2FkLTQ2OTAtNGU0Zi05MjljLTc0Njc3Nzg4Mzc1NyIsImV4cCI6MTc4NDg2MDgxNH0.zVkyC0acyKrRRXSaqjVQLT1ve2zLLOd87aPwmnEa2dk",
+          "componentType": "art-table",
+          "containerSignature": "",
+          "displayName": "广告智能投放控制台",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 75347,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://sc.scm121.com/dataCenter/adConsole/home"
+            },
+            {
+              "sameUrlIndex": 0,
+              "url": "https://src-sc.scm121.com/erp-data/adConsole/home"
+            }
+          ],
+          "frameUrl": "https://src-sc.scm121.com/erp-data/adConsole/home",
+          "headerFingerprint": "序号|计划基础信息更多指标|近30天趋势更多指标|计划广告消耗&roi|计划预算及消耗|计划转化更多指标|计划潜在转化更多指标|计划转化成本更多指标|计划历史roi更多指标|操作",
+          "headers": [
+            "序号",
+            "计划基础信息 更多指标",
+            "近30天趋势 更多指标",
+            "计划广告消耗&ROI",
+            "计划预算及消耗",
+            "计划转化 更多指标",
+            "计划潜在转化 更多指标",
+            "计划转化成本 更多指标",
+            "计划历史ROI 更多指标",
+            "操作"
+          ],
+          "id": "source_19f9357f347_9404b11978fb_1",
+          "isTopFrame": false,
+          "legacyPageOwnership": true,
+          "locatorVersion": 2,
+          "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+          "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "preview": "序号、计划基础信息 更多指标、近30天趋势 更多指标、计划广告消耗&ROI、计划预算及消耗、计划转化 更多指标、计划潜在转化 更多指标、计划转化成本 更多指标、计划历史ROI 更多指标、操作",
+          "selector": "div:nth-of-type(2) > div > div > div > div:nth-of-type(2)",
+          "selectorStrength": "positional",
+          "tableIndex": 0,
+          "tableTitle": ""
+        }
+      ],
+      "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+      "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+      "revision": 19,
+      "selectedColumns": [
+        {
+          "index": 4,
+          "header": "计划预算及消耗",
+          "normalizedHeader": "计划预算及消耗",
+          "occurrence": 1
+        },
+        {
+          "index": 5,
+          "header": "计划转化 更多指标",
+          "normalizedHeader": "计划转化更多指标",
+          "occurrence": 1
+        },
+        {
+          "index": 6,
+          "header": "计划潜在转化 更多指标",
+          "normalizedHeader": "计划潜在转化更多指标",
+          "occurrence": 1
+        }
+      ],
+      "source": {
+        "businessTabTitle": "广告智能投放控制台",
+        "capturedAt": 1784855952900,
+        "capturedPageUrl": "https://src-sc.scm121.com/erp-data/adConsole/home?terminalName=SUPPLIER&_c=jst-gyl-supplier&gyl_env=supplier&erpToken=CS%40GYL.188bb1952ccd4b5686fa75db1aba4ce3&gylToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiIyMjE1MjEwMiIsInJvbGVJZHMiOlsiQzYzN0IwQTkzN0FENDc1MUExMDcyMDI1MUY2Rjc5REQiLCJDNTI3MEZBRUVFM0U0OTE2ODZDN0NCNUY5MDYwNzUwRSIsIjExRDREMUUxNDNGMjQ3MUJBMDJBQjZCQjk4MkE5REYyIiwiOEJGODBCM0UwQzgzNEE3NjgxM0QwNEM4ODNENkQxMkQiLCJBQTkwOTRFNDIwRjE0QTE1OERDMTc2NThENzU3MjU0RCIsIkM4NTNBQzMxNDZCNzRFQUE5OUNGQzcwQTBDMEVCNUM4IiwiMzJCNzVERUY4OEU5NDJBNzg5N0I2ODY1QThCMDMyREQiLCJDNjYzMDEwRDI5NUM0NUMzOTI0QTY4NzFERUQ5QkRGNyJdLCJ1c2VyX25hbWUiOiJmYW5nd2VuZ0BqdXNodWl0YW4uY29tIiwiY3VycmVudF91c2VyX29yZ19pZCI6Ik9SRzAwMSIsImNvSWQiOiIxNTQ4OTQ4MyIsImV4cGlyYXRpb24iOjE3ODQ4NjA4MTQ3NDIsInVzZXIiOnsiY29JZCI6IjE1NDg5NDgzIiwibG9naW5OYW1lIjoiMTk5MjU3MjEyNTAiLCJsb2dpbldheSI6IkFHRU5UIiwibmlja05hbWUiOiLooazooavogIHnvZciLCJwcm94eUxvZ2luTmFtZSI6ImZhbmd3ZW5nQGp1c2h1aXRhbi5jb20iLCJyb2xlSWRzIjoiMTEsMTIsMzkiLCJ1aWQiOiIyMjE1MjEwMiJ9LCJhdXRob3JpdGllcyI6WyJKU1Qtemhvbmd0YWkteXVueWluZ2Z1emVyZW4iLCJPUC1GaW5hbmNlIiwiSlNULWNoYW5uZWwiLCJKU1Qtc3VwcGxpZXIiLCJKU1QtT1AtRFJIWiIsIm11bHRpTG9naW4iLCIgT1AtRFNGTSIsIk9QLVJlY2VpcHQtcGF5bWVudCJdLCJjdXJyZW50X3VzZXJfb3JnX2NvZGUiOiJKU1QiLCJjbGllbnRfaWQiOiJhZ2VudCIsImp0aSI6IjlhZjQwY2FkLTQ2OTAtNGU0Zi05MjljLTc0Njc3Nzg4Mzc1NyIsImV4cCI6MTc4NDg2MDgxNH0.zVkyC0acyKrRRXSaqjVQLT1ve2zLLOd87aPwmnEa2dk",
+        "componentType": "art-table",
+        "containerSignature": "",
+        "displayName": "广告智能投放控制台",
+        "displayNameCustomized": false,
+        "displayNameOrigin": "auto",
+        "frameId": 75347,
+        "framePathHint": [
+          {
+            "sameUrlIndex": 0,
+            "url": "https://sc.scm121.com/dataCenter/adConsole/home"
+          },
+          {
+            "sameUrlIndex": 0,
+            "url": "https://src-sc.scm121.com/erp-data/adConsole/home"
+          }
+        ],
+        "frameUrl": "https://src-sc.scm121.com/erp-data/adConsole/home",
+        "headerFingerprint": "序号|计划基础信息更多指标|近30天趋势更多指标|计划广告消耗&roi|计划预算及消耗|计划转化更多指标|计划潜在转化更多指标|计划转化成本更多指标|计划历史roi更多指标|操作",
+        "headers": [
+          "序号",
+          "计划基础信息 更多指标",
+          "近30天趋势 更多指标",
+          "计划广告消耗&ROI",
+          "计划预算及消耗",
+          "计划转化 更多指标",
+          "计划潜在转化 更多指标",
+          "计划转化成本 更多指标",
+          "计划历史ROI 更多指标",
+          "操作"
+        ],
+        "id": "source_19f9357f347_9404b11978fb_1",
+        "isTopFrame": false,
+        "legacyPageOwnership": true,
+        "locatorVersion": 2,
+        "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+        "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+        "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+        "preview": "序号、计划基础信息 更多指标、近30天趋势 更多指标、计划广告消耗&ROI、计划预算及消耗、计划转化 更多指标、计划潜在转化 更多指标、计划转化成本 更多指标、计划历史ROI 更多指标、操作",
+        "selector": "div:nth-of-type(2) > div > div > div > div:nth-of-type(2)",
+        "selectorStrength": "positional",
+        "tableIndex": 0,
+        "tableTitle": ""
+      },
+      "sourceName": "广告智能投放控制台",
+      "sources": [
+        {
+          "businessTabTitle": "广告智能投放控制台",
+          "capturedAt": 1784855952900,
+          "capturedPageUrl": "https://src-sc.scm121.com/erp-data/adConsole/home?terminalName=SUPPLIER&_c=jst-gyl-supplier&gyl_env=supplier&erpToken=CS%40GYL.188bb1952ccd4b5686fa75db1aba4ce3&gylToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiIyMjE1MjEwMiIsInJvbGVJZHMiOlsiQzYzN0IwQTkzN0FENDc1MUExMDcyMDI1MUY2Rjc5REQiLCJDNTI3MEZBRUVFM0U0OTE2ODZDN0NCNUY5MDYwNzUwRSIsIjExRDREMUUxNDNGMjQ3MUJBMDJBQjZCQjk4MkE5REYyIiwiOEJGODBCM0UwQzgzNEE3NjgxM0QwNEM4ODNENkQxMkQiLCJBQTkwOTRFNDIwRjE0QTE1OERDMTc2NThENzU3MjU0RCIsIkM4NTNBQzMxNDZCNzRFQUE5OUNGQzcwQTBDMEVCNUM4IiwiMzJCNzVERUY4OEU5NDJBNzg5N0I2ODY1QThCMDMyREQiLCJDNjYzMDEwRDI5NUM0NUMzOTI0QTY4NzFERUQ5QkRGNyJdLCJ1c2VyX25hbWUiOiJmYW5nd2VuZ0BqdXNodWl0YW4uY29tIiwiY3VycmVudF91c2VyX29yZ19pZCI6Ik9SRzAwMSIsImNvSWQiOiIxNTQ4OTQ4MyIsImV4cGlyYXRpb24iOjE3ODQ4NjA4MTQ3NDIsInVzZXIiOnsiY29JZCI6IjE1NDg5NDgzIiwibG9naW5OYW1lIjoiMTk5MjU3MjEyNTAiLCJsb2dpbldheSI6IkFHRU5UIiwibmlja05hbWUiOiLooazooavogIHnvZciLCJwcm94eUxvZ2luTmFtZSI6ImZhbmd3ZW5nQGp1c2h1aXRhbi5jb20iLCJyb2xlSWRzIjoiMTEsMTIsMzkiLCJ1aWQiOiIyMjE1MjEwMiJ9LCJhdXRob3JpdGllcyI6WyJKU1Qtemhvbmd0YWkteXVueWluZ2Z1emVyZW4iLCJPUC1GaW5hbmNlIiwiSlNULWNoYW5uZWwiLCJKU1Qtc3VwcGxpZXIiLCJKU1QtT1AtRFJIWiIsIm11bHRpTG9naW4iLCIgT1AtRFNGTSIsIk9QLVJlY2VpcHQtcGF5bWVudCJdLCJjdXJyZW50X3VzZXJfb3JnX2NvZGUiOiJKU1QiLCJjbGllbnRfaWQiOiJhZ2VudCIsImp0aSI6IjlhZjQwY2FkLTQ2OTAtNGU0Zi05MjljLTc0Njc3Nzg4Mzc1NyIsImV4cCI6MTc4NDg2MDgxNH0.zVkyC0acyKrRRXSaqjVQLT1ve2zLLOd87aPwmnEa2dk",
+          "componentType": "art-table",
+          "containerSignature": "",
+          "displayName": "广告智能投放控制台",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 75347,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://sc.scm121.com/dataCenter/adConsole/home"
+            },
+            {
+              "sameUrlIndex": 0,
+              "url": "https://src-sc.scm121.com/erp-data/adConsole/home"
+            }
+          ],
+          "frameUrl": "https://src-sc.scm121.com/erp-data/adConsole/home",
+          "headerFingerprint": "序号|计划基础信息更多指标|近30天趋势更多指标|计划广告消耗&roi|计划预算及消耗|计划转化更多指标|计划潜在转化更多指标|计划转化成本更多指标|计划历史roi更多指标|操作",
+          "headers": [
+            "序号",
+            "计划基础信息 更多指标",
+            "近30天趋势 更多指标",
+            "计划广告消耗&ROI",
+            "计划预算及消耗",
+            "计划转化 更多指标",
+            "计划潜在转化 更多指标",
+            "计划转化成本 更多指标",
+            "计划历史ROI 更多指标",
+            "操作"
+          ],
+          "id": "source_19f9357f347_9404b11978fb_1",
+          "isTopFrame": false,
+          "legacyPageOwnership": true,
+          "locatorVersion": 2,
+          "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+          "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "preview": "序号、计划基础信息 更多指标、近30天趋势 更多指标、计划广告消耗&ROI、计划预算及消耗、计划转化 更多指标、计划潜在转化 更多指标、计划转化成本 更多指标、计划历史ROI 更多指标、操作",
+          "selector": "div:nth-of-type(2) > div > div > div > div:nth-of-type(2)",
+          "selectorStrength": "positional",
+          "tableIndex": 0,
+          "tableTitle": ""
+        }
+      ],
+      "trigger": {
+        "mode": "page-load",
+        "autoRunEnabled": false
+      },
+      "type": "derived-column",
+      "updatedAt": 1784944242552,
+      "version": 3
+    },
+    {
+      "analysisMethod": {
+        "description": "根据所选择的信息，分析广告投放实际效果，以及需要注意的"
+      },
+      "createdAt": 1784883442503,
+      "defaultMethodVersion": 1,
+      "execution": {
+        "scope": "current-page",
+        "maxRows": 100,
+        "maxBatchRows": 20
+      },
+      "id": "19f9357f347_4aa96246114e9",
+      "name": "智能化分析广告",
+      "output": {
+        "columnName": "智能分析结论",
+        "position": "before-first-selected-column",
+        "maxChars": 1000
+      },
+      "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+      "pageSources": [
+        {
+          "businessTabTitle": "广告智能投放控制台",
+          "capturedAt": 1784865057786,
+          "capturedPageUrl": "https://src-sc.scm121.com/erp-data/adConsole/home?terminalName=SUPPLIER&_c=jst-gyl-supplier&gyl_env=supplier&erpToken=CS%40GYL.48973e89781d47118f957776bf4f5c84&gylToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiIyMjE1MjEwMiIsInJvbGVJZHMiOlsiQzYzN0IwQTkzN0FENDc1MUExMDcyMDI1MUY2Rjc5REQiLCJDNTI3MEZBRUVFM0U0OTE2ODZDN0NCNUY5MDYwNzUwRSIsIjExRDREMUUxNDNGMjQ3MUJBMDJBQjZCQjk4MkE5REYyIiwiOEJGODBCM0UwQzgzNEE3NjgxM0QwNEM4ODNENkQxMkQiLCJBQTkwOTRFNDIwRjE0QTE1OERDMTc2NThENzU3MjU0RCIsIkM4NTNBQzMxNDZCNzRFQUE5OUNGQzcwQTBDMEVCNUM4IiwiMzJCNzVERUY4OEU5NDJBNzg5N0I2ODY1QThCMDMyREQiLCJDNjYzMDEwRDI5NUM0NUMzOTI0QTY4NzFERUQ5QkRGNyJdLCJ1c2VyX25hbWUiOiJmYW5nd2VuZ0BqdXNodWl0YW4uY29tIiwiY3VycmVudF91c2VyX29yZ19pZCI6Ik9SRzAwMSIsImNvSWQiOiIxNTQ4OTQ4MyIsImV4cGlyYXRpb24iOjE3ODQ4NzAxODgxMDcsInVzZXIiOnsiY29JZCI6IjE1NDg5NDgzIiwibG9naW5OYW1lIjoiMTk5MjU3MjEyNTAiLCJsb2dpbldheSI6IkFHRU5UIiwibmlja05hbWUiOiLooazooavogIHnvZciLCJwcm94eUxvZ2luTmFtZSI6ImZhbmd3ZW5nQGp1c2h1aXRhbi5jb20iLCJyb2xlSWRzIjoiMTEsMTIsMzkiLCJ1aWQiOiIyMjE1MjEwMiJ9LCJhdXRob3JpdGllcyI6WyJKU1Qtemhvbmd0YWkteXVueWluZ2Z1emVyZW4iLCJPUC1GaW5hbmNlIiwiSlNULWNoYW5uZWwiLCJKU1Qtc3VwcGxpZXIiLCJKU1QtT1AtRFJIWiIsIm11bHRpTG9naW4iLCIgT1AtRFNGTSIsIk9QLVJlY2VpcHQtcGF5bWVudCJdLCJjdXJyZW50X3VzZXJfb3JnX2NvZGUiOiJKU1QiLCJjbGllbnRfaWQiOiJhZ2VudCIsImp0aSI6IjkyNjdiYTI0LTg4NjAtNGM3Ni1iOTMyLWU5MzYxOWRkMTE0MyIsImV4cCI6MTc4NDg3MDE4OH0.El94rcCoErO9Ot7vVCs2RWYN7yxpIz9VFS-GIiJt3v4",
+          "componentType": "art-table",
+          "containerSignature": "",
+          "displayName": "广告智能投放控制台",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 77438,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://sc.scm121.com/dataCenter/adConsole/home"
+            },
+            {
+              "sameUrlIndex": 0,
+              "url": "https://src-sc.scm121.com/erp-data/adConsole/home"
+            }
+          ],
+          "frameUrl": "https://src-sc.scm121.com/erp-data/adConsole/home",
+          "headerFingerprint": "序号|店铺链接|近30天趋势更多指标|链接广告消耗&roi更多指标|营销场景|成交转化更多指标|潜在转化更多指标|转化成本更多指标|广告直接成交占比更多指标|库存|链接退款率更多指标",
+          "headers": [
+            "序号",
+            "店铺链接",
+            "近30天趋势 更多指标",
+            "链接广告消耗&ROI 更多指标",
+            "营销场景",
+            "成交转化 更多指标",
+            "潜在转化 更多指标",
+            "转化成本 更多指标",
+            "广告直接成交占比 更多指标",
+            "库存",
+            "链接退款率 更多指标"
+          ],
+          "id": "19f8e7c3054_e55439f3e88ab8",
+          "isTopFrame": false,
+          "locatorVersion": 2,
+          "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+          "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "preview": "序号、店铺链接、近30天趋势 更多指标、链接广告消耗&ROI 更多指标、营销场景、成交转化 更多指标、潜在转化 更多指标、转化成本 更多指标、广告直接成交占比 更多指标、库存、链接退款率 更多指标",
+          "selector": "div:nth-of-type(2) > div > div > div > div:nth-of-type(2)",
+          "selectorStrength": "positional",
+          "tableIndex": 0,
+          "tableTitle": ""
+        }
+      ],
+      "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+      "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+      "revision": 5,
+      "selectedColumns": [
+        {
+          "index": 3,
+          "header": "链接广告消耗&ROI 更多指标",
+          "normalizedHeader": "链接广告消耗&roi更多指标",
+          "occurrence": 1
+        },
+        {
+          "index": 5,
+          "header": "成交转化 更多指标",
+          "normalizedHeader": "成交转化更多指标",
+          "occurrence": 1
+        },
+        {
+          "index": 6,
+          "header": "潜在转化 更多指标",
+          "normalizedHeader": "潜在转化更多指标",
+          "occurrence": 1
+        }
+      ],
+      "source": {
+        "businessTabTitle": "广告智能投放控制台",
+        "capturedAt": 1784865057786,
+        "capturedPageUrl": "https://src-sc.scm121.com/erp-data/adConsole/home?terminalName=SUPPLIER&_c=jst-gyl-supplier&gyl_env=supplier&erpToken=CS%40GYL.48973e89781d47118f957776bf4f5c84&gylToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiIyMjE1MjEwMiIsInJvbGVJZHMiOlsiQzYzN0IwQTkzN0FENDc1MUExMDcyMDI1MUY2Rjc5REQiLCJDNTI3MEZBRUVFM0U0OTE2ODZDN0NCNUY5MDYwNzUwRSIsIjExRDREMUUxNDNGMjQ3MUJBMDJBQjZCQjk4MkE5REYyIiwiOEJGODBCM0UwQzgzNEE3NjgxM0QwNEM4ODNENkQxMkQiLCJBQTkwOTRFNDIwRjE0QTE1OERDMTc2NThENzU3MjU0RCIsIkM4NTNBQzMxNDZCNzRFQUE5OUNGQzcwQTBDMEVCNUM4IiwiMzJCNzVERUY4OEU5NDJBNzg5N0I2ODY1QThCMDMyREQiLCJDNjYzMDEwRDI5NUM0NUMzOTI0QTY4NzFERUQ5QkRGNyJdLCJ1c2VyX25hbWUiOiJmYW5nd2VuZ0BqdXNodWl0YW4uY29tIiwiY3VycmVudF91c2VyX29yZ19pZCI6Ik9SRzAwMSIsImNvSWQiOiIxNTQ4OTQ4MyIsImV4cGlyYXRpb24iOjE3ODQ4NzAxODgxMDcsInVzZXIiOnsiY29JZCI6IjE1NDg5NDgzIiwibG9naW5OYW1lIjoiMTk5MjU3MjEyNTAiLCJsb2dpbldheSI6IkFHRU5UIiwibmlja05hbWUiOiLooazooavogIHnvZciLCJwcm94eUxvZ2luTmFtZSI6ImZhbmd3ZW5nQGp1c2h1aXRhbi5jb20iLCJyb2xlSWRzIjoiMTEsMTIsMzkiLCJ1aWQiOiIyMjE1MjEwMiJ9LCJhdXRob3JpdGllcyI6WyJKU1Qtemhvbmd0YWkteXVueWluZ2Z1emVyZW4iLCJPUC1GaW5hbmNlIiwiSlNULWNoYW5uZWwiLCJKU1Qtc3VwcGxpZXIiLCJKU1QtT1AtRFJIWiIsIm11bHRpTG9naW4iLCIgT1AtRFNGTSIsIk9QLVJlY2VpcHQtcGF5bWVudCJdLCJjdXJyZW50X3VzZXJfb3JnX2NvZGUiOiJKU1QiLCJjbGllbnRfaWQiOiJhZ2VudCIsImp0aSI6IjkyNjdiYTI0LTg4NjAtNGM3Ni1iOTMyLWU5MzYxOWRkMTE0MyIsImV4cCI6MTc4NDg3MDE4OH0.El94rcCoErO9Ot7vVCs2RWYN7yxpIz9VFS-GIiJt3v4",
+        "componentType": "art-table",
+        "containerSignature": "",
+        "displayName": "广告智能投放控制台",
+        "displayNameCustomized": false,
+        "displayNameOrigin": "auto",
+        "frameId": 77438,
+        "framePathHint": [
+          {
+            "sameUrlIndex": 0,
+            "url": "https://sc.scm121.com/dataCenter/adConsole/home"
+          },
+          {
+            "sameUrlIndex": 0,
+            "url": "https://src-sc.scm121.com/erp-data/adConsole/home"
+          }
+        ],
+        "frameUrl": "https://src-sc.scm121.com/erp-data/adConsole/home",
+        "headerFingerprint": "序号|店铺链接|近30天趋势更多指标|链接广告消耗&roi更多指标|营销场景|成交转化更多指标|潜在转化更多指标|转化成本更多指标|广告直接成交占比更多指标|库存|链接退款率更多指标",
+        "headers": [
+          "序号",
+          "店铺链接",
+          "近30天趋势 更多指标",
+          "链接广告消耗&ROI 更多指标",
+          "营销场景",
+          "成交转化 更多指标",
+          "潜在转化 更多指标",
+          "转化成本 更多指标",
+          "广告直接成交占比 更多指标",
+          "库存",
+          "链接退款率 更多指标"
+        ],
+        "id": "source_19f9357f347_4aa96246114e9_1",
+        "isTopFrame": false,
+        "locatorVersion": 2,
+        "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+        "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+        "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+        "preview": "序号、店铺链接、近30天趋势 更多指标、链接广告消耗&ROI 更多指标、营销场景、成交转化 更多指标、潜在转化 更多指标、转化成本 更多指标、广告直接成交占比 更多指标、库存、链接退款率 更多指标",
+        "selector": "div:nth-of-type(2) > div > div > div > div:nth-of-type(2)",
+        "selectorStrength": "positional",
+        "tableIndex": 0,
+        "tableTitle": "",
+        "legacyPageOwnership": true
+      },
+      "sourceName": "广告智能投放控制台",
+      "sources": [
+        {
+          "businessTabTitle": "广告智能投放控制台",
+          "capturedAt": 1784865057786,
+          "capturedPageUrl": "https://src-sc.scm121.com/erp-data/adConsole/home?terminalName=SUPPLIER&_c=jst-gyl-supplier&gyl_env=supplier&erpToken=CS%40GYL.48973e89781d47118f957776bf4f5c84&gylToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiIyMjE1MjEwMiIsInJvbGVJZHMiOlsiQzYzN0IwQTkzN0FENDc1MUExMDcyMDI1MUY2Rjc5REQiLCJDNTI3MEZBRUVFM0U0OTE2ODZDN0NCNUY5MDYwNzUwRSIsIjExRDREMUUxNDNGMjQ3MUJBMDJBQjZCQjk4MkE5REYyIiwiOEJGODBCM0UwQzgzNEE3NjgxM0QwNEM4ODNENkQxMkQiLCJBQTkwOTRFNDIwRjE0QTE1OERDMTc2NThENzU3MjU0RCIsIkM4NTNBQzMxNDZCNzRFQUE5OUNGQzcwQTBDMEVCNUM4IiwiMzJCNzVERUY4OEU5NDJBNzg5N0I2ODY1QThCMDMyREQiLCJDNjYzMDEwRDI5NUM0NUMzOTI0QTY4NzFERUQ5QkRGNyJdLCJ1c2VyX25hbWUiOiJmYW5nd2VuZ0BqdXNodWl0YW4uY29tIiwiY3VycmVudF91c2VyX29yZ19pZCI6Ik9SRzAwMSIsImNvSWQiOiIxNTQ4OTQ4MyIsImV4cGlyYXRpb24iOjE3ODQ4NzAxODgxMDcsInVzZXIiOnsiY29JZCI6IjE1NDg5NDgzIiwibG9naW5OYW1lIjoiMTk5MjU3MjEyNTAiLCJsb2dpbldheSI6IkFHRU5UIiwibmlja05hbWUiOiLooazooavogIHnvZciLCJwcm94eUxvZ2luTmFtZSI6ImZhbmd3ZW5nQGp1c2h1aXRhbi5jb20iLCJyb2xlSWRzIjoiMTEsMTIsMzkiLCJ1aWQiOiIyMjE1MjEwMiJ9LCJhdXRob3JpdGllcyI6WyJKU1Qtemhvbmd0YWkteXVueWluZ2Z1emVyZW4iLCJPUC1GaW5hbmNlIiwiSlNULWNoYW5uZWwiLCJKU1Qtc3VwcGxpZXIiLCJKU1QtT1AtRFJIWiIsIm11bHRpTG9naW4iLCIgT1AtRFNGTSIsIk9QLVJlY2VpcHQtcGF5bWVudCJdLCJjdXJyZW50X3VzZXJfb3JnX2NvZGUiOiJKU1QiLCJjbGllbnRfaWQiOiJhZ2VudCIsImp0aSI6IjkyNjdiYTI0LTg4NjAtNGM3Ni1iOTMyLWU5MzYxOWRkMTE0MyIsImV4cCI6MTc4NDg3MDE4OH0.El94rcCoErO9Ot7vVCs2RWYN7yxpIz9VFS-GIiJt3v4",
+          "componentType": "art-table",
+          "containerSignature": "",
+          "displayName": "广告智能投放控制台",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 77438,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://sc.scm121.com/dataCenter/adConsole/home"
+            },
+            {
+              "sameUrlIndex": 0,
+              "url": "https://src-sc.scm121.com/erp-data/adConsole/home"
+            }
+          ],
+          "frameUrl": "https://src-sc.scm121.com/erp-data/adConsole/home",
+          "headerFingerprint": "序号|店铺链接|近30天趋势更多指标|链接广告消耗&roi更多指标|营销场景|成交转化更多指标|潜在转化更多指标|转化成本更多指标|广告直接成交占比更多指标|库存|链接退款率更多指标",
+          "headers": [
+            "序号",
+            "店铺链接",
+            "近30天趋势 更多指标",
+            "链接广告消耗&ROI 更多指标",
+            "营销场景",
+            "成交转化 更多指标",
+            "潜在转化 更多指标",
+            "转化成本 更多指标",
+            "广告直接成交占比 更多指标",
+            "库存",
+            "链接退款率 更多指标"
+          ],
+          "id": "source_19f9357f347_4aa96246114e9_1",
+          "isTopFrame": false,
+          "locatorVersion": 2,
+          "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+          "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "preview": "序号、店铺链接、近30天趋势 更多指标、链接广告消耗&ROI 更多指标、营销场景、成交转化 更多指标、潜在转化 更多指标、转化成本 更多指标、广告直接成交占比 更多指标、库存、链接退款率 更多指标",
+          "selector": "div:nth-of-type(2) > div > div > div > div:nth-of-type(2)",
+          "selectorStrength": "positional",
+          "tableIndex": 0,
+          "tableTitle": "",
+          "legacyPageOwnership": true
+        }
+      ],
+      "trigger": {
+        "mode": "page-load",
+        "autoRunEnabled": false
+      },
+      "type": "derived-column",
+      "updatedAt": 1784883444180,
+      "version": 3
+    },
+    {
+      "analysisMethod": {
+        "description": "关注售后单状态为待确认，买家留言需要关注的售后单，按照需要关注的类型，分块解读"
+      },
+      "createdAt": 1784883442503,
+      "id": "19f9357f347_cd6fd0139af4b",
+      "name": "售后分析",
+      "pageKey": "https://sc.scm121.com/afterSaleManage/afterSales",
+      "pageTitle": "售后管理 - 聚水潭ERP分销版-供应商",
+      "pageUrl": "https://sc.scm121.com/afterSaleManage/afterSales",
+      "revision": 1,
+      "source": {
+        "businessTabTitle": "售后管理",
+        "capturedAt": 1784800599904,
+        "capturedPageUrl": "https://innerorder.scm121.com/afterSales",
+        "componentType": "art-table",
+        "containerSignature": "",
+        "displayName": "售后管理",
+        "displayNameCustomized": false,
+        "displayNameOrigin": "auto",
+        "frameId": 74949,
+        "framePathHint": [
+          {
+            "sameUrlIndex": 0,
+            "url": "https://sc.scm121.com/afterSaleManage/afterSales"
+          },
+          {
+            "sameUrlIndex": 0,
+            "url": "https://innerorder.scm121.com/afterSales"
+          }
+        ],
+        "frameUrl": "https://innerorder.scm121.com/afterSales",
+        "headerFingerprint": "序号|售后单号|内部订单号|售后单状态|解决方案|线上状态|线上类型|售后分类|商品信息展示设置商品明细支持添加，编辑|退货快递单号|退货国际单号|货物状态|快递拦截状态|拦截失败原因|快递拦截时间|收货仓|仓库|线上订单号|线上售后单号|售后问题类型|售后标签|售后问题登记|供分销备注填售后凭证/驳回理由，售后处理更高效|供应商售后单状态|聚工单|买家账号|收货人|店铺|已提交供应商|异常状态|供应商退款状态|供应商查看供应商退货地址|申请时间|确认时间|原订单状态|订单状态快照|发货快递单号|发货国际单号|原订单标签|原订单发货仓库|原订单备注/旗帜|原订单线下备注|原订单业务员|原订单采购金额|原订单下单金额|线上申请金额|实退金额|实际收货金额|申请退货数量|实退数量|创建人|修改人|平台售后详情|仲裁状态|操作",
+        "headers": [
+          "序号",
+          "售后单号",
+          "内部订单号",
+          "售后单状态",
+          "解决方案",
+          "线上状态",
+          "线上类型",
+          "售后分类",
+          "商品信息 展示设置 商品明细支持添加，编辑",
+          "退货快递单号",
+          "退货国际单号",
+          "货物状态",
+          "快递拦截状态",
+          "拦截失败原因",
+          "快递拦截时间",
+          "收货仓",
+          "仓库",
+          "线上订单号",
+          "线上售后单号",
+          "售后问题类型",
+          "售后标签",
+          "售后问题登记",
+          "供分销备注 填售后凭证/驳回理由，售后处理更高效",
+          "供应商售后单状态",
+          "聚工单",
+          "买家账号",
+          "收货人",
+          "店铺",
+          "已提交供应商",
+          "异常状态",
+          "供应商退款状态",
+          "供应商 查看供应商退货地址",
+          "申请时间",
+          "确认时间",
+          "原订单状态",
+          "订单状态快照",
+          "发货快递单号",
+          "发货国际单号",
+          "原订单标签",
+          "原订单发货仓库",
+          "原订单备注/旗帜",
+          "原订单线下备注",
+          "原订单业务员",
+          "原订单采购金额",
+          "原订单下单金额",
+          "线上申请金额",
+          "实退金额",
+          "实际收货金额",
+          "申请退货数量",
+          "实退数量",
+          "创建人",
+          "修改人",
+          "平台售后详情",
+          "仲裁状态",
+          "操作"
+        ],
+        "id": "source_19f9357f347_cd6fd0139af4b_1",
+        "isTopFrame": false,
+        "locatorVersion": 2,
+        "pageKey": "https://sc.scm121.com/afterSaleManage/afterSales",
+        "pageTitle": "售后管理 - 聚水潭ERP分销版-供应商",
+        "pageUrl": "https://sc.scm121.com/afterSaleManage/afterSales",
+        "preview": "序号、售后单号、内部订单号、售后单状态、解决方案、线上状态、线上类型、售后分类、商品信息 展示设置 商品明细支持添加，编辑、退货快递单号、退货国际单号、货物状态、快递拦截状态、拦截失败原因、快递拦截时间、收货仓、仓库、线上订单号、线上售后单号、售后问题类型、售后标签、售后问题登记、供分销备注 填售后凭证/驳回理由，售后处理更高效、供应商售后单状态、聚工单、买家账号、收货人、店铺、已提交供应商、异常状态、供应商退款状态、供应商 查看供应商退货地址、申请时间、确认时间、原订单状态、订单状态快照、发货快递单号、发货国际单号、原订单标签、原订单发货仓库、原订单备注/旗帜、原订单线下备注、原订单业务员、原订单采购金额、原订单下单金额、线上申请金额、实退金额、实际收货金额、申请退货数量、实退数量、创建人、修改人、平台售后详情、仲裁状态、操作",
+        "selector": "div > div:nth-of-type(2) > div > div > div:nth-of-type(1)",
+        "selectorStrength": "positional",
+        "tableIndex": 0,
+        "tableTitle": "",
+        "legacyPageOwnership": true
+      },
+      "sourceName": "售后管理",
+      "sources": [
+        {
+          "businessTabTitle": "售后管理",
+          "capturedAt": 1784800599904,
+          "capturedPageUrl": "https://innerorder.scm121.com/afterSales",
+          "componentType": "art-table",
+          "containerSignature": "",
+          "displayName": "售后管理",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 74949,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://sc.scm121.com/afterSaleManage/afterSales"
+            },
+            {
+              "sameUrlIndex": 0,
+              "url": "https://innerorder.scm121.com/afterSales"
+            }
+          ],
+          "frameUrl": "https://innerorder.scm121.com/afterSales",
+          "headerFingerprint": "序号|售后单号|内部订单号|售后单状态|解决方案|线上状态|线上类型|售后分类|商品信息展示设置商品明细支持添加，编辑|退货快递单号|退货国际单号|货物状态|快递拦截状态|拦截失败原因|快递拦截时间|收货仓|仓库|线上订单号|线上售后单号|售后问题类型|售后标签|售后问题登记|供分销备注填售后凭证/驳回理由，售后处理更高效|供应商售后单状态|聚工单|买家账号|收货人|店铺|已提交供应商|异常状态|供应商退款状态|供应商查看供应商退货地址|申请时间|确认时间|原订单状态|订单状态快照|发货快递单号|发货国际单号|原订单标签|原订单发货仓库|原订单备注/旗帜|原订单线下备注|原订单业务员|原订单采购金额|原订单下单金额|线上申请金额|实退金额|实际收货金额|申请退货数量|实退数量|创建人|修改人|平台售后详情|仲裁状态|操作",
+          "headers": [
+            "序号",
+            "售后单号",
+            "内部订单号",
+            "售后单状态",
+            "解决方案",
+            "线上状态",
+            "线上类型",
+            "售后分类",
+            "商品信息 展示设置 商品明细支持添加，编辑",
+            "退货快递单号",
+            "退货国际单号",
+            "货物状态",
+            "快递拦截状态",
+            "拦截失败原因",
+            "快递拦截时间",
+            "收货仓",
+            "仓库",
+            "线上订单号",
+            "线上售后单号",
+            "售后问题类型",
+            "售后标签",
+            "售后问题登记",
+            "供分销备注 填售后凭证/驳回理由，售后处理更高效",
+            "供应商售后单状态",
+            "聚工单",
+            "买家账号",
+            "收货人",
+            "店铺",
+            "已提交供应商",
+            "异常状态",
+            "供应商退款状态",
+            "供应商 查看供应商退货地址",
+            "申请时间",
+            "确认时间",
+            "原订单状态",
+            "订单状态快照",
+            "发货快递单号",
+            "发货国际单号",
+            "原订单标签",
+            "原订单发货仓库",
+            "原订单备注/旗帜",
+            "原订单线下备注",
+            "原订单业务员",
+            "原订单采购金额",
+            "原订单下单金额",
+            "线上申请金额",
+            "实退金额",
+            "实际收货金额",
+            "申请退货数量",
+            "实退数量",
+            "创建人",
+            "修改人",
+            "平台售后详情",
+            "仲裁状态",
+            "操作"
+          ],
+          "id": "source_19f9357f347_cd6fd0139af4b_1",
+          "isTopFrame": false,
+          "locatorVersion": 2,
+          "pageKey": "https://sc.scm121.com/afterSaleManage/afterSales",
+          "pageTitle": "售后管理 - 聚水潭ERP分销版-供应商",
+          "pageUrl": "https://sc.scm121.com/afterSaleManage/afterSales",
+          "preview": "序号、售后单号、内部订单号、售后单状态、解决方案、线上状态、线上类型、售后分类、商品信息 展示设置 商品明细支持添加，编辑、退货快递单号、退货国际单号、货物状态、快递拦截状态、拦截失败原因、快递拦截时间、收货仓、仓库、线上订单号、线上售后单号、售后问题类型、售后标签、售后问题登记、供分销备注 填售后凭证/驳回理由，售后处理更高效、供应商售后单状态、聚工单、买家账号、收货人、店铺、已提交供应商、异常状态、供应商退款状态、供应商 查看供应商退货地址、申请时间、确认时间、原订单状态、订单状态快照、发货快递单号、发货国际单号、原订单标签、原订单发货仓库、原订单备注/旗帜、原订单线下备注、原订单业务员、原订单采购金额、原订单下单金额、线上申请金额、实退金额、实际收货金额、申请退货数量、实退数量、创建人、修改人、平台售后详情、仲裁状态、操作",
+          "selector": "div > div:nth-of-type(2) > div > div > div:nth-of-type(1)",
+          "selectorStrength": "positional",
+          "tableIndex": 0,
+          "tableTitle": "",
+          "legacyPageOwnership": true
+        }
+      ],
+      "type": "table-analysis",
+      "updatedAt": 1784883444180,
+      "version": 3
+    },
+    {
+      "analysisMethod": {
+        "description": "监控广告消耗环比增加，但是广告盈余却是负的广告"
+      },
+      "createdAt": 1784883442503,
+      "id": "19f9357f347_ab323e30e79a",
+      "name": "广告投放监控",
+      "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+      "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+      "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+      "revision": 1,
+      "source": {
+        "businessTabTitle": "广告智能投放控制台",
+        "capturedAt": 1784865024988,
+        "capturedPageUrl": "https://src-sc.scm121.com/erp-data/adConsole/home?terminalName=SUPPLIER&_c=jst-gyl-supplier&gyl_env=supplier&erpToken=CS%40GYL.48973e89781d47118f957776bf4f5c84&gylToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiIyMjE1MjEwMiIsInJvbGVJZHMiOlsiQzYzN0IwQTkzN0FENDc1MUExMDcyMDI1MUY2Rjc5REQiLCJDNTI3MEZBRUVFM0U0OTE2ODZDN0NCNUY5MDYwNzUwRSIsIjExRDREMUUxNDNGMjQ3MUJBMDJBQjZCQjk4MkE5REYyIiwiOEJGODBCM0UwQzgzNEE3NjgxM0QwNEM4ODNENkQxMkQiLCJBQTkwOTRFNDIwRjE0QTE1OERDMTc2NThENzU3MjU0RCIsIkM4NTNBQzMxNDZCNzRFQUE5OUNGQzcwQTBDMEVCNUM4IiwiMzJCNzVERUY4OEU5NDJBNzg5N0I2ODY1QThCMDMyREQiLCJDNjYzMDEwRDI5NUM0NUMzOTI0QTY4NzFERUQ5QkRGNyJdLCJ1c2VyX25hbWUiOiJmYW5nd2VuZ0BqdXNodWl0YW4uY29tIiwiY3VycmVudF91c2VyX29yZ19pZCI6Ik9SRzAwMSIsImNvSWQiOiIxNTQ4OTQ4MyIsImV4cGlyYXRpb24iOjE3ODQ4NzAxODgxMDcsInVzZXIiOnsiY29JZCI6IjE1NDg5NDgzIiwibG9naW5OYW1lIjoiMTk5MjU3MjEyNTAiLCJsb2dpbldheSI6IkFHRU5UIiwibmlja05hbWUiOiLooazooavogIHnvZciLCJwcm94eUxvZ2luTmFtZSI6ImZhbmd3ZW5nQGp1c2h1aXRhbi5jb20iLCJyb2xlSWRzIjoiMTEsMTIsMzkiLCJ1aWQiOiIyMjE1MjEwMiJ9LCJhdXRob3JpdGllcyI6WyJKU1Qtemhvbmd0YWkteXVueWluZ2Z1emVyZW4iLCJPUC1GaW5hbmNlIiwiSlNULWNoYW5uZWwiLCJKU1Qtc3VwcGxpZXIiLCJKU1QtT1AtRFJIWiIsIm11bHRpTG9naW4iLCIgT1AtRFNGTSIsIk9QLVJlY2VpcHQtcGF5bWVudCJdLCJjdXJyZW50X3VzZXJfb3JnX2NvZGUiOiJKU1QiLCJjbGllbnRfaWQiOiJhZ2VudCIsImp0aSI6IjkyNjdiYTI0LTg4NjAtNGM3Ni1iOTMyLWU5MzYxOWRkMTE0MyIsImV4cCI6MTc4NDg3MDE4OH0.El94rcCoErO9Ot7vVCs2RWYN7yxpIz9VFS-GIiJt3v4",
+        "componentType": "art-table",
+        "containerSignature": "",
+        "displayName": "广告智能投放控制台",
+        "displayNameCustomized": false,
+        "displayNameOrigin": "auto",
+        "frameId": 77438,
+        "framePathHint": [
+          {
+            "sameUrlIndex": 0,
+            "url": "https://sc.scm121.com/dataCenter/adConsole/home"
+          },
+          {
+            "sameUrlIndex": 0,
+            "url": "https://src-sc.scm121.com/erp-data/adConsole/home"
+          }
+        ],
+        "frameUrl": "https://src-sc.scm121.com/erp-data/adConsole/home",
+        "headerFingerprint": "序号|店铺链接|近30天趋势更多指标|链接广告消耗&roi更多指标|营销场景|成交转化更多指标|潜在转化更多指标|转化成本更多指标|广告直接成交占比更多指标|库存|链接退款率更多指标",
+        "headers": [
+          "序号",
+          "店铺链接",
+          "近30天趋势 更多指标",
+          "链接广告消耗&ROI 更多指标",
+          "营销场景",
+          "成交转化 更多指标",
+          "潜在转化 更多指标",
+          "转化成本 更多指标",
+          "广告直接成交占比 更多指标",
+          "库存",
+          "链接退款率 更多指标"
+        ],
+        "id": "source_19f9357f347_ab323e30e79a_1",
+        "isTopFrame": false,
+        "locatorVersion": 2,
+        "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+        "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+        "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+        "preview": "序号、店铺链接、近30天趋势 更多指标、链接广告消耗&ROI 更多指标、营销场景、成交转化 更多指标、潜在转化 更多指标、转化成本 更多指标、广告直接成交占比 更多指标、库存、链接退款率 更多指标",
+        "selector": "div:nth-of-type(2) > div > div > div > div:nth-of-type(2)",
+        "selectorStrength": "positional",
+        "tableIndex": 0,
+        "tableTitle": "",
+        "legacyPageOwnership": true
+      },
+      "sourceName": "广告智能投放控制台",
+      "sources": [
+        {
+          "businessTabTitle": "广告智能投放控制台",
+          "capturedAt": 1784865024988,
+          "capturedPageUrl": "https://src-sc.scm121.com/erp-data/adConsole/home?terminalName=SUPPLIER&_c=jst-gyl-supplier&gyl_env=supplier&erpToken=CS%40GYL.48973e89781d47118f957776bf4f5c84&gylToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiIyMjE1MjEwMiIsInJvbGVJZHMiOlsiQzYzN0IwQTkzN0FENDc1MUExMDcyMDI1MUY2Rjc5REQiLCJDNTI3MEZBRUVFM0U0OTE2ODZDN0NCNUY5MDYwNzUwRSIsIjExRDREMUUxNDNGMjQ3MUJBMDJBQjZCQjk4MkE5REYyIiwiOEJGODBCM0UwQzgzNEE3NjgxM0QwNEM4ODNENkQxMkQiLCJBQTkwOTRFNDIwRjE0QTE1OERDMTc2NThENzU3MjU0RCIsIkM4NTNBQzMxNDZCNzRFQUE5OUNGQzcwQTBDMEVCNUM4IiwiMzJCNzVERUY4OEU5NDJBNzg5N0I2ODY1QThCMDMyREQiLCJDNjYzMDEwRDI5NUM0NUMzOTI0QTY4NzFERUQ5QkRGNyJdLCJ1c2VyX25hbWUiOiJmYW5nd2VuZ0BqdXNodWl0YW4uY29tIiwiY3VycmVudF91c2VyX29yZ19pZCI6Ik9SRzAwMSIsImNvSWQiOiIxNTQ4OTQ4MyIsImV4cGlyYXRpb24iOjE3ODQ4NzAxODgxMDcsInVzZXIiOnsiY29JZCI6IjE1NDg5NDgzIiwibG9naW5OYW1lIjoiMTk5MjU3MjEyNTAiLCJsb2dpbldheSI6IkFHRU5UIiwibmlja05hbWUiOiLooazooavogIHnvZciLCJwcm94eUxvZ2luTmFtZSI6ImZhbmd3ZW5nQGp1c2h1aXRhbi5jb20iLCJyb2xlSWRzIjoiMTEsMTIsMzkiLCJ1aWQiOiIyMjE1MjEwMiJ9LCJhdXRob3JpdGllcyI6WyJKU1Qtemhvbmd0YWkteXVueWluZ2Z1emVyZW4iLCJPUC1GaW5hbmNlIiwiSlNULWNoYW5uZWwiLCJKU1Qtc3VwcGxpZXIiLCJKU1QtT1AtRFJIWiIsIm11bHRpTG9naW4iLCIgT1AtRFNGTSIsIk9QLVJlY2VpcHQtcGF5bWVudCJdLCJjdXJyZW50X3VzZXJfb3JnX2NvZGUiOiJKU1QiLCJjbGllbnRfaWQiOiJhZ2VudCIsImp0aSI6IjkyNjdiYTI0LTg4NjAtNGM3Ni1iOTMyLWU5MzYxOWRkMTE0MyIsImV4cCI6MTc4NDg3MDE4OH0.El94rcCoErO9Ot7vVCs2RWYN7yxpIz9VFS-GIiJt3v4",
+          "componentType": "art-table",
+          "containerSignature": "",
+          "displayName": "广告智能投放控制台",
+          "displayNameCustomized": false,
+          "displayNameOrigin": "auto",
+          "frameId": 77438,
+          "framePathHint": [
+            {
+              "sameUrlIndex": 0,
+              "url": "https://sc.scm121.com/dataCenter/adConsole/home"
+            },
+            {
+              "sameUrlIndex": 0,
+              "url": "https://src-sc.scm121.com/erp-data/adConsole/home"
+            }
+          ],
+          "frameUrl": "https://src-sc.scm121.com/erp-data/adConsole/home",
+          "headerFingerprint": "序号|店铺链接|近30天趋势更多指标|链接广告消耗&roi更多指标|营销场景|成交转化更多指标|潜在转化更多指标|转化成本更多指标|广告直接成交占比更多指标|库存|链接退款率更多指标",
+          "headers": [
+            "序号",
+            "店铺链接",
+            "近30天趋势 更多指标",
+            "链接广告消耗&ROI 更多指标",
+            "营销场景",
+            "成交转化 更多指标",
+            "潜在转化 更多指标",
+            "转化成本 更多指标",
+            "广告直接成交占比 更多指标",
+            "库存",
+            "链接退款率 更多指标"
+          ],
+          "id": "source_19f9357f347_ab323e30e79a_1",
+          "isTopFrame": false,
+          "locatorVersion": 2,
+          "pageKey": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "pageTitle": "数据 - 聚水潭ERP分销版-供应商",
+          "pageUrl": "https://sc.scm121.com/dataCenter/adConsole/home",
+          "preview": "序号、店铺链接、近30天趋势 更多指标、链接广告消耗&ROI 更多指标、营销场景、成交转化 更多指标、潜在转化 更多指标、转化成本 更多指标、广告直接成交占比 更多指标、库存、链接退款率 更多指标",
+          "selector": "div:nth-of-type(2) > div > div > div > div:nth-of-type(2)",
+          "selectorStrength": "positional",
+          "tableIndex": 0,
+          "tableTitle": "",
+          "legacyPageOwnership": true
+        }
+      ],
+      "type": "table-analysis",
+      "updatedAt": 1784883444180,
+      "version": 3
+    }
+  ],
+  "pageNames": {}
+}
