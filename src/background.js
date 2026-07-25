@@ -948,12 +948,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       if (Number.isInteger(target.windowId)) await chrome.windows.update(target.windowId, { focused: true });
       await chrome.tabs.update(target.id, { active: true });
+      // jtv1：顶层 URL 命中不代表目标业务页签已激活。若数据源带页签标题，
+      // 先尝试在目标 tab 内激活对应业务页签（页签开着则切换）；
+      // 页签已关闭（激活失败）时，用 ?n=标题 直达 URL 导航重开该业务页签。
+      const switchTabTitle = String(message.source?.businessTabTitle || "").trim();
+      DIAGNOSTIC_LOGS && console.info("[web2ai.switch-page] target found", JSON.stringify({
+        targetPageKey, tabId: target.id, switchTabTitle, pageUrl: message.pageUrl || ""
+      }));
+      if (switchTabTitle) {
+        const activated = await sendToFrame(target.id, 0, { type: "ACTIVATE_BUSINESS_PAGE_TAB", title: switchTabTitle }).catch(() => null);
+        DIAGNOSTIC_LOGS && console.info("[web2ai.switch-page] activate tab", JSON.stringify({ switchTabTitle, ok: Boolean(activated?.ok), error: activated?.error || "" }));
+        if (!activated?.ok && message.pageUrl && normalizedPageKey(message.pageUrl) === targetPageKey) {
+          // 直达 URL 重开已关闭的业务页签（?n= 不影响 pageKey 匹配）
+          await chrome.tabs.update(target.id, { active: true, url: message.pageUrl }).catch(() => null);
+          await waitForTabReady(target.id, 15000).catch(() => null);
+        } else {
+          // 激活后等待业务 iframe 就绪，避免 FOCUS 打到旧页签
+          await waitForTabPageKey(target.id, normalizedPageKey(message.source?.frameUrl || message.pageUrl || ""), 8).catch(() => false);
+        }
+      }
       const opened = await openSkillsPanelWhenReady(target.id);
       if (!opened) {
         sendResponse({ ok: false, error: "已切换页面，但暂时无法打开技能面板，请刷新页面后重试" });
         return;
       }
-      await focusSkillSourceWhenReady(target.id, message.source);
+      const focused = await focusSkillSourceWhenReady(target.id, message.source);
+      DIAGNOSTIC_LOGS && console.info("[web2ai.switch-page] focus result", JSON.stringify({ focused }));
       sendResponse({ ok: true, data: { tabId: target.id } });
       return;
     }

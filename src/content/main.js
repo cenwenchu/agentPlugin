@@ -18,6 +18,7 @@ import { initOverlay, render, setOpen, clearDraftInput, refreshModelOptions, cap
 import { showToast } from './toast.js';
 import { addContextSnippet, initContextDependencies, removeContextByRef } from './context.js';
 import { initSkills, reloadSkills, createSkillDraft, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars, getBusinessPageTabs } from './skills.js';
+import { findBusinessTabElements, businessTabTitle } from './business-tab-dom.js';
 import { applySkillWorkspaceCollectionProgress } from './skill-workspace-controller.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
@@ -326,14 +327,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
     const title = compactOneLine(message.title || "");
-    const target = Array.from(document.querySelectorAll('[class*="realTab"]'))
-      .filter((element) => String(element.className || "").split(/\s+/).some((name) => name.endsWith("-realTab")))
-      .find((element) => compactOneLine(element.textContent || "") === title);
+    const target = findBusinessTabElements()
+      .find((tab) => businessTabTitle(tab) === title);
     if (!target) {
       sendResponse({ ok: false, error: `页面“${title}”未打开` });
       return;
     }
-    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    target.element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
     sendResponse({ ok: true });
     return;
   }

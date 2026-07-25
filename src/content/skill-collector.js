@@ -6,12 +6,13 @@
 
 import { DEBUG, IS_TOP_FRAME, compactOneLine, uid } from "./state.js";
 import { isVisibleElement } from "./dom.js";
+import { resolveTableRootAdapter } from "./table-adapters.js";
 import {
   MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS, classifyCollectionCompletion,
   classifyScrollCollection, nextVirtualScrollTop, shouldStopAfterNoProgress
 } from "./skill-collection-model.js";
 import {
-  alignedRowCellTexts, extractHeaders, extractStoredSourceData, locateStoredSource
+  alignedRowCellTexts, dataRowsInTable, extractHeaders, extractStoredSourceData, locateStoredSource
 } from "./skill-source-dom.js";
 import { getRowCells, isHeaderRow } from "./table-row-dom.js";
 import {
@@ -20,8 +21,9 @@ import {
 } from "./table-pagination-dom.js";
 
 const activeCollections = new Map();
-const SKILL_COLLECTION_DIAGNOSTICS = DEBUG;
-const SKILL_PAGINATION_SELECTOR = ".ant-pagination,.arco-pagination,.vxe-pager,[class*='pagination'],[class*='pager'],[role='navigation']";
+// 运行时可开关：控制台执行 window.__WEB2AI_DEBUG = true 即可打开采集日志
+const SKILL_COLLECTION_DIAGNOSTICS = () => DEBUG || globalThis.__WEB2AI_DEBUG === true;
+const SKILL_PAGINATION_SELECTOR = ".ant-pagination,.arco-pagination,.vxe-pager,#_jt_pagebar,[class*='pagination'],[class*='pager'],[role='navigation']";
 
 // 普通跨页选择继续使用 table-pagination-dom 的保守默认值。技能采集已经先
 // 校验数据源身份，可按内容摘要自适应结束等待，避免每次滚动/翻页固定停两秒。
@@ -45,8 +47,7 @@ function emitCollectionProgress(collectionId, progress) {
 }
 
 function logSkillCollection(event, details = {}) {
-  if (!SKILL_COLLECTION_DIAGNOSTICS) return;
-  SKILL_COLLECTION_DIAGNOSTICS && console.info("[web2ai.skill-collection]", event, JSON.stringify({
+  SKILL_COLLECTION_DIAGNOSTICS() && console.info("[web2ai.skill-collection]", event, JSON.stringify({
     frame: IS_TOP_FRAME ? "top" : "child",
     ...details
   }));
@@ -99,7 +100,10 @@ function isVisibleCollectionElement(node) {
 
 function findStoredSourceVerticalScroller(table) {
   if (!table) return null;
-  const row = table.querySelector?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
+  // 适配器声明的滚动容器（如 _jtv1 聚水潭：#_jt_body，其 overflow-y 为容器默认 visible，
+  // 真实页面里是唯一承载虚拟滚动 overflow-x/overflow-y 的节点），纳入评分时给予最高优先级
+  const adapterScroller = resolveTableRootAdapter(table)?.scroller?.(table);
+  const row = dataRowsInTable(table)[0] || null;
   const candidates = new Set();
   const knownSelectors = [
     ".ant-table-body", ".ant-table-content", ".ant-virtual-list-holder",
@@ -122,6 +126,9 @@ function findStoredSourceVerticalScroller(table) {
   const ranked = [...candidates].filter((node) => {
     if (node?.nodeType !== 1 || !node.isConnected) return false;
     if (node !== node.ownerDocument?.scrollingElement && !isVisibleCollectionElement(node)) return false;
+    // 适配器声明的滚动容器（如 _jtv1 #_jt_body）overflow-y 为容器默认 visible，
+    // 其滚动范围由内容高度决定，不能按 clientHeight 过滤
+    if (node === adapterScroller) return true;
     return node.clientHeight >= 40 && node.scrollHeight - node.clientHeight > 8;
   }).map((node) => {
     const className = String(node.className || "");
@@ -131,7 +138,7 @@ function findStoredSourceVerticalScroller(table) {
     const containsRow = Boolean(row && node.contains(row));
     const documentScroller = node === node.ownerDocument?.scrollingElement;
     const ancestorFrameScroller = node.ownerDocument !== document;
-    return { node, score: (known ? 8 : 0) + (scrollStyle ? 4 : 0) + (containsRow ? 3 : 0) + (ancestorFrameScroller ? 2 : 0) - (documentScroller ? 1 : 0) - Math.min(node.clientHeight / 1000, 2) };
+    return { node, score: (known ? 8 : 0) + (scrollStyle ? 4 : 0) + (containsRow ? 3 : 0) + (ancestorFrameScroller ? 2 : 0) - (documentScroller ? 1 : 0) - Math.min(node.clientHeight / 1000, 2) + (node === adapterScroller ? 20 : 0) };
   }).sort((a, b) => b.score - a.score);
   return ranked[0]?.node || null;
 }
@@ -176,8 +183,7 @@ function setVerticalScrollTop(scroller, top) {
 
 function classifyVerticalCollection(scroller, table) {
   const className = `${String(scroller?.className || "")} ${String(table?.className || "")}`;
-  const renderedRows = Array.from(table?.querySelectorAll?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr") || [])
-    .filter((row) => !isHeaderRow(row));
+  const renderedRows = dataRowsInTable(table);
   const layoutNodes = [table, table?.parentElement, ...renderedRows.slice(0, 3)].filter(Boolean);
   const hasVirtualLayoutEvidence = layoutNodes.some((node) => {
     const style = getComputedStyle(node);
@@ -198,9 +204,9 @@ function classifyVerticalCollection(scroller, table) {
 
 function tableHasVirtualLayoutEvidence(table) {
   if (!table) return false;
-  const renderedRows = Array.from(table.querySelectorAll?.(
-    "tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"
-  ) || []).filter((row) => !isHeaderRow(row));
+  // _jtv1（聚水潭）：#_jt_body 固定高度 + overflow，本身就是虚拟滚动证据
+  if (resolveTableRootAdapter(table)?.scroller?.(table)) return true;
+  const renderedRows = dataRowsInTable(table);
   const layoutNodes = [table, table.parentElement, ...renderedRows.slice(0, 3)].filter(Boolean);
   const virtualCss = /(art-table|virtual-list|virtual-scroll|virtualized)/i.test(`${table.className || ""} ${table.parentElement?.className || ""}`);
   const hasTransform = layoutNodes.some((node) => {
@@ -239,7 +245,26 @@ async function waitForVirtualRows(source, beforeTable, beforeDigest, beforeRows)
 async function resolvePageScrollCollection(source, initialTable, page) {
   let table = initialTable;
   let scroller = findStoredSourceVerticalScroller(table);
-  let mode = scroller ? classifyVerticalCollection(scroller, table) : "none";
+  const rootAdapter = resolveTableRootAdapter(table);
+  // 适配器已明确声明滚动容器时（如 _jtv1 聚水潭 #_jt_body），直接按虚拟滚动处理，
+  // 不再走启发式分类——真实页面 overflow-y 为容器默认 visible 时，
+  // renderedRowHeights 为 0 / isDocumentScroller 都会把分类误判成 none/probe，
+  // 导致"滚动一步无新增就停止"。
+  let mode = scroller
+    ? (rootAdapter?.scroller?.(table) === scroller ? "confirmed" : classifyVerticalCollection(scroller, table))
+    : "none";
+  // 诊断：适配器是否命中、scroller 钩子是否返回了节点，帮助定位"滚动容器找不到"
+  logSkillCollection("scroll detection init", {
+    page,
+    table: describeCollectionElement(table),
+    adapter: rootAdapter?.name || "none",
+    adapterScroller: describeCollectionElement(rootAdapter?.scroller?.(table) || null),
+    adapterScrollerScrollHeight: Math.round(rootAdapter?.scroller?.(table)?.scrollHeight || 0),
+    adapterScrollerClientHeight: Math.round(rootAdapter?.scroller?.(table)?.clientHeight || 0),
+    adapterScrollerOverflowY: rootAdapter?.scroller?.(table)?.ownerDocument?.defaultView?.getComputedStyle(rootAdapter.scroller(table))?.overflowY || "",
+    chosenScroller: describeCollectionElement(scroller),
+    chosenMode: mode
+  });
   // 有些虚拟表格的真实滚动由祖先文档承载，当前 frame 看不到 scrollTop/scrollHeight。
   // 这类场景不能误判成普通表格直接翻页，而是改用 scrollIntoView 的保守采集模式。
   if (!scroller && tableHasVirtualLayoutEvidence(table)) mode = "into-view";
@@ -258,7 +283,10 @@ async function resolvePageScrollCollection(source, initialTable, page) {
     await new Promise((resolve) => setTimeout(resolve, 140));
     table = findStoredSourceTable(source) || table;
     scroller = findStoredSourceVerticalScroller(table);
-    mode = scroller ? classifyVerticalCollection(scroller, table) : (tableHasVirtualLayoutEvidence(table) ? "into-view" : "none");
+    const retryAdapter = resolveTableRootAdapter(table);
+    mode = scroller
+      ? (retryAdapter?.scroller?.(table) === scroller ? "confirmed" : classifyVerticalCollection(scroller, table))
+      : (tableHasVirtualLayoutEvidence(table) ? "into-view" : "none");
   }
   logSkillCollection("scroll detection result", {
     page,
@@ -636,6 +664,9 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
 }
 
 function findStoredSourcePagination(table) {
+  // 适配器声明的分页器优先（如 _jtv1 聚水潭：#_jt_pagebar）
+  const adapterPagination = resolveTableRootAdapter(table)?.pagination?.(table);
+  if (adapterPagination) return adapterPagination;
   let scope = table;
   for (let depth = 0; depth < 9 && scope; depth++, scope = scope.parentElement) {
     const candidates = Array.from(scope.querySelectorAll?.(SKILL_PAGINATION_SELECTOR) || []);
@@ -651,10 +682,20 @@ function findStoredSourcePagination(table) {
 }
 
 function paginationIsOnFirstPage(pagination) {
+  // _jtv1：页码在 span.cur（如 "1"），且 disabled 的下一页也可佐证第一页
   const active = pagination?.querySelector?.(
-    "[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active,.vxe-pager--num-btn.is--active,.is--active[class*='num-btn']"
+    "[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active,.vxe-pager--num-btn.is--active,.is--active[class*='num-btn'],#_jt_pagebar .cur"
   );
-  return compactOneLine(active?.innerText || active?.textContent || "") === "1";
+  if (compactOneLine(active?.innerText || active?.textContent || "") === "1") return true;
+  // 聚水潭 pagebar：文本含 "1/3页" 且首页/上一页按钮为 disabled 时即第一页
+  // 注意：分页容器只有 id（#_jt_pagebar 无 class），用 id 选择器匹配
+  const jtv1Root = pagination?.matches?.("#_jt_pagebar") ? pagination : pagination?.querySelector?.("#_jt_pagebar");
+  if (jtv1Root) {
+    const label = compactOneLine(jtv1Root.querySelector?.("._jt_label")?.textContent || "");
+    const firstBtn = jtv1Root.querySelector?.("._jt_first,._jt_pre");
+    if (/(^|\s)1\s*\/\s*\d+\s*页/.test(label) && firstBtn?.classList?.contains("_jt_pagebtn_disabled")) return true;
+  }
+  return false;
 }
 
 async function restoreStoredSourceTableTop(source, reason = "restore") {
@@ -734,7 +775,8 @@ async function restoreStoredSourceFirstPage(source) {
       ".ant-pagination-prev button,.ant-pagination-prev a,.ant-pagination-prev .ant-pagination-item-link," +
       ".arco-pagination-item-previous button,.arco-pagination-prev button," +
       ".vxe-pager--prev-btn:not(.is--disabled),.vxe-pager .btn-prev:not(.is--disabled)," +
-      "button[aria-label*='上一页'],a[aria-label*='上一页'],button[aria-label*='previous' i],a[aria-label*='previous' i]"
+      "button[aria-label*='上一页'],a[aria-label*='上一页'],button[aria-label*='previous' i],a[aria-label*='previous' i]," +
+      "#_jt_pagebar ._jt_pre:not(._jt_pagebtn_disabled)"
     );
     const previousContainer = previous?.closest?.(".ant-pagination-prev,.arco-pagination-item-previous,.arco-pagination-prev,.vxe-pager--prev-btn,.btn-prev");
     const disabled = !previous || previous.disabled || previous.getAttribute?.("aria-disabled") === "true" ||
@@ -794,9 +836,9 @@ async function collectStoredSourceData(source, options = {}) {
       if (rows.length >= maxRows) { reason = "row-limit"; break; }
       if (page >= maxPages) { reason = "page-limit"; break; }
       const table = findStoredSourceTable(runtimeSource);
-      const anchorRow = table?.querySelector?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
+      const anchorRow = dataRowsInTable(table)[0] || null;
       const next = findPaginationNextButton(anchorRow);
-      const pagination = next?.closest?.(".ant-pagination,.arco-pagination,[class*='pagination'],[role='navigation']");
+      const pagination = next?.closest?.(".ant-pagination,.arco-pagination,#_jt_pagebar,[class*='pagination'],[role='navigation']");
       const nextContainer = next?.closest?.(".ant-pagination-next,.arco-pagination-item-next,.arco-pagination-next");
       const disabled = !next || next.disabled || next.getAttribute?.("aria-disabled") === "true" ||
         nextContainer?.classList?.contains("ant-pagination-disabled") ||

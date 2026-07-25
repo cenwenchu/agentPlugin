@@ -165,6 +165,34 @@ test("uses the ArtTable component root instead of an art-table row as scope", ()
   assert.equal(resolved.scope, componentRoot);
 });
 
+test("resolves _jtv1 scope from body row to common parent of header and body", () => {
+  const commonParent = { id: "jtv1-container" };
+  const body = { parentElement: commonParent };
+  const row = {
+    closest: (selector) => selector === "#_jt_body" ? body : null,
+    getAttribute: () => null,
+    querySelector: () => null,
+    matches: () => false
+  };
+  const resolved = resolveTableAdapter(row);
+  assert.equal(resolved.adapter.name, "_jtv1");
+  assert.equal(resolved.scope, commonParent);
+});
+
+test("resolves _jtv1 scope from header container node directly", () => {
+  const commonParent = { id: "jtv1-container" };
+  const head = {
+    parentElement: commonParent,
+    closest: () => null,
+    getAttribute: () => null,
+    querySelector: () => null,
+    matches: (sel) => sel === "#_jt_row_head"
+  };
+  const resolved = resolveTableAdapter(head);
+  assert.equal(resolved.adapter.name, "_jtv1");
+  assert.equal(resolved.scope, commonParent);
+});
+
 test("distinguishes recycled virtual rows by business key or leading-column fingerprint", () => {
   assert.notEqual(
     getRenderedRowIdentity("orders", "row:1", "same text"),

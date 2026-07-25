@@ -9,7 +9,8 @@ import { getCssSelector, isVisibleElement } from "./dom.js";
 import { skillHeadersMatch } from "./skill-collection-model.js";
 import { SOURCE_LOCATOR_VERSION } from "./skill-source-model.js";
 import { normalizeDerivedColumnSelections, normalizedHeaderText, SKILL_TYPE_DERIVED_COLUMN } from "./derived-column-model.js";
-import { resolveTableAdapter } from "./table-adapters.js";
+import { resolveTableAdapter, resolveTableRootAdapter } from "./table-adapters.js";
+import { findBusinessTabElements, businessTabTitle, isJtv1LikePage } from "./business-tab-dom.js";
 import { DERIVED_COLUMN_SELECTOR, getRowCells, isHeaderRow, isTableFooterOrSummaryRow } from "./table-row-dom.js";
 import { findHeaderRowAbove } from "./table-header-resolver.js";
 import { findPaginationNextButton } from "./table-pagination-dom.js";
@@ -43,20 +44,25 @@ function normalizeHeader(value) {
 }
 
 function readBusinessTabDomSnapshot() {
-  return Array.from(document.querySelectorAll('[class*="realTab"]'))
-    .filter((element) => String(element.className || "").split(/\s+/).some((name) => name.endsWith("-realTab")))
-    .map((element, index) => ({
-      index,
-      text: compactOneLine(element.textContent || ""),
-      className: String(element.className || "").trim().split(/\s+/).slice(0, 6),
-      ariaSelected: element.getAttribute?.("aria-selected") || "",
-      dataActive: element.getAttribute?.("data-active") || "",
-      visible: isVisibleElement(element)
-    }));
+  return findBusinessTabElements().map((tab, index) => ({
+    index,
+    text: businessTabTitle(tab),
+    className: String(tab.element.className || "").trim().split(/\s+/).slice(0, 6),
+    ariaSelected: tab.element.getAttribute?.("aria-selected") || "",
+    dataActive: tab.element.getAttribute?.("data-active") || "",
+    visible: isVisibleElement(tab.element)
+  }));
 }
 
 function tableCandidates() {
   const candidates = Array.from(document.querySelectorAll(TABLE_SELECTOR));
+  // _jtv1（聚水潭 ERP）：表头和表体是兄弟 div，共同父元素为表格根节点
+  Array.from(document.querySelectorAll("#_jt_row_head")).forEach((head) => {
+    const parent = head.parentElement;
+    if (parent && !candidates.includes(parent)) {
+      candidates.push(parent);
+    }
+  });
   return candidates.filter((candidate, index) => !candidates.some((parent, parentIndex) => (
     parentIndex !== index && parent.contains(candidate) && parent.matches(TABLE_SELECTOR)
   )));
@@ -64,7 +70,21 @@ function tableCandidates() {
 
 function dataRowsInTable(table) {
   if (!table) return [];
-  return Array.from(table.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
+  const adapter = resolveTableRootAdapter(table);
+  if (adapter?.dataRows) {
+    return adapter.dataRows(table)
+      .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row));
+  }
+  const matched = Array.from(table.querySelectorAll(
+    "tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr, ._jt_row._jt_rh"
+  ));
+  // 容器内嵌套表格的行不属于当前表格；但有的容器本身不含直接行
+  //（如 .ant-table-wrapper 包裹原生 table），此时保留全部匹配
+  const directRows = matched.filter((row) => {
+    const owner = row.closest?.("table, [role='table'], [role='grid'], [role='treegrid']");
+    return !owner || owner === table || !table.contains(owner);
+  });
+  return (directRows.length ? directRows : matched)
     .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row));
 }
 
@@ -152,12 +172,33 @@ function summarizeTableCandidate(table, index = 0) {
 
 function resolveTableFromTarget(target) {
   if (!(target instanceof Element)) return null;
-  const row = target.closest("tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
+  // jtv1（聚水潭 epaas）：工具栏/按钮区域可能含 table 布局或 role 结构，
+  // 通用选择器（TABLE_SELECTOR / tr / [role=row] / .ant-table-row）会把它误判为
+  // 数据表格。jtv1 下只认聚水潭自己的数据表格结构（_jt_row 行 + #_jt_body/#_jt_row_head
+  // 容器），禁用通用选择器兜底，避免选错按钮区域。
+  if (isJtv1LikePage()) {
+    const jtv1Row = target.closest("._jt_row._jt_rh");
+    const jtv1Root = jtv1Row ? getStableTableRoot(jtv1Row) : null;
+    if (jtv1Root) return jtv1Root;
+    const jtv1Body = target.closest("#_jt_body");
+    if (jtv1Body) return jtv1Body.parentElement;
+    const jtv1Head = target.closest("#_jt_row_head");
+    if (jtv1Head) return jtv1Head.parentElement;
+    return null;
+  }
+  const row = target.closest("tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr, ._jt_row._jt_rh");
   const componentRoot = row ? getStableTableRoot(row) : null;
   if (componentRoot) return componentRoot;
   const matched = target.closest(TABLE_SELECTOR);
-  if (!matched) return null;
-  return tableCandidates().find((candidate) => candidate === matched || candidate.contains(matched)) || matched;
+  if (matched) {
+    return tableCandidates().find((candidate) => candidate === matched || candidate.contains(matched)) || matched;
+  }
+  // _jtv1：target 在 #_jt_body 或 #_jt_row_head 内，父元素为表格根节点
+  const jtv1Body = target.closest("#_jt_body");
+  if (jtv1Body) return jtv1Body.parentElement;
+  const jtv1Head = target.closest("#_jt_row_head");
+  if (jtv1Head) return jtv1Head.parentElement;
+  return null;
 }
 
 function preferVisibleTables(tables = []) {
@@ -212,6 +253,14 @@ function extractHeaders(table, preferredTarget = null) {
     ".art-table-header-cell, .ant-table-thead th, .arco-table-th, " +
     "[class*='table-header'] [class*='cell'], [class*='table-head'] [class*='cell']"
   )).filter((cell) => !cell.matches?.(DERIVED_COLUMN_SELECTOR));
+  // 适配器接管的表头（如 _jtv1 聚水潭：表头在 #_jt_row_head 子 div 中，含隐藏列需过滤）
+  if (!cells.length) {
+    const adapter = resolveTableRootAdapter(table);
+    if (adapter?.headerCells) {
+      cells = adapter.headerCells(table)
+        .filter((cell) => !cell.matches?.(DERIVED_COLUMN_SELECTOR));
+    }
+  }
   // 非标准 div 表格无法标识完整表头区域时，再使用用户实际点击行兜底。
   if (!cells.length) cells = clickedHeaderCells(preferredTarget);
   // 复用 Chat 的表头关联算法，兼容固定表头与表体拆成兄弟 table 的组件。
@@ -741,8 +790,7 @@ function extractStoredSourceData(source, limit = 200, options = {}) {
   const selected = located.table;
   if (!selected) return { found: false, status: located.status, ambiguous: located.ambiguous, candidateCount: located.candidateCount };
   const headers = located.headers || extractHeaders(selected);
-  const rawRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
-    .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row));
+  const rawRows = dataRowsInTable(selected);
   const allRows = rawRows
     .map((row) => alignedRowCellTexts(getRowCells(row), headers.length))
     .filter((cells) => cells.length && cells.some(Boolean));
@@ -782,8 +830,7 @@ function extractStoredSourcePreviewData(source, limit = 20, options = {}) {
   const selected = located.table;
   if (!selected) return { found: false, status: located.status, ambiguous: located.ambiguous, candidateCount: located.candidateCount };
   const headers = located.headers || extractHeaders(selected);
-  const rawRows = Array.from(selected.querySelectorAll("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr"))
-    .filter((row) => !isHeaderRow(row) && !isTableFooterOrSummaryRow(row));
+  const rawRows = dataRowsInTable(selected);
   const allRows = rawRows
     .map((row) => alignedRowCellTexts(getRowCells(row), headers.length))
     .filter((cells) => cells.length && cells.some(Boolean));
@@ -814,9 +861,9 @@ function inspectStoredSourcePagination(source, options = {}) {
   const located = locateStoredSource(source, options);
   const table = located.table;
   if (!table) return { found: false, status: located.status, ambiguous: located.ambiguous, multiPage: false };
-  const anchorRow = table.querySelector?.("tbody tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr");
+  const anchorRow = dataRowsInTable(table)[0];
   const next = findPaginationNextButton(anchorRow);
-  const pagination = next?.closest?.(".ant-pagination,.arco-pagination,[class*='pagination'],[role='navigation']");
+  const pagination = next?.closest?.(".ant-pagination,.arco-pagination,#_jt_pagebar,[class*='pagination'],[role='navigation']");
   const pageNumbers = Array.from(pagination?.querySelectorAll?.("button,a,[role='button']") || [])
     .map((node) => Number.parseInt(compactOneLine(node.innerText || node.textContent || ""), 10))
     .filter((value) => Number.isInteger(value) && value > 0);
@@ -828,5 +875,6 @@ function inspectStoredSourcePagination(source, options = {}) {
 export {
   pageKey, tableCandidates, resolveTableFromTarget, alignedRowCellTexts, extractHeaders,
   describeTable, headerSimilarity, locateStoredSource, resolveStoredSource,
-  extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination
+  extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination,
+  dataRowsInTable
 };

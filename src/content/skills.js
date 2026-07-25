@@ -23,10 +23,12 @@ import {
   validateDerivedColumnSkill
 } from "./derived-column-model.js";
 import { buildSkillSourceRecoveryHint, skillSourceStatusLabel } from "./skill-source-status.js";
+import { findBusinessTabElements, businessTabTitle, businessTabActive, closestBusinessTab, isJtv1LikePage } from "./business-tab-dom.js";
 import {
   pageKey, tableCandidates, resolveTableFromTarget, extractHeaders, describeTable,
   headerSimilarity, resolveStoredSource, extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination
 } from "./skill-source-dom.js";
+import { resolveTableRootAdapter } from "./table-adapters.js";
 import {
   collectStoredSourceData, stopStoredSourceCollection, findStoredSourceTable
 } from "./skill-collector.js";
@@ -121,17 +123,19 @@ function buildSkillStatusStateSnapshot(skill, statuses = {}) {
 }
 
 function readBusinessPageTabs() {
-  const titles = Array.from(document.querySelectorAll('[class*="realTab"]'))
-    .filter((element) => String(element.className || "").split(/\s+/).some((name) => name.endsWith("-realTab")))
-    .map((element) => compactOneLine(element.textContent || ""))
-    .filter(Boolean);
+  const tabs = findBusinessTabElements();
+  const titles = tabs.map(businessTabTitle).filter(Boolean);
   const uniqueTitles = [...new Set(titles)];
+  // 优先采用 DOM 标记的激活页签（聚水潭 ant Tabs 用 aria-selected）；
+  // 无标记时回退到已确认标题，再退化为最后一个页签
+  const domActive = tabs.find((tab) => businessTabActive(tab));
+  const domActiveTitle = domActive ? businessTabTitle(domActive) : "";
+  const activeTitle = domActiveTitle
+    || (uniqueTitles.includes(confirmedBusinessTabTitle) ? confirmedBusinessTabTitle : uniqueTitles[uniqueTitles.length - 1] || "");
   return {
     titles: uniqueTitles,
-    activeTitle: uniqueTitles.includes(confirmedBusinessTabTitle)
-      ? confirmedBusinessTabTitle
-      : uniqueTitles[uniqueTitles.length - 1] || "",
-    activeTitleConfirmed: Boolean(confirmedBusinessTabTitle && uniqueTitles.includes(confirmedBusinessTabTitle))
+    activeTitle,
+    activeTitleConfirmed: Boolean(domActiveTitle || (confirmedBusinessTabTitle && uniqueTitles.includes(confirmedBusinessTabTitle)))
   };
 }
 
@@ -278,12 +282,15 @@ function renderSkillBars(skills = []) {
     grouped.set(fallbackTable, list);
   }
   for (const [table, tableSkills] of grouped) {
+    // 统一插入到表格上方（文档流）。jtv1 等"写死高度的虚拟滚动表"（适配器声明了
+    // scroller）需要等量压缩表体高度，否则 bar 会把底部 pagebar 挤出可视区。
+    const fixedHeightScroller = resolveTableRootAdapter(table)?.scroller?.(table) || null;
     const bar = document.createElement("div");
     bar.dataset.web2aiSkillBar = "1";
     bar.dataset.web2aiUi = "1";
     Object.assign(bar.style, {
-      display: "flex", flexDirection: "column", alignItems: "stretch", gap: "6px",
-      boxSizing: "border-box", width: "100%", margin: "0 0 8px", padding: "8px 10px",
+      display: "flex", flexDirection: "column", alignItems: "stretch", gap: "4px",
+      boxSizing: "border-box", width: "100%", margin: "0 0 6px", padding: "4px 10px",
       border: "1px solid #bfdbfe", borderRadius: "9px", background: "#eff6ff",
       color: "#1e3a8a", fontFamily: "system-ui,-apple-system,sans-serif", fontSize: "12px"
     });
@@ -291,7 +298,7 @@ function renderSkillBars(skills = []) {
     Object.assign(topRow.style, {
       display: "flex",
       alignItems: "center",
-      gap: "8px",
+      gap: "6px",
       flexWrap: "wrap"
     });
     const label = document.createElement("span");
@@ -302,11 +309,11 @@ function renderSkillBars(skills = []) {
     Object.assign(help.style, {
       display: "inline-flex",
       alignItems: "center",
-      gap: "8px",
+      gap: "6px",
       flexWrap: "wrap",
       color: "#475569",
-      fontSize: "10px",
-      lineHeight: "1.5"
+      fontSize: "9px",
+      lineHeight: "1.3"
     });
     const tableHelp = document.createElement("span");
     tableHelp.textContent = "表：点击“执行”后，会按当前数据源立即发起一次整表分析。";
@@ -494,6 +501,26 @@ function renderSkillBars(skills = []) {
     }
     bar.appendChild(listRow);
     table.parentNode?.insertBefore(bar, table);
+    if (fixedHeightScroller) {
+      // jtv1 的容器链写死高度且随视口/手动拖拽动态变化（#_jt_row_foot 有 resize 把手）。
+      // 不能缓存"原始高度"做固定减法——屏幕变化或拖拽后基准会过期。
+      // 改为每次基于容器当前实测高度、按 bar 高度占比做比例压缩，跟得上动态尺寸。
+      // 用 dataset 标记已压缩，bar 每 3s 重建时若已压过则不重复压缩（幂等）。
+      const barHeight = bar.getBoundingClientRect().height;
+      if (barHeight > 0 && !fixedHeightScroller.dataset.web2aiShrunk) {
+        const tableNow = table.getBoundingClientRect().height;
+        const scrollerNow = fixedHeightScroller.getBoundingClientRect().height;
+        if (tableNow > 0 && scrollerNow > 0) {
+          // 表体占容器的高度比，按同比例压缩 bar 占用的高度，保持 pagebar 可见
+          const ratio = scrollerNow / tableNow;
+          const tableNext = Math.max(0, Math.round(tableNow - barHeight));
+          const scrollerNext = Math.max(120, Math.round(scrollerNow - barHeight * ratio));
+          table.style.height = `${tableNext}px`;
+          fixedHeightScroller.style.height = `${scrollerNext}px`;
+          fixedHeightScroller.dataset.web2aiShrunk = "1";
+        }
+      }
+    }
   }
   const diagnostic = JSON.stringify({
     frame: IS_TOP_FRAME ? "top" : "child",
@@ -790,11 +817,39 @@ async function loadSkills() {
     ? pageNamesData[PAGE_NAMES_STORAGE_KEY]
     : {};
   STATE.skillCatalog = all;
-  STATE.skills = all.filter((skill) => skill.pageKey === currentPageKey || skill.sources.some((source) => source.pageKey === currentPageKey))
+  // jtv1（聚水潭多页签框架）：顶层 URL 对所有业务页签相同，归属改用页签标题维度。
+  // 仅影响识别为 jtv1 的页面；其他站点仍按顶层 pageKey 归属，行为不变。
+  const jtv1 = isJtv1LikePage();
+  const activeTab = jtv1 ? (businessTabs.activeTitle || "") : "";
+  const openTabTitles = jtv1 ? new Set(businessTabs.titles || []) : null;
+  // 归属判定：数据源是否属于"当前激活的业务页签"。无页签标题的老数据回退 pageKey。
+  const sourceOnActiveTab = (source) => {
+    if (!jtv1) return source.pageKey === currentPageKey;
+    const title = compactOneLine(source.businessTabTitle || "");
+    return title ? title === activeTab : source.pageKey === currentPageKey;
+  };
+  // 页签已关闭判定：有页签标题但该标题不在当前打开的页签列表里。
+  const sourceTabClosed = (source) => {
+    if (!jtv1) return false;
+    const title = compactOneLine(source.businessTabTitle || "");
+    return Boolean(title && openTabTitles && !openTabTitles.has(title));
+  };
+  STATE.skills = all.filter((skill) => {
+    if (jtv1) {
+      // 关 tab 隐藏：该技能所有数据源所属页签都已关闭 → 不在当前页显示
+      const sources = skill.sources || [];
+      const hasOpenSource = sources.some((source) => !sourceTabClosed(source) && sourceOnActiveTab(source));
+      const legacyHit = skill.pageKey === currentPageKey && !sources.some((s) => compactOneLine(s.businessTabTitle || ""));
+      return hasOpenSource || legacyHit;
+    }
+    return skill.pageKey === currentPageKey || skill.sources.some((source) => source.pageKey === currentPageKey);
+  })
     .map((skill) => ({
       ...skill,
       // 横条渲染只能看到当前顶层页面的数据源，不能拿其他页面的相似表格兜底。
-      pageSources: skill.sources.filter((source) => source.pageKey === currentPageKey || (!source.pageKey && skill.pageKey === currentPageKey))
+      pageSources: jtv1
+        ? skill.sources.filter((source) => sourceOnActiveTab(source) && !sourceTabClosed(source))
+        : skill.sources.filter((source) => source.pageKey === currentPageKey || (!source.pageKey && skill.pageKey === currentPageKey))
     }));
   STATE.skillSourceStatuses = Object.fromEntries(STATE.skills.map((skill) => [
     skill.id,
@@ -1346,9 +1401,9 @@ function initSkills(onRender) {
   if (IS_TOP_FRAME && !businessTabClickListenerInstalled) {
     businessTabClickListenerInstalled = true;
     document.addEventListener("click", (event) => {
-      const tab = event.target instanceof Element ? event.target.closest('[class*="realTab"]') : null;
-      if (!tab || !String(tab.className || "").split(/\s+/).some((name) => name.endsWith("-realTab"))) return;
-      pendingBusinessTabTitle = compactOneLine(tab.textContent || "");
+      const tab = closestBusinessTab(event.target);
+      if (!tab) return;
+      pendingBusinessTabTitle = businessTabTitle(tab);
       scheduleBusinessTabSkillRefresh();
     }, true);
   }

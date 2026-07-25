@@ -34,6 +34,7 @@
 - `table-pagination-dom.js`：定位分页器、执行一次激活并等待页面数据稳定。
 - `skill-source-dom.js`：描述、恢复、校验技能数据源并读取当前渲染行。
 - `skill-collector.js`：执行分页和虚拟滚动采集，管理停止状态及恢复第一页/顶部。
+- `business-tab-dom.js`：多页签 SPA 框架（jtv1 / 聚水潭 epaas）的业务页签识别、激活态判定与 `?n=` 直达 URL 生成；统一 realTab 与 ant Tabs 两套 DOM。
 
 `table.js` 和 `skills.js` 继续作为原有公开接口的 facade，因此调用方不需要批量迁移。`main.js` 在初始化时向 `context.js` 注入表格 UI 和 Overlay 动作，向 `table.js` 注入 render；这消除了 `table → context → overlay → table` 静态循环，同时保留原来的同步重绘时序。
 
@@ -189,7 +190,7 @@ npm test
 npm run test:e2e
 ```
 
-当前单元测试覆盖分组与时间编号、固定表头关联、adapter/rowKey、HTML/ARIA 行语义、分页器作用域、技能数据源 DOM 恢复、模块无环边界、上下文隔离、token 预算、SSE chunk 边界、onboarding、Markdown/CSV 导出、模型新增草稿、技能导入去重、虚拟滚动规则、采集完成语义、技能 mutation/revision、旧版与新版 frame/表格定位、工作台会话状态、运行时文件装载，以及单表/多表请求分区、空单元格对齐、预算公平分配和数据完整性判断。静态回归负责全部源文件语法、Manifest 入口、调试日志、demo HTML 结构和关键导出检查。真实 Chrome E2E 还覆盖技能新建、修改、跨页多数据源持久化、按列分析自动执行 / 手动更新、页面访问频控、测试全部载入、“满意并保存”、执行全部载入、临时 CSV/XLSX 和每个数据源条数展示。
+当前单元测试覆盖分组与时间编号、固定表头关联、adapter/rowKey、HTML/ARIA 行语义、分页器作用域、技能数据源 DOM 恢复、模块无环边界、上下文隔离、token 预算、SSE chunk 边界、onboarding、Markdown/CSV 导出、模型新增草稿、技能导入去重、虚拟滚动规则、采集完成语义、技能 mutation/revision、旧版与新版 frame/表格定位、工作台会话状态、运行时文件装载，以及单表/多表请求分区、空单元格对齐、预算公平分配和数据完整性判断。业务页签框架（jtv1）覆盖页签 DOM 识别（realTab / ant Tabs / jtv1 特征门控）、激活态判定、`?n=` 直达 URL 生成与 pageKey 兼容。静态回归负责全部源文件语法、Manifest 入口、调试日志、demo HTML 结构和关键导出检查。真实 Chrome E2E 还覆盖技能新建、修改、跨页多数据源持久化、按列分析自动执行 / 手动更新、页面访问频控、测试全部载入、“满意并保存”、执行全部载入、临时 CSV/XLSX 和每个数据源条数展示，以及 jtv1 表格识别、多业务页签数据源状态互转、多表数据源兜底。
 
 ## 10. 技能数据源与执行
 
@@ -226,6 +227,20 @@ Chat 的“全部技能”区域继续按全局统一顺序编号。当前页面
 保存后的技能会在对应业务数据源上方注入可换行的“技能列表：”横条。点击“执行”先进入全屏执行页，用户再次点击“执行技能”后才开始采集和模型调用。每个数据源 Tab 显示采集中累计条数或完成后的总条数；首次回答后可以继续提问，后续请求携带初次分析及已完成问答。
 
 技能横条的数据源状态判断统一覆盖整表分析与按列分析。无论技能类型，只要当前数据源处于 `changed`、`missing` 或 `ambiguous`，对应条目都会灰化，并禁用“执行”或“自动执行 / 更新”等交互；同时保留 hover 提示，引导用户切换到正确页面或重新绑定数据源。
+
+### 业务页签框架（jtv1 / 聚水潭 epaas）
+
+聚水潭 epaas（`https://www.erp321.com/epaas`）这类多页签 SPA 框架把所有业务页签内嵌在 iframe 里：顶层 URL 不随业务切换变化，业务区分依赖页面内的“业务页签”而非地址栏。`business-tab-dom.js` 统一两套页签 DOM 识别：老框架的 `realTab`（class 以 `-realTab` 结尾）与聚水潭 ant Tabs（`.ant-tabs-tab-btn` + `aria-selected` 激活态）。ant Tabs 分支仅在页面呈现 jtv1 特征时启用，不影响只含 realTab 的旧框架，也不影响普通单页站点。
+
+**jtv1 判定**（`isJtv1LikePage`）有两条路径，任一为真即判定：(a) 顶层 `location.pathname === /epaas`（覆盖框架首页与所有业务页）；(b) DOM 特征命中 `#_jt`（聚水潭表格根）、`iframe[src*='.aspx']`（业务 iframe）或 `iframe[id^='epaas-tab-']`（页签 iframe，欢迎页签常驻）。路径判定最稳；DOM 判定不限域名，聚水潭系其他产品（如 `sc.scm121.com` 分销版）若复用 `#_jt` 组件或 `.aspx` iframe 也可能命中，需结合其页签激活标记确认行为。
+
+**页签维度的技能归属**。普通站点按顶层 `pageKey`（origin+pathname）归属；jtv1 下顶层 URL 对所有业务页签相同，`loadSkills` 改用 `source.businessTabTitle === 当前激活页签标题` 判定“当前页技能”。激活标题优先取 DOM 的 `aria-selected="true"`，无标记时回退到已确认标题或最后一个页签。无 `businessTabTitle` 的历史数据回退 pageKey，升级后技能不会消失。`businessTabTitle` 在绑定（`SKILL_TABLE_PICK_RESULT` 取 `GET_PAGE_IDENTITY.activeBusinessTabTitle`）与历史补齐（`LEARN_SOURCE_BUSINESS_TAB`，只填空值不覆盖）两个阶段写入 source 并持久化。数据源所属页签不在当前打开页签列表里时判定“页签已关闭”，技能从当前页隐藏。
+
+**面板分组与直达 URL**。`overlay.js` 的“其他页面技能”按 `source.businessTabTitle` 分组（与当前页类型无关，跨框架查看也能分页签显示），分组名为页签标题原文。带页签标题的 source 会跳过技能级 pageKey 兜底分组，避免同一技能同时出现在“顶层页面名”和“页签标题”两个分组。直达 URL 规则为 `?n=页签标题原文`（如 `https://www.erp321.com/epaas?n=采购单管理`），仅当 source 本身是 `/epaas` 路径时由 `overlay.js` 的 `directUrlFor` 拼接；`?n=` 不影响 pageKey（origin+pathname）匹配，因此不干扰 background 的 URL 校验。其他框架（如 `sc.scm121.com`）没有 `/epaas` 路径，`directUrlFor` 返回空并回退到 source 原始 `pageUrl`。
+
+**跳转与重开**。点击“其他页面技能”分组走 `switchToSkillPage` → background `SWITCH_TO_SKILL_PAGE`：先按 pageKey 找到目标浏览器 tab，若 source 带 `businessTabTitle` 则向顶帧发 `ACTIVATE_BUSINESS_PAGE_TAB` 激活对应业务页签（`main.js` 在 `findBusinessTabElements` 里按标题找页签并 dispatch click，realTab 优先于 ant Tabs）；激活失败（页签已关闭）时用 `?n=` 直达 URL 导航重开，再打开技能面板并聚焦高亮数据源表格。前端传单个 source 对象（不是 `focusSources` 数组），background 据此读取 `businessTabTitle`；`focusSources` 数组仅作聚焦兜底。
+
+**执行链路的页签激活**。采集（`LOAD_SKILL_SOURCE_DATA`）、预览（`EXTRACT_SKILL_SOURCE_PREVIEW_DATA`）、分页探测（`INSPECT_SKILL_SOURCE_PAGINATION`）在定位数据源前，若 source 带 `businessTabTitle` 会先尝试激活对应业务页签再校验。技能横条（`renderSkillBars`）按 `frameUrl === pageKey(location.href)` 定位目标 frame，jtv1 每个业务页签 iframe 的 src 不同，天然按页签区分，无需特殊处理。jtv1 表格（`#_jt` 写死高度的虚拟滚动表）上方注入技能横条时，会按横条实际高度等量压缩 `#_jt` 与 `#_jt_body` 高度，保持底部翻页器可见；压缩基于容器当前实测高度按比例计算、幂等（横条每 3s 重建不叠加误差），以适配框架按视口/手动拖拽动态算高的特性。
 
 ### 按列分析运行时
 

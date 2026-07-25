@@ -5,6 +5,7 @@
  */
 
 import { DEBUG } from "./state.js";
+import { resolveTableAdapter } from "./table-adapters.js";
 
 const DERIVED_COLUMN_SELECTOR = "[data-web2ai-derived-column]";
 const WEB2AI_UI_SELECTOR = "[data-web2ai-ui],[id^='web2ai_']";
@@ -37,6 +38,14 @@ function normalizeBusinessText(value) {
 
 function getRawRowCells(rowEl) {
   if (!rowEl) return [];
+
+  // 0. 适配器接管：特定表格组件（如 _jtv1 聚水潭）自带单元格语义，与通用逻辑隔离
+  const { adapter } = resolveTableAdapter(rowEl);
+  if (adapter?.rowCells) {
+    const cells = adapter.rowCells(rowEl);
+    if (cells) return cells;
+  }
+
   const tag = rowEl.tagName?.toLowerCase();
 
   // 1. 标准 HTML 表格 <tr>
@@ -60,12 +69,12 @@ function getRawRowCells(rowEl) {
   if (semanticCells.length) return Array.from(semanticCells);
 
   // 4. 兜底：取直接子元素中非 script/style/template 的作为单元格
+  //    过滤 display:none 隐藏列，保持与表头列数一致
   return Array.from(rowEl.children).filter((child) => {
     const tagName = child.tagName?.toLowerCase();
-    return tagName !== "script" &&
-      tagName !== "style" &&
-      tagName !== "template" &&
-      tagName !== "noscript";
+    if (tagName === "script" || tagName === "style" || tagName === "template" || tagName === "noscript") return false;
+    if (child.style?.display === "none") return false;
+    return true;
   });
 }
 

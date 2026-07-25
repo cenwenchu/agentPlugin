@@ -1,0 +1,178 @@
+<!doctype html><meta charset="utf-8"><title>Web2AI E2E — _jtv1 聚水潭 ERP</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  ._jt_cell_head { padding: 4px 8px; border-bottom: 1px solid #e8e8e8; background: #fafafa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ._jt_cell { padding: 4px 8px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ._jt_row { display: flex; }
+  ._jt_row:hover { background: #f5f5f5; }
+  #_jt_row_head_list { display: flex; }
+  #_jt_row_head { border-bottom: 2px solid #d9d9d9; }
+  ._jt_pagebtn { display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center; border: 1px solid #d9d9d9; border-radius: 2px; margin: 0 2px; cursor: pointer; }
+  ._jt_pagebtn_disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+
+<div id="_jt">
+<table id="_jt_toolbar">
+  <tbody>
+    <tr>
+      <td>新增采购单 审核生效 预约到货 生成入库单 保存 完成/取消完成 取消审核 作废/删除 批量修改 合并 打印 导出 TaoWorld推单 聚货通推单 微信群推单 跟单 设置运营云仓 更多</td>
+      <td id="_jt_toolbar_right">采购单设置采购自动下单筛选设置列设置权限设置</td>
+    </tr>
+  </tbody>
+</table>
+
+<div id="_jt_row_head" class="_jtv1">
+  <div id="_jt_row_head_list">
+    <div class="_jt_cell_head _jt_cell_head_index" style="width: 36px;">&nbsp;</div>
+    <div class="_jt_cell_head _jt_cbx" style="width: 28px;"><input type="checkbox"></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 120px;"><span>采购单号</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>原始采购单号</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 120px;"><span>采购日期</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>订单店铺名称</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 200px;"><span>供应商</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 60px;"><span>状态</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>编辑</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 80px;"><span>标记|多标签</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 80px;"><span>总商品量</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 80px;"><span>总金额</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>最早预计到货日期</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>预计到货数量</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 80px;"><span>总入库数</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>差异数</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>退货数</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>质检数</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 80px;"><span>收货状态</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>采购单类型</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="width: 200px;"><span>备注</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>收货地址</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>仓储方</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>运营云仓</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>物流单号</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>物流公司</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>物流状态</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>运费</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>采购员</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>审核日期</span></div>
+    <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>最后修改日期</span></div>
+  </div>
+</div>
+
+<div id="_jt_body" style="height: 120px; overflow-x: auto; overflow-y: auto;">
+<div id="_jt_body_list" style="border-bottom-width: medium; border-bottom-style: none; width: 3370px;">
+
+<!-- Row 0 -->
+<div class="_jt_row _jt_rh" index="0">
+  <div class="_jt_cell _jt_cell_index _jt_ch" style="width: 36px;">1</div>
+  <div class="_jt_cell _jt_ch" style="width: 28px;"><input type="checkbox"></div>
+  <div class="_jt_cell _jt_ch" style="width: 120px;">389502</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 120px;">2026-07-15 10:18:09</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 200px;">DKW0001E1</div>
+  <div class="_jt_cell _jt_ch" style="width: 60px; background: #abd46e; color: #fff;">已确认</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px; text-align: right;">946</div>
+  <div class="_jt_cell _jt_ch" style="width: 80px; text-align: right;">60414.39</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px; text-align: right;">944</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px;">部分入库</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 200px;">257X1C809N返折18箱</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+</div>
+
+<!-- Row 1 -->
+<div class="_jt_row _jt_rh" index="1">
+  <div class="_jt_cell _jt_cell_index _jt_ch" style="width: 36px;">2</div>
+  <div class="_jt_cell _jt_ch" style="width: 28px;"><input type="checkbox"></div>
+  <div class="_jt_cell _jt_ch" style="width: 120px;">388885</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 120px;">2026-07-13 14:32:22</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 200px;">DKW0001E1</div>
+  <div class="_jt_cell _jt_ch" style="width: 60px; background: #abd46e; color: #fff;">已确认</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px; text-align: right;">2231</div>
+  <div class="_jt_cell _jt_ch" style="width: 80px; text-align: right;">216395.52</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px; text-align: right;">2221</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px;">部分入库</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 200px;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+</div>
+
+<!-- Row 2 -->
+<div class="_jt_row _jt_rh" index="2">
+  <div class="_jt_cell _jt_cell_index _jt_ch" style="width: 36px;">3</div>
+  <div class="_jt_cell _jt_ch" style="width: 28px;"><input type="checkbox"></div>
+  <div class="_jt_cell _jt_ch" style="width: 120px;">384407</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 120px;">2026-07-06 16:55:44</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 200px;">DKW0001E1</div>
+  <div class="_jt_cell _jt_ch" style="width: 60px; background: #abd46e; color: #fff;">已确认</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px; text-align: right;">1831</div>
+  <div class="_jt_cell _jt_ch" style="width: 80px; text-align: right;">160884.09</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px; text-align: right;">1830</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 80px;">部分入库</div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="width: 200px;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+  <div class="_jt_cell _jt_ch" style="display: none;"></div>
+</div>
+
+</div>
+</div>
+
+<div id="_jt_pagebar" style="margin-top:12px;">
+  <span class="_jt_label">共 56条 1/3页 </span>
+  <span title="首页" class="_jt_pagebtn_disabled _jt_first"></span>
+  <span title="上一页" class="_jt_pagebtn_disabled _jt_pre"></span>
+  <span title="下一页" class="_jt_pagebtn _jt_next"></span>
+  <span title="尾页" class="_jt_pagebtn _jt_last"></span>
+</div>
+</div>

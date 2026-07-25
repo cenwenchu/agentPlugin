@@ -142,7 +142,7 @@ function findLiveTableByIndex(fallbackRoot, tableIndex) {
 
 function getTableRowTexts(root) {
   if (!root) return [];
-  const rows = root.querySelectorAll?.("tbody tr, tr, [role='rowgroup'] [role='row'], [role='row']") || [];
+  const rows = root.querySelectorAll?.("tbody tr, tr, [role='rowgroup'] [role='row'], [role='row'], ._jt_row._jt_rh") || [];
   const texts = [];
   for (const r of rows) {
     if (!getRowCells(r).length) continue;
@@ -286,6 +286,10 @@ function findPaginationNextButton(anchorRowEl) {
       p.querySelector?.(`.vxe-pager--next-btn:not(.${VXE_PAGER_DISABLED})`) ||
       p.querySelector?.(`.vxe-pager .btn-next:not(.${VXE_PAGER_DISABLED})`);
     if (vxe && (!drawerContainer || drawerContainer.contains(vxe))) return vxe;
+    // _jtv1（聚水潭 ERP）：下一页是 span._jt_next，未禁用态无 _jt_pagebtn_disabled。
+    // 注意：分页容器只有 id 没有 class（#_jt_pagebar 的 classList 为空），不能用类选择器
+    const jtv1 = p.querySelector?.("#_jt_pagebar ._jt_next:not(._jt_pagebtn_disabled)");
+    if (jtv1 && (!drawerContainer || drawerContainer.contains(jtv1))) return jtv1;
     const ariaNext =
       p.querySelector?.(
         "button[aria-label*='下一页']:not([disabled]):not([aria-disabled='true']),a[aria-label*='下一页']"

@@ -25,7 +25,8 @@ import { buildOnboardingPrompt, createFallbackOnboarding, parseOnboardingRespons
 import { highlightRow, removePinnedRowOverlay, syncRowCheckboxState, updateBatchBar, hideTableRowFab, ensureTableRowFab, setTableAskAiEnabled, setTableSelectionEnabled } from './table.js';
 import { showToast } from './toast.js';
 import { showConfirmDialog, showPromptDialog } from './dialog.js';
-import { createSkillDraft, cancelSkillDraft, selectSkillTable, saveSkillDraft, rebindSkill, removeSkillDraftSource, deleteSkill, deleteAllSkills, switchToSkillPage, renameCurrentSkillPage, buildAnalysisPrompt, downloadSkillsExport, previewSkillsImport, applySkillsImport, reloadSkills } from './skills.js';
+import { createSkillDraft, cancelSkillDraft, selectSkillTable, saveSkillDraft, rebindSkill, removeSkillDraftSource, deleteSkill, deleteAllSkills, switchToSkillPage, renameCurrentSkillPage, buildAnalysisPrompt, downloadSkillsExport, previewSkillsImport, applySkillsImport, reloadSkills, getBusinessPageTabs } from './skills.js';
+import { isJtv1LikePage, jtv1SourceDirectUrl } from './business-tab-dom.js';
 import {
   DEFAULT_DERIVED_METHOD_VERSION,
   SKILL_TYPE_DERIVED_COLUMN,
@@ -1151,33 +1152,75 @@ function render() {
     // 序号基于“全部技能”的统一顺序生成；当前页筛选和页面切换只引用这张
     // 映射，不会在每个页面重新从 1 编号。
     const skillNumberById = new Map(STATE.skillCatalog.map((skill, index) => [skill.id, index + 1]));
+    // jtv1：按业务页签标题分组（顶层 pageKey 对所有页签相同，无法区分）。
+    // 分组 key = 页签标题原文，label 直接取标题，pageUrl 用 ?n=标题 直达地址。
+    // 注意：是否按页签分组取决于 source 是否带 businessTabTitle，与当前页类型无关——
+    // 这样在其它框架（如 tool.jushuitan.com）查看 epaas 技能时也能正确分页签显示。
+    const currentIsJtv1 = isJtv1LikePage();
+    const jtv1ActiveTitle = currentIsJtv1 ? (getBusinessPageTabs().activeTitle || "") : "";
+    // 返回 source 的页签标题；无标题返回 null 走原 pageKey 分组逻辑
+    const jtv1GroupOf = (source) => {
+      if (!source) return null;
+      const title = String(source.businessTabTitle || "").replace(/\s+/g, " ").trim();
+      return title || null;
+    };
+    // 由 source.pageUrl 推导 epaas origin 拼 ?n= 直达地址（不依赖当前页 location）。
+    // 仅当 source 本身就是 /epaas 路径时才拼；其他框架（如 sc.scm121.com）没有
+    // /epaas 路径，返回空走原 pageUrl。逻辑共享自 business-tab-dom 便于单测。
+    const directUrlFor = (source, tabTitle) => jtv1SourceDirectUrl(source?.pageUrl, tabTitle);
     for (const skill of STATE.skillCatalog) {
       const relatedPages = new Map();
-      relatedPages.set(skill.pageKey, {
-        pageKey: skill.pageKey,
-        pageUrl: skill.pageUrl,
-        pageTitle: skill.pageTitle,
-        source: (skill.sources || []).find((source) => source.pageKey === skill.pageKey) || skill.source || null
-      });
-      for (const source of skill.sources || [skill.source].filter(Boolean)) {
+      const addRelatedPage = (key, info) => {
+        if (!key) return;
+        if (!relatedPages.has(key)) relatedPages.set(key, info);
+      };
+      // 技能的 pageKey 维度条目（兜底分组）。若该技能任一 source 已按业务页签分组，
+      // 则跳过 pageKey 兜底——否则同一技能会同时出现在"顶层页面名"和"页签标题"两个分组。
+      const skillSources = skill.sources || [skill.source].filter(Boolean);
+      const hasTabGroupedSource = skillSources.some((source) => Boolean(jtv1GroupOf(source)));
+      if (!hasTabGroupedSource) {
+        addRelatedPage(skill.pageKey, {
+          groupKey: skill.pageKey,
+          pageKey: skill.pageKey,
+          pageUrl: skill.pageUrl,
+          pageTitle: skill.pageTitle,
+          label: STATE.skillPageNames[skill.pageKey] || skill.pageTitle || skill.pageKey,
+          source: skillSources.find((source) => source.pageKey === skill.pageKey) || skill.source || null
+        });
+      }
+      for (const source of skillSources) {
+        const tabTitle = jtv1GroupOf(source);
+        if (tabTitle) {
+          // jtv1：页签标题作为分组 key 和展示名；直达 URL 由 source.pageUrl 推导 origin
+          addRelatedPage(`tab:${tabTitle}`, {
+            groupKey: `tab:${tabTitle}`,
+            pageKey: source.pageKey || skill.pageKey,
+            pageUrl: directUrlFor(source, tabTitle) || source.pageUrl,
+            pageTitle: tabTitle,
+            label: tabTitle,
+            source
+          });
+          continue;
+        }
         if (!source.pageKey) continue;
-        relatedPages.set(source.pageKey, {
+        addRelatedPage(source.pageKey, {
+          groupKey: source.pageKey,
           pageKey: source.pageKey,
           pageUrl: source.pageUrl,
           pageTitle: source.pageTitle,
+          label: STATE.skillPageNames[source.pageKey] || source.pageTitle || source.pageKey,
           source
         });
       }
       for (const page of relatedPages.values()) {
-        if (!page.pageKey) continue;
-        const group = pageGroups.get(page.pageKey) || {
+        if (!page.groupKey) continue;
+        const group = pageGroups.get(page.groupKey) || {
           ...page,
           count: 0,
           skills: [],
           // 切换到其他页面时，不应盲用分组里的第一个技能；这里保留该页面
           // 的候选数据源列表，后续按顺序尝试，直到定位到第一个有效技能。
-          focusSources: [],
-          label: STATE.skillPageNames[page.pageKey] || page.pageTitle || page.pageKey
+          focusSources: []
         };
         group.count++;
         group.skills.push(skill);
@@ -1188,11 +1231,20 @@ function render() {
           }
           if (!group.source) group.source = page.source;
         }
-        pageGroups.set(page.pageKey, group);
+        pageGroups.set(page.groupKey, group);
       }
     }
-    const otherPages = [...pageGroups.values()].filter((group) => group.pageKey !== currentPageKey);
-    const currentPageName = STATE.skillPageNames[currentPageKey] || STATE.skills[0]?.pageTitle || document.title || currentPageKey;
+    // 排除"当前页"分组：当前页是 jtv1 时排除当前激活页签分组；其他情况排除当前顶层 pageKey
+    const otherPages = [...pageGroups.values()].filter((group) => {
+      if (currentIsJtv1 && group.groupKey?.startsWith("tab:")) {
+        return group.label !== jtv1ActiveTitle;
+      }
+      return group.pageKey !== currentPageKey;
+    });
+    // jtv1 等多页签框架：顶层 URL/标题对所有业务页签相同，当前页名称改用激活的业务页签标题
+    const activeTabTitle = isJtv1LikePage() ? (getBusinessPageTabs().activeTitle || "") : "";
+    const currentPageName = activeTabTitle
+      || STATE.skillPageNames[currentPageKey] || STATE.skills[0]?.pageTitle || document.title || currentPageKey;
     if (!otherPages.length) {
       STATE.skillCatalogExpanded = false;
       STATE.skillCatalogCanToggle = false;
@@ -1685,7 +1737,9 @@ function render() {
               class: "skillPageLink",
               title: group.pageKey,
               // “其他页面技能”区域只负责切页和摘要展示，不再承担单技能删除入口。
-              onClick: () => switchToSkillPage(group.pageKey, group.pageUrl, group.focusSources)
+              // source 传单个对象（background 用它取 businessTabTitle 激活页签），
+              // focusSources 数组仅作为聚焦兜底。
+              onClick: () => switchToSkillPage(group.pageKey, group.pageUrl, group.source || group.focusSources?.[0] || null)
             }, [
               el("span", { class: "skillPageName" }, [`【${group.label}】`]),
               " ",

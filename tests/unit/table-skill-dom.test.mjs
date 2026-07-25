@@ -511,3 +511,63 @@ test("scored locator returns ambiguous when multiple visible tables are equally 
     cleanup();
   }
 });
+
+test("jtv1 source data ignores nested toolbar table and aligns visible cells with headers", () => {
+  const cleanup = installDom(`
+    <div id="_jt">
+      <table id="_jt_toolbar"><tbody><tr>
+        <td>新增采购单 审核生效 更多</td>
+        <td id="_jt_toolbar_right">采购单设置采购自动下单筛选设置列设置权限设置</td>
+      </tr></tbody></table>
+      <div id="_jt_row_head" class="_jtv1">
+        <div id="_jt_row_head_list">
+          <div class="_jt_cell_head _jt_cell_head_index">&nbsp;</div>
+          <div class="_jt_cell_head _jtv1 _jt_cbx"><input type="checkbox"></div>
+          <div class="_jt_cell_head _jtv1 nobr"><span>采购单号</span></div>
+          <div class="_jt_cell_head _jtv1 nobr" style="display: none;"><span>原始采购单号</span></div>
+          <div class="_jt_cell_head _jtv1 nobr"><span>供应商</span></div>
+          <div class="_jt_cell_head _jtv1 nobr"><span>状态</span></div>
+        </div>
+      </div>
+      <div id="_jt_body">
+        <div class="_jt_row _jt_rh" index="0">
+          <div class="_jt_cell _jt_cell_index _jt_ch">1</div>
+          <div class="_jt_cell _jt_ch"><input type="checkbox"></div>
+          <div class="_jt_cell _jt_ch">392643</div>
+          <div class="_jt_cell _jt_ch" style="display: none;"></div>
+          <div class="_jt_cell _jt_ch">杭州信驰眼镜有限公司</div>
+          <div class="_jt_cell _jt_ch">待审核</div>
+        </div>
+        <div class="_jt_row _jt_rh" index="1">
+          <div class="_jt_cell _jt_cell_index _jt_ch">2</div>
+          <div class="_jt_cell _jt_ch"><input type="checkbox"></div>
+          <div class="_jt_cell _jt_ch">392644</div>
+          <div class="_jt_cell _jt_ch" style="display: none;"></div>
+          <div class="_jt_cell _jt_ch">台州供货商</div>
+          <div class="_jt_cell _jt_ch">已入库</div>
+        </div>
+      </div>
+    </div>
+  `);
+  try {
+    const source = {
+      selector: "#_jt",
+      selectorStrength: "stable-id",
+      headers: ["采购单号", "供应商", "状态"],
+      locatorVersion: 2
+    };
+    const data = extractStoredSourceData(source);
+    assert.equal(data.found, true);
+    assert.deepEqual(data.headers, ["采购单号", "供应商", "状态"]);
+    assert.equal(data.rowCount, 2);
+    assert.deepEqual(data.rows, [
+      ["392643", "杭州信驰眼镜有限公司", "待审核"],
+      ["392644", "台州供货商", "已入库"]
+    ]);
+    const preview = extractStoredSourcePreviewData(source);
+    assert.equal(preview.found, true);
+    assert.deepEqual(preview.rows, data.rows);
+  } finally {
+    cleanup();
+  }
+});
