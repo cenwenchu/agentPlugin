@@ -6,6 +6,14 @@
  * top frame 负责技能目录、页面归属和状态汇总。持久化读取仍直接使用 storage，
  * 写入统一交给 background 串行 mutation；全屏工作台的采集、提交与继续问
  * 主流程位于 skill-workspace-controller.js，overlay.js 只保留壳层入口与渲染。
+ *
+ * jtv1 页面（聚水潭/ERP321）特殊处理：
+ *   - pageWatchTimer 同时监控 pageKey() 和 location.href，确保同 pageKey
+ *     内 SPA 切 Tab（query 参数变化）能触发技能列表刷新
+ *   - 两阶段 MutationObserver 捕获业务 Tab 异步切换：
+ *     Phase 1（childList）：Tab 元素首次出现在 DOM → 首次 loadSkills
+ *     Phase 2（aria-selected）：激活 Tab 切换（如框架默认首页 → 业务页签）→
+ *       自动刷新技能列表，解决首次进入业务页面技能列表不出现的问题
  */
 
 import { DEBUG, IS_TOP_FRAME, STATE, compactOneLine, refs, uid, web2aiDiagnosticsEnabled } from "./state.js";

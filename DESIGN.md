@@ -242,6 +242,8 @@ Chat 的“全部技能”区域继续按全局统一顺序编号。当前页面
 
 **执行链路的页签激活**。采集（`LOAD_SKILL_SOURCE_DATA`）、预览（`EXTRACT_SKILL_SOURCE_PREVIEW_DATA`）、分页探测（`INSPECT_SKILL_SOURCE_PAGINATION`）在定位数据源前，若 source 带 `businessTabTitle` 会先尝试激活对应业务页签再校验。技能横条（`renderSkillBars`）按 `frameUrl === pageKey(location.href)` 定位目标 frame，jtv1 每个业务页签 iframe 的 src 不同，天然按页签区分，无需特殊处理。**性能**：`renderSkillBars` 与 3s 低频重建定时器先做 `frameHasMatchingSkill` 判断（仅比较 `source.frameUrl` 与本 frame URL，不定位表格）——当前 frame 无任何匹配技能时直接早退/不启动定时器，避免无技能 frame 每 3s 空转全文档扫描；有匹配的 frame 仍保留 3s 重建以兜底业务框架整块替换表格 DOM（横条丢失需重建，不能按"技能/页面无变化"跳过）。jtv1 表格（`#_jt` 写死高度的虚拟滚动表）上方注入技能横条时，会按横条实际高度等量压缩 `#_jt` 与 `#_jt_body` 高度，保持底部翻页器可见；压缩基于容器当前实测高度按比例计算、幂等（横条每 3s 重建不叠加误差），以适配框架按视口/手动拖拽动态算高的特性。
 
+**首次加载与页签切换检测**。`initSkills` 中的 `pageWatchTimer` 在 jtv1 页面额外监控 `location.href` 变化，处理 SPA 框架内同一 pageKey 下的查询参数切换（如 `?n=` 直达不同业务页签）。业务页签的加载采用两阶段 MutationObserver：（1）**Phase 1（childList）**：检测页签 DOM 元素的出现 → 触发首次 `loadSkills`；（2）**Phase 2（aria-selected）**：监听 Ant Design 页签的 `aria-selected` 属性变化 → 在活跃页签切换时（如从框架首页切到业务页签）自动刷新技能列表。
+
 ### 按列分析运行时
 
 “按列分析”是面向当前页逐行生成 AI 结论的技能类型，内部类型名继续使用 `derived-column`。测试预览与正式运行共用字段选择、分析方法、输出列名和批次预算规则，但正式运行不会进入全屏工作台，而是直接在页面表格中以原生插列方式展示结果。
@@ -261,7 +263,11 @@ Chat 的“全部技能”区域继续按全局统一顺序编号。当前页面
 - `pageGuardKey = pageKey + modelId` 负责统计当前页面对当前模型的总请求额度。
 - `pageListGuardKey = pageGuardKey + listSignature` 仅用于描述“这次被拦截时看到的是哪一版列表”。
 
-列表变化时允许重新进入调度判断，但不会重置 `pageGuardKey` 下已经累计的请求次数。因此“翻页后允许重试”不等于“翻页后获得新的总额度”。
+列表变化时允许重新进入调度判断，但不会重置 `pageGuardKey` 下已经累计的请求次数。因此"翻页后允许重试"不等于"翻页后获得新的总额度"。
+
+**占位渲染**。`renderDerivedRuntimePlaceholders()` 在 LLM 请求进行中同步插入加载占位 DOM：使用缓存的 `lastRenderOptions` 为缺少派生列的行立即生成列单元，使表格列结构先出现、内容后续填充（"列先出现，内容后填充"模式）。当 Observer 检测到新行加入 DOM 且对应 controller 处于运行状态时，自动触发占位渲染，确保虚拟滚动或翻页产生的新行无需等待 LLM 返回即可获得列 DOM。
+
+**关闭清理优化**。`stopDerivedColumnRuntime` 在表格根元素上挂载 MutationObserver，监听 childList 新增并实时清理虚拟滚动回收行重新进入 DOM 时残留的派生列单元格。清理采用多轮延迟策略 [1500ms, 4000ms, 10000ms]，替代原先的单次 1500ms 延迟。Observer 在 30 秒后自动断开；若技能被重新启用则跳过清理。
 
 按列分析缓存以 `analysisFingerprint + rowFingerprint` 为键，先写入页面内存，再镜像到 `chrome.storage.session`。缓存默认保留 2 小时，回到上一页时会优先命中缓存恢复，不重复请求模型；点击“更新”时会显式绕过缓存并强制重新分析当前页。
 

@@ -1,5 +1,23 @@
 /**
  * @fileoverview 按列分析运行期控制器。
+ *
+ * 负责技能自动运行调度、LLM 请求批处理、结果缓存与渲染。
+ *
+ * 核心流程：
+ *   1. scheduleDerivedColumnRuntime / triggerDerivedColumnRuntime 创建或复用 controller
+ *   2. observer（1500ms setInterval）监控 jtv1 虚拟滚动与 DOM 变化
+ *      - scroll-stale 检测（scrollGeneration 变化 + 600ms 滚动静默）→ 触发重算
+ *      - 占位渲染：在 LLM 飞行期间，新出现行的派生列同步插入 loading 占位 DOM，
+ *        实现"列先出现，内容后填充"
+ *   3. runDerivedRuntimeSkill 定位数据源 → 构建行指纹 → 查缓存 → LLM 批处理
+ *      - Session Storage 双层缓存：analysisFingerprint + rowFingerprint
+ *      - recent 结果复用：避免短时间内滚动回来重复请求
+ *   4. stopDerivedColumnRuntime 文档级清理 + MutationObserver 实时残留回收
+ *      - 多轮延时清理（1.5s / 4s / 10s）作为兜底
+ *      - 30s MutationObserver 监控表格根节点，行回收重入 DOM 时立即清除残留
+ *
+ * 页面频控：按 pageKey + modelId 维度累计，列表内容变化只影响调度判断，
+ * 不重置窗口内总请求次数。pageRequestLimitPerMinute 由 DEFAULT_MODEL_PROFILE 控制。
  */
 
 import { STATE, web2aiDiagnosticsEnabled } from "./state.js";
@@ -458,48 +476,14 @@ function restoreRecentRuntimeResults(controller, {
   pendingRows = []
 } = {}) {
   const recent = controller?.lastCompletedResult;
-  if (!recent) {
-    console.warn("[web2ai.diag] restoreRecent-fail", { reason: "no-recent-result" });
-    return null;
-  }
+  if (!recent) return null;
   const pendingSignature = buildPendingFingerprintSignature(pendingRows);
-  if (!analysisFingerprint || !pendingSignature) {
-    console.warn("[web2ai.diag] restoreRecent-fail", { reason: "empty-fingerprint-or-signature", analysisFingerprint: !!analysisFingerprint, pendingSignature: !!pendingSignature });
-    return null;
-  }
-  if (recent.analysisFingerprint !== analysisFingerprint) {
-    console.warn("[web2ai.diag] restoreRecent-fail", {
-      reason: "analysisFingerprint-mismatch",
-      recent: recent.analysisFingerprint?.substring(0, 16) + "...",
-      current: analysisFingerprint.substring(0, 16) + "..."
-    });
-    return null;
-  }
-  if (recent.pendingSignature !== pendingSignature) {
-    console.warn("[web2ai.diag] restoreRecent-fail", {
-      reason: "pendingSignature-mismatch",
-      recentLen: recent.pendingSignature?.length,
-      currentLen: pendingSignature.length
-    });
-    return null;
-  }
-  if (Date.now() - Number(recent.completedAt || 0) > DERIVED_RUNTIME_RECENT_RESULT_TTL_MS) {
-    console.warn("[web2ai.diag] restoreRecent-fail", {
-      reason: "ttl-expired",
-      age: Date.now() - Number(recent.completedAt || 0),
-      ttl: DERIVED_RUNTIME_RECENT_RESULT_TTL_MS
-    });
-    return null;
-  }
+  if (!analysisFingerprint || !pendingSignature) return null;
+  if (recent.analysisFingerprint !== analysisFingerprint) return null;
+  if (recent.pendingSignature !== pendingSignature) return null;
+  if (Date.now() - Number(recent.completedAt || 0) > DERIVED_RUNTIME_RECENT_RESULT_TTL_MS) return null;
   const resultMap = new Map(Array.isArray(recent.results) ? recent.results : []);
-  if (!resultMap.size) {
-    console.warn("[web2ai.diag] restoreRecent-fail", { reason: "empty-result-map" });
-    return null;
-  }
-  console.warn("[web2ai.diag] restoreRecent-ok", {
-    resultCount: resultMap.size,
-    pendingCount: pendingRows.length
-  });
+  if (!resultMap.size) return null;
   return {
     resultMap,
     pendingSignature
@@ -641,18 +625,35 @@ async function locateRuntimeSource(skill) {
   return { table: located.table, headers, source };
 }
 
+/**
+ * 同步占位渲染：在 observer 检测到缺失派生列时立即插入 loading 占位 DOM，
+ * 不等 async 的 locateRuntimeSource + LLM 调用完成。利用 controller 上缓存
+ * 的 lastRenderOptions 避免重新走定位链路，实现"列先出现，内容后填充"。
+ * jtv1 虚拟滚动场景下，用户滚动后能立即看到列占位，不必等 AI 返回。
+ */
+function renderDerivedRuntimePlaceholders(controller) {
+  const { skillId, root, lastRenderOptions } = controller;
+  if (!root?.isConnected || !lastRenderOptions) return 0;
+  const adapterRows = dataRowsInTable(root);
+  const candidates = adapterRows.length
+    ? adapterRows
+    : Array.from(root?.querySelectorAll?.(RUNTIME_TABLE_ROW_SELECTOR) || []);
+  const missingRows = [];
+  for (const rowEl of candidates) {
+    if (!rowEl?.isConnected || isHeaderRow(rowEl) || isTableFooterOrSummaryRow(rowEl)) continue;
+    if (rowEl.querySelector(`[${RUNTIME_CELL_ATTR}="${skillId}"]:not([${RUNTIME_HEADER_ATTR}])`)) continue;
+    missingRows.push({ rowEl, rowIdentity: "", status: "loading", conclusion: "", error: "" });
+  }
+  if (!missingRows.length) return 0;
+  renderDerivedRuntimeNotes(skillId, missingRows, lastRenderOptions);
+  logDerivedRuntime("placeholder-render", { skillId, missingCount: missingRows.length, rowCount: candidates.length });
+  return missingRows.length;
+}
+
 async function runDerivedRuntimeSkill(controller) {
   const { skillId } = controller;
   const currentSkill = resolveControllerSkill(controller);
   const runOptions = normalizeRuntimeRunOptions(controller.runOptions);
-  console.warn("[web2ai.diag] runDerived-start", {
-    skillId,
-    status: controller.status,
-    sessionId: controller.sessionId,
-    scrollGeneration: runtimeScrollGeneration,
-    lastScrollGeneration: controller.lastScrollGeneration,
-    runOptions
-  });
   if (!currentSkill || skillTypeOf(currentSkill) !== SKILL_TYPE_DERIVED_COLUMN) {
     logDerivedRuntime("run-skip-no-skill", {
       skillId,
@@ -700,16 +701,6 @@ async function runDerivedRuntimeSkill(controller) {
       resultSchemaVersion: DEFAULT_RUNTIME_RESULT_SCHEMA_VERSION
     });
     controller.lastAnalysisFingerprint = analysisFingerprint;
-    console.warn("[web2ai.diag] fingerprint-detail", {
-      skillId: skill.id,
-      fingerprint: analysisFingerprint.substring(0, 20) + "...",
-      sourceId: located.source.id,
-      modelId: STATE.activeModelId,
-      revision: skill.revision,
-      selectedColumnCount: (skill.selectedColumns || []).length,
-      selectedColumns: (skill.selectedColumns || []).map(c => `${c.normalizedHeader || c.header || "?"}:${c.occurrence || 1}`).join(", "),
-      methodPreview: (skill.analysisMethod?.description || "").substring(0, 30)
-    });
     const runtimeModel = buildRuntimeRows({
       skill,
       table: located.table,
@@ -771,14 +762,6 @@ async function runDerivedRuntimeSkill(controller) {
         pendingRows.push(unique);
       }
     }
-    console.warn("[web2ai.diag] run-cache-summary", {
-      skillId,
-      totalUnique: uniqueRows.length,
-      cacheHits: cachedRenderable.length,
-      cacheMisses: pendingRows.length,
-      hasSessionStorage: Boolean(globalThis.chrome?.storage?.session),
-      analysisFingerprint: analysisFingerprint.substring(0, 16) + "..."
-    });
     renderDerivedRuntimeNotes(skillId, cachedRenderable, renderOptions);
 
     if (!pendingRows.length) {
@@ -1035,7 +1018,19 @@ function ensureRuntimeObserver() {
       }
     }
     for (const controller of runtimeControllers.values()) {
-      if (controller.status === "running") continue;
+      // running 状态表示 LLM 请求正在飞行中，不应重复触发热重跑，
+      // 但 jtv1 虚拟滚动在此期间可能有新行进入 DOM 且缺少派生列占位。
+      // 对这些行做同步占位渲染——列先出现，AI 结果回填后更新内容。
+      // 注意：不更新 lastScrollGeneration，等待 status 变 complete 后
+      // 由 scroll-stale 路径触发 runDerivedRuntimeSkill 来填充内容。
+      if (controller.status === "running") {
+        if (controller.root?.isConnected &&
+            controller.root.querySelector?.("#_jt_row_head") &&
+            controller.lastScrollGeneration !== runtimeScrollGeneration) {
+          renderDerivedRuntimePlaceholders(controller);
+        }
+        continue;
+      }
       const skill = resolveControllerSkill(controller);
       if (!skill || !skillBelongsToCurrentFrame(skill)) continue;
       if (isRuntimeBlockedByCooldown(controller)) {
@@ -1062,11 +1057,6 @@ function ensureRuntimeObserver() {
         continue;
       }
       if (!skillAutoRunEnabled(skill) && !shouldKeepManualRuntimeWhenAutoDisabled(controller)) {
-        console.warn("[web2ai.diag] observer-clear-stale", {
-          skillId: controller.skillId,
-          status: controller.status,
-          hasRoot: Boolean(controller.root?.isConnected)
-        });
         clearStaleRuntimeController(controller, "auto-disabled-stale-page");
         continue;
       }
@@ -1075,33 +1065,17 @@ function ensureRuntimeObserver() {
       const rowCount = root?.isConnected ? countRenderableRuntimeRows(root) : 0;
       const hasJtv1Head = root?.querySelector?.("#_jt_row_head");
       const jtv1StaleSuppressed = Number(controller.jtv1StaleSuppressUntil || 0) > Date.now();
-      console.warn("[web2ai.diag] observer-tick", {
-        skillId: controller.skillId,
-        status: controller.status,
-        renderedCellCount,
-        rowCount,
-        hasJtv1Head: Boolean(hasJtv1Head),
-        lastScrollGen: controller.lastScrollGeneration,
-        scrollGen: runtimeScrollGeneration,
-        jtv1StaleSuppressed
-      });
       if (
         root?.isConnected &&
         controller.lastScrollGeneration !== runtimeScrollGeneration &&
         !jtv1StaleSuppressed &&
         hasJtv1Head
       ) {
-        console.warn("[web2ai.diag] observer-jtv1-scroll-stale-FIRING", {
-          skillId: controller.skillId,
-          renderedCellCount,
-          rowCount,
-          lastScrollGeneration: controller.lastScrollGeneration,
-          scrollGeneration: runtimeScrollGeneration
-        });
         controller.lastScrollGeneration = runtimeScrollGeneration;
         controller.jtv1StaleSuppressUntil = Date.now() + 3000;
         controller.sessionId = nextRuntimeSessionId();
         controller.runOptions = { manual: true };
+        renderDerivedRuntimePlaceholders(controller);
         void runDerivedRuntimeSkill(controller);
         continue;
       }
@@ -1111,26 +1085,13 @@ function ensureRuntimeObserver() {
         // 此处不重复触发热重跑，避免 unnecessary 全量重跑 → 重排 → 滚动卡顿。
         if (hasJtv1Head && renderedCellCount > 0 &&
             ["complete", "partial"].includes(String(controller.status || ""))) {
-          console.warn("[web2ai.diag] observer-missing-blocked-jtv1", {
-            skillId: controller.skillId,
-            reason: "jtv1-complete-skip",
-            renderedCellCount,
-            rowCount,
-            status: controller.status
-          });
+          // jtv1 complete 跳过重跑，但仍同步补占位（虚拟回收后新行无列）
+          renderDerivedRuntimePlaceholders(controller);
           continue;
         }
-        console.warn("[web2ai.diag] observer-missing-FIRING", {
-          skillId: controller.skillId,
-          hasRoot: Boolean(root),
-          rootConnected: Boolean(root?.isConnected),
-          renderedCellCount,
-          rowCount,
-          hasJtv1Head: Boolean(hasJtv1Head),
-          status: controller.status
-        });
         controller.sessionId = nextRuntimeSessionId();
         controller.runOptions = { manual: true };
+        renderDerivedRuntimePlaceholders(controller);
         void runDerivedRuntimeSkill(controller);
       }
     }
@@ -1158,13 +1119,6 @@ function ensureRuntimeObserver() {
           if (!sid || activeIds.has(sid)) continue;
           col.remove();
           sweepColsRemoved += 1;
-        }
-        if (sweepRemoved > 0 || sweepColsRemoved > 0) {
-          console.warn("[web2ai.diag] sweep-orphan-cleanup", {
-            activeControllerIds: [...activeIds],
-            cellsRemoved: sweepRemoved,
-            colsRemoved: sweepColsRemoved
-          });
         }
       }
     }
@@ -1350,27 +1304,51 @@ async function stopDerivedColumnRuntime(skillId = "", { clearUi = true, clearHis
     const cells = document.querySelectorAll(
       `[data-web2ai-derived-column="${normalizedSkillId}"],[data-web2ai-derived-column-col="${normalizedSkillId}"]`
     );
-    console.warn("[web2ai.diag] stopRuntime-doc-cleanup", {
-      skillId: normalizedSkillId,
-      removedCount: cells.length
-    });
     cells.forEach((node) => node.remove());
-    // jtv1 虚拟滚动回收的行在初次清理时可能不在 DOM 中，
-    // 1.5s 后追加一次清理以捕获滚动后重入 DOM 的残留单元格。
-    setTimeout(() => {
-      if (typeof document !== "undefined") {
+    // 即时清理无法覆盖虚拟滚动回收后重新注入 DOM 的残留单元格。
+    // 在表格根节点上挂 MutationObserver：监听到新增子节点时实时清除残留，
+    // 不再依赖定时轮询的时间窗口。
+    const cleanupRoot = existing?.root;
+    if (cleanupRoot?.isConnected) {
+      const residualObserver = new MutationObserver((mutations) => {
+        // 技能被重新启用后不再清理新产生的派生列
+        if (runtimeControllers.has(normalizedSkillId)) return;
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType !== 1) continue;
+            if (node.hasAttribute?.("data-web2ai-derived-column") &&
+                node.getAttribute("data-web2ai-derived-column") === normalizedSkillId) {
+              node.remove();
+              continue;
+            }
+            if (node.hasAttribute?.("data-web2ai-derived-column-col") &&
+                node.getAttribute("data-web2ai-derived-column-col") === normalizedSkillId) {
+              node.remove();
+              continue;
+            }
+            const residual = node.querySelectorAll?.(
+              `[data-web2ai-derived-column="${normalizedSkillId}"],[data-web2ai-derived-column-col="${normalizedSkillId}"]`
+            );
+            residual.forEach((n) => n.remove());
+          }
+        }
+      });
+      residualObserver.observe(cleanupRoot, { childList: true, subtree: true });
+      setTimeout(() => residualObserver.disconnect(), 30000);
+      logDerivedRuntime("stop-residual-observer", { skillId: normalizedSkillId });
+    }
+    // 延时清理作为兜底：覆盖 observer 未捕获的场景（如根节点变化、scroll container 之外的行）
+    [1500, 4000, 10000].forEach((delay) => {
+      setTimeout(() => {
+        if (typeof document === "undefined") return;
         const delayed = document.querySelectorAll(
           `[data-web2ai-derived-column="${normalizedSkillId}"],[data-web2ai-derived-column-col="${normalizedSkillId}"]`
         );
-        if (delayed.length > 0) {
-          console.warn("[web2ai.diag] stopRuntime-delayed-cleanup", {
-            skillId: normalizedSkillId,
-            removedCount: delayed.length
-          });
-          delayed.forEach((node) => node.remove());
-        }
-      }
-    }, 1500);
+        if (!delayed.length) return;
+        delayed.forEach((node) => node.remove());
+        logDerivedRuntime("stop-delayed-cleanup", { skillId: normalizedSkillId, removedCount: delayed.length, delayMs: delay });
+      }, delay);
+    });
   }
   if (!existing) return false;
   existing.sessionId = nextRuntimeSessionId();

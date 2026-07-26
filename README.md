@@ -226,6 +226,9 @@ AI 和基础表格诊断日志默认仍跟随 `background.js` 的 `DIAGNOSTIC_LO
 
 技能横条（`renderSkillBars`）与按列分析运行期调度（`scheduleDerivedColumnRuntime`）按 frame 隔离：当前 frame 无任何技能数据源的 `frameUrl` 匹配时（`frameHasMatchingSkill`，仅字符串比较、不定位表格），该 frame 不做全文档表格定位，也不启动 3s 低频重建定时器——避免"在 A 页建了技能后，B 页/顶层/空 frame 也每 1.5s 空转扫描"。frameUrl 匹配的技能所在 frame 仍保留 3s 重建，用于兜底业务框架整块替换表格 DOM 导致横条丢失的场景（这是正确性兜底，不能按"技能/页面无变化"跳过）。顶层 frame 的跨 frame 广播定时器与"本 frame 是否匹配"无关，始终保留以确保子 frame 收到技能列表。
 
+- jtv1 业务页面首次加载时，`pageWatchTimer` 额外监控 `location.href` 以检测 SPA 页签切换（query 参数变化）。业务页签检测使用两阶段 MutationObserver：Phase 1 监听 childList 触发首次 `loadSkills`，Phase 2 监听 Ant Design 页签的 `aria-selected` 属性变化，在页签切换时自动刷新技能列表。
+- 按列分析运行时新增同步占位渲染（`renderDerivedRuntimePlaceholders`）：LLM 请求期间新行通过缓存渲染选项立即获得列 DOM，实现"列先出现、内容后填充"。关闭分析时通过表格根元素 MutationObserver 实时清理虚拟滚动回收产生的残留单元格，采用 [1500ms, 4000ms, 10000ms] 多轮延迟 + 30s 自动断开，若技能被重新启用则跳过清理。
+
 ## 表格行为说明
 
 - `tableKey` 由 frame 运行实例与组件根节点实例共同组成；同 URL 的多个 iframe 也彼此隔离，不用于刷新恢复。
