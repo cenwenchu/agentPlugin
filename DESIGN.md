@@ -154,7 +154,7 @@ token 估算不依赖供应商 tokenizer：非 ASCII 近似一字符一 token，
 - 流式请求断开会取消对应 `AbortController`。
 - 首个 token 之前的网络失败最多自动重试一次；收到任何内容后不再整请求重试，而是保留部分回答并标记连接中断。
 - API 错误目前会显示部分服务端响应；后续应增加脱敏和结构化错误码。
-- AI 和基础表格诊断默认跟随 `DEBUG/DIAGNOSTIC_LOGS`；技能相关排障日志当前默认开启，便于定位跨 frame 调度、数据源校验、分页采集和运行时缓存恢复。诊断仅记录长度、数量、页码和 DOM 特征，不记录提示词、数据行或密钥。静态回归禁止在 `src` 中保留 `.log/.txt` 调试产物。
+- AI 和基础表格诊断默认跟随 `DEBUG/DIAGNOSTIC_LOGS`；技能与派生列排障日志统一走全局诊断开关，默认关闭，避免后台常驻刷屏。诊断仅记录长度、数量、页码和 DOM 特征，不记录提示词、数据行或密钥。静态回归禁止在 `src` 中保留 `.log/.txt` 调试产物。
 - 生产 Manifest 使用 `<all_urls>` 自动注入轻量加载器，确保网页右侧入口在打开或刷新页面后直接可用；自定义 AI API 请求也由该 host 权限覆盖。
 
 ## 8. 后续优化路线
@@ -247,6 +247,14 @@ Chat 的“全部技能”区域继续按全局统一顺序编号。当前页面
 “按列分析”是面向当前页逐行生成 AI 结论的技能类型，内部类型名继续使用 `derived-column`。测试预览与正式运行共用字段选择、分析方法、输出列名和批次预算规则，但正式运行不会进入全屏工作台，而是直接在页面表格中以原生插列方式展示结果。
 
 运行时通过 `derived-column-controller.js` 维护每个技能在当前 frame 下的 controller，并负责四件事：定位已绑定数据源、生成当前列表签名、读取 / 写入会话缓存，以及决定是否真正发起模型请求。渲染层由 `derived-column-renderer.js` 独立负责，只处理列头、单元格和状态文案，不参与请求编排。
+
+派生列的插入位置由 `output.position` 控制，支持三种模式：
+
+- `before-first-selected-column`（默认）：插入到所选字段的最靠前位置。
+- `after-last-selected-column`：插入到所选字段的最后面。
+- `at-column`：指定列号，配合 `output.positionIndex`（0-based）使用。
+
+历史技能未设置 `position` 时，`normalizeDerivedColumnOutput` 自动回退为默认值保证向后兼容。技能编辑器的插入位置选择框在初始渲染和状态切换时通过 `<option>` 的 `selected` 属性正确反映当前值，避免 `el()` 静态 DOM 的 `<select>` value 属性不生效的问题。实际插入索引由 `resolveDerivedInsertIndex` 根据 `selectedColumns` 和 `output` 配置统一计算。
 
 按列分析的页面访问频控采用双层语义：
 

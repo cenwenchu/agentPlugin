@@ -1,12 +1,29 @@
 /**
  * @fileoverview 按列分析技能的纯数据模型与兼容归一化。
+ *
+ * 派生列（derived column）技能会在原始表格中插入一个新列，
+ * 其输出位置由 output.position 控制，支持三种模式：
+ *   - before-first-selected-column：插入到所选列的最前面（默认）
+ *   - after-last-selected-column：插入到所选列的最后面
+ *   - at-column：指定列号（配合 output.positionIndex 使用）
+ * 历史技能未设置 position 时自动回退为默认值，保证向后兼容。
  */
 
 const SKILL_TYPE_TABLE_ANALYSIS = "table-analysis";
 const SKILL_TYPE_DERIVED_COLUMN = "derived-column";
 const DEFAULT_DERIVED_METHOD_VERSION = 1;
 const DEFAULT_DERIVED_OUTPUT_COLUMN_NAME = "智能分析结论";
-const DEFAULT_DERIVED_OUTPUT_POSITION = "before-first-selected-column";
+// 派生列插入位置常量：决定新列放在所选字段的哪个位置
+const DERIVED_OUTPUT_POSITION_BEFORE_FIRST = "before-first-selected-column";
+const DERIVED_OUTPUT_POSITION_AFTER_LAST = "after-last-selected-column";
+const DERIVED_OUTPUT_POSITION_AT_COLUMN = "at-column";
+const VALID_DERIVED_OUTPUT_POSITIONS = new Set([
+  DERIVED_OUTPUT_POSITION_BEFORE_FIRST,
+  DERIVED_OUTPUT_POSITION_AFTER_LAST,
+  DERIVED_OUTPUT_POSITION_AT_COLUMN
+]);
+const DEFAULT_DERIVED_OUTPUT_POSITION = DERIVED_OUTPUT_POSITION_BEFORE_FIRST;
+const DEFAULT_DERIVED_OUTPUT_POSITION_INDEX = -1;
 const DEFAULT_DERIVED_OUTPUT_MAX_CHARS = 1000;
 const DEFAULT_DERIVED_TRIGGER_MODE = "page-load";
 const DEFAULT_DERIVED_TRIGGER_AUTO_RUN_ENABLED = false;
@@ -103,12 +120,22 @@ function normalizeDerivedColumnAnalysisMethod(method = {}) {
   return { description: String(method?.description || "").replace(/\r\n?/g, "\n").trim() };
 }
 
+/**
+ * 归一化派生列输出配置，包括列名、插入位置和最大字符数。
+ * position 做白名单校验，非法或缺失时回退为 before-first-selected-column；
+ * positionIndex 仅在 at-column 模式下有意义，其他模式统一为 -1。
+ */
 function normalizeDerivedColumnOutput(output = {}) {
+  const position = VALID_DERIVED_OUTPUT_POSITIONS.has(output?.position)
+    ? output.position
+    : DEFAULT_DERIVED_OUTPUT_POSITION;
+  const positionIndex = position === DERIVED_OUTPUT_POSITION_AT_COLUMN
+    ? normalizeNonNegativeInteger(output?.positionIndex, DEFAULT_DERIVED_OUTPUT_POSITION_INDEX)
+    : DEFAULT_DERIVED_OUTPUT_POSITION_INDEX;
   return {
     columnName: String(output?.columnName || DEFAULT_DERIVED_OUTPUT_COLUMN_NAME).trim() || DEFAULT_DERIVED_OUTPUT_COLUMN_NAME,
-    position: output?.position === DEFAULT_DERIVED_OUTPUT_POSITION
-      ? DEFAULT_DERIVED_OUTPUT_POSITION
-      : DEFAULT_DERIVED_OUTPUT_POSITION,
+    position,
+    positionIndex,
     maxChars: Math.min(1000, Math.max(1, normalizePositiveInteger(output?.maxChars, DEFAULT_DERIVED_OUTPUT_MAX_CHARS)))
   };
 }
@@ -170,8 +197,12 @@ export {
   SKILL_TYPE_TABLE_ANALYSIS,
   SKILL_TYPE_DERIVED_COLUMN,
   DEFAULT_DERIVED_METHOD_VERSION,
+  DERIVED_OUTPUT_POSITION_BEFORE_FIRST,
+  DERIVED_OUTPUT_POSITION_AFTER_LAST,
+  DERIVED_OUTPUT_POSITION_AT_COLUMN,
   DEFAULT_DERIVED_OUTPUT_COLUMN_NAME,
   DEFAULT_DERIVED_OUTPUT_POSITION,
+  DEFAULT_DERIVED_OUTPUT_POSITION_INDEX,
   DEFAULT_DERIVED_OUTPUT_MAX_CHARS,
   DEFAULT_DERIVED_TRIGGER_MODE,
   DEFAULT_DERIVED_TRIGGER_AUTO_RUN_ENABLED,

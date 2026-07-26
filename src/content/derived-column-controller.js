@@ -5,6 +5,8 @@
 import { STATE, web2aiDiagnosticsEnabled } from "./state.js";
 import {
   DEFAULT_DERIVED_METHOD_VERSION,
+  DERIVED_OUTPUT_POSITION_AFTER_LAST,
+  DERIVED_OUTPUT_POSITION_AT_COLUMN,
   SKILL_TYPE_DERIVED_COLUMN,
   normalizeDerivedColumnOutput,
   normalizeDerivedColumnSkill,
@@ -66,10 +68,7 @@ const derivedRuntimePageRequestGuards = new Map();
 let runtimeScrollQuietAt = 0;
 let runtimeScrollGeneration = 0;
 let runtimeScrollListenerInstalled = false;
-let lastObserverControllerCount = -1;
 const RUNTIME_SCROLL_QUIET_MS = 600;
-// 运行期诊断日志开关（区别于全局 DEBUG，独立控制 observer/jtv1 链路日志）
-const DRV_DIAG = true;
 
 function noteRuntimeScrolling() {
   runtimeScrollQuietAt = Date.now() + RUNTIME_SCROLL_QUIET_MS;
@@ -80,7 +79,6 @@ function ensureRuntimeScrollListener() {
   if (runtimeScrollListenerInstalled || typeof document?.addEventListener !== "function") return;
   runtimeScrollListenerInstalled = true;
   document.addEventListener("scroll", noteRuntimeScrolling, { passive: true, capture: true });
-  DRV_DIAG && console.log("[web2ai.drv-diag] scroll listener installed", { page: `${location.origin}${location.pathname}` });
 }
 
 function logDerivedRuntime(event, detail = {}, level = "info") {
@@ -514,11 +512,25 @@ function buildRuntimeRenderableItems(uniqueRows = [], resultMap = new Map(), fai
   return items;
 }
 
-function resolveDerivedInsertIndex(selectedColumns = []) {
+/**
+ * 根据 output.position 和 selectedColumns 计算派生列的实际插入索引。
+ *
+ * - at-column + positionIndex >= 0：直接使用 positionIndex
+ * - after-last-selected-column：max(selectedColumnIndexes) + 1
+ * - before-first-selected-column（默认）：min(selectedColumnIndexes)
+ * - 无有效 selectedColumns 时回退为 0
+ */
+function resolveDerivedInsertIndex(selectedColumns = [], { position = "", positionIndex = -1 } = {}) {
+  if (position === DERIVED_OUTPUT_POSITION_AT_COLUMN && positionIndex >= 0) {
+    return positionIndex;
+  }
   const indexes = (Array.isArray(selectedColumns) ? selectedColumns : [])
     .map((item) => Number(item?.index))
     .filter((value) => Number.isFinite(value) && value >= 0);
   if (!indexes.length) return 0;
+  if (position === DERIVED_OUTPUT_POSITION_AFTER_LAST) {
+    return Math.max(0, Math.max(...indexes) + 1);
+  }
   return Math.max(0, Math.min(...indexes));
 }
 
@@ -593,7 +605,6 @@ async function runDerivedRuntimeSkill(controller) {
     runOptions
   });
   if (!currentSkill || skillTypeOf(currentSkill) !== SKILL_TYPE_DERIVED_COLUMN) {
-    DRV_DIAG && console.log("[web2ai.drv-diag] run-early-return", { skillId, reason: "no-skill" });
     logDerivedRuntime("run-skip-no-skill", {
       skillId,
       hasCurrentSkill: Boolean(currentSkill),
@@ -604,13 +615,11 @@ async function runDerivedRuntimeSkill(controller) {
     return;
   }
   if (!runOptions.manual && !skillAutoRunEnabled(currentSkill)) {
-    DRV_DIAG && console.log("[web2ai.drv-diag] run-early-return", { skillId, reason: "auto-disabled" });
     logDerivedRuntime("run-skip-auto-disabled", { skillId });
     controller.status = "idle";
     return;
   }
   if (!skillBelongsToCurrentFrame(currentSkill)) {
-    DRV_DIAG && console.log("[web2ai.drv-diag] run-early-return", { skillId, reason: "frame-mismatch" });
     logDerivedRuntime("run-skip-frame-mismatch", {
       skillId,
       currentPage: pageKey(location.href),
@@ -651,7 +660,7 @@ async function runDerivedRuntimeSkill(controller) {
     const renderOptions = {
       root: located.table,
       headerCount: located.headers.length,
-      insertIndex: resolveDerivedInsertIndex(runtimeModel.selectedColumns),
+      insertIndex: resolveDerivedInsertIndex(runtimeModel.selectedColumns, { position: output.position, positionIndex: output.positionIndex }),
       outputColumnName: output.columnName
     };
     controller.lastRenderOptions = renderOptions;
@@ -883,13 +892,6 @@ async function runDerivedRuntimeSkill(controller) {
       status: controller.status
     }, hasFailures ? "warn" : "info");
   } catch (error) {
-    DRV_DIAG && console.log("[web2ai.drv-diag] run-failed", {
-      skillId: controller.skillId,
-      error: String(error?.message ?? error),
-      code: error?.code || "(none)",
-      status: controller.status,
-      sessionId: controller.sessionId
-    });
     if (
       error?.code === "SOURCE_CHANGED" &&
       !runOptions.manual
@@ -996,12 +998,6 @@ function ensureRuntimeObserver() {
         !jtv1StaleSuppressed &&
         hasJtv1Head
       ) {
-        DRV_DIAG && console.log("[web2ai.drv-diag] jtv1 stale → rerun", {
-          skillId: controller.skillId,
-          renderedCellCount,
-          lastScrollGen: controller.lastScrollGeneration,
-          scrollGen: runtimeScrollGeneration
-        });
         logDerivedRuntime("observer-jtv1-scroll-stale", {
           skillId: controller.skillId,
           renderedCellCount,
@@ -1017,14 +1013,6 @@ function ensureRuntimeObserver() {
         continue;
       }
       if (!root || !root.isConnected || countRenderedRuntimeCells(controller) < rowCount) {
-        const afterClearCount = countRenderedRuntimeCells(controller);
-        DRV_DIAG && console.log("[web2ai.drv-diag] rerun triggered", {
-          skillId: controller.skillId,
-          hasRoot: Boolean(root),
-          rootConnected: Boolean(root?.isConnected),
-          renderedCellCount: afterClearCount,
-          rowCount
-        });
         logDerivedRuntime("observer-rerun", {
           skillId: controller.skillId,
           hasRoot: Boolean(root),
@@ -1036,13 +1024,6 @@ function ensureRuntimeObserver() {
         controller.runOptions = { manual: true };
         void runDerivedRuntimeSkill(controller);
       }
-    }
-    // 仅当控制器数量变化时输出摘要（低频，不刷屏）
-    const currentCount = runtimeControllers.size;
-    if (currentCount !== lastObserverControllerCount) {
-      lastObserverControllerCount = currentCount;
-      const ids = [...runtimeControllers.keys()].join(",") || "(none)";
-      DRV_DIAG && console.log("[web2ai.drv-diag] controllers changed", { count: currentCount, ids, scrollGen: runtimeScrollGeneration });
     }
   }, 1500);
 }
@@ -1268,6 +1249,7 @@ export const __test = {
   recordDerivedRuntimePageRequest,
   resolveControllerSkill,
   resolveControllerListSignature,
+  resolveDerivedInsertIndex,
   shouldRetryBlockedRuntimeForListChange,
   shouldKeepStableRenderedRuntime,
   shouldKeepManualRuntimeWhenAutoDisabled

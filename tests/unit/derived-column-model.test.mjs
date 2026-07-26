@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_DERIVED_METHOD_VERSION,
+  DERIVED_OUTPUT_POSITION_AFTER_LAST,
+  DERIVED_OUTPUT_POSITION_AT_COLUMN,
+  DERIVED_OUTPUT_POSITION_BEFORE_FIRST,
+  normalizeDerivedColumnOutput,
   normalizeDerivedColumnSkill,
   reconcileDerivedColumnSelections,
   skillTypeOf,
@@ -40,6 +44,7 @@ test("normalizeDerivedColumnSkill restores defaults and stable selected columns"
   assert.deepEqual(normalized.output, {
     columnName: "智能分析结论",
     position: "before-first-selected-column",
+    positionIndex: -1,
     maxChars: 1000
   });
 });
@@ -130,4 +135,41 @@ test("analysis fingerprint changes with revision, method and selected columns", 
   assert.notEqual(base, changedRevision);
   assert.notEqual(base, changedMethod);
   assert.notEqual(base, changedColumns);
+});
+
+test("normalizeDerivedColumnOutput defaults to before-first-selected-column", () => {
+  const output = normalizeDerivedColumnOutput({});
+  assert.equal(output.position, DERIVED_OUTPUT_POSITION_BEFORE_FIRST);
+  assert.equal(output.positionIndex, -1);
+});
+
+test("normalizeDerivedColumnOutput rejects invalid position and falls back", () => {
+  const output = normalizeDerivedColumnOutput({ position: "some-random-value", positionIndex: 5 });
+  assert.equal(output.position, DERIVED_OUTPUT_POSITION_BEFORE_FIRST);
+  assert.equal(output.positionIndex, -1);
+});
+
+test("normalizeDerivedColumnOutput accepts after-last-selected-column", () => {
+  const output = normalizeDerivedColumnOutput({ position: DERIVED_OUTPUT_POSITION_AFTER_LAST });
+  assert.equal(output.position, DERIVED_OUTPUT_POSITION_AFTER_LAST);
+  assert.equal(output.positionIndex, -1);
+});
+
+test("normalizeDerivedColumnOutput accepts at-column with valid positionIndex", () => {
+  const output = normalizeDerivedColumnOutput({ position: DERIVED_OUTPUT_POSITION_AT_COLUMN, positionIndex: 3 });
+  assert.equal(output.position, DERIVED_OUTPUT_POSITION_AT_COLUMN);
+  assert.equal(output.positionIndex, 3);
+});
+
+test("normalizeDerivedColumnOutput clamps positionIndex to -1 when not at-column", () => {
+  const output = normalizeDerivedColumnOutput({ position: DERIVED_OUTPUT_POSITION_BEFORE_FIRST, positionIndex: 5 });
+  assert.equal(output.position, DERIVED_OUTPUT_POSITION_BEFORE_FIRST);
+  assert.equal(output.positionIndex, -1);
+});
+
+test("normalizeDerivedColumnOutput normalizes negative positionIndex to fallback -1 in at-column mode", () => {
+  const output = normalizeDerivedColumnOutput({ position: DERIVED_OUTPUT_POSITION_AT_COLUMN, positionIndex: -3 });
+  assert.equal(output.position, DERIVED_OUTPUT_POSITION_AT_COLUMN);
+  // normalizeNonNegativeInteger(-3, -1) → -3 >= 0 is false → returns fallback -1
+  assert.equal(output.positionIndex, -1);
 });

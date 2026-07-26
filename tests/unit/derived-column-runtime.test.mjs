@@ -697,3 +697,44 @@ test("changing list signature does not reset the page-level request budget", () 
   assert.equal(blockedAfterListChange.allowed, false);
   assert.equal(blockedAfterListChange.reason, "limit");
 });
+
+test("resolveDerivedInsertIndex uses positionIndex for at-column", () => {
+  const { resolveDerivedInsertIndex } = runtimeTest;
+  assert.equal(resolveDerivedInsertIndex(
+    [{ index: 2 }, { index: 5 }],
+    { position: "at-column", positionIndex: 7 }
+  ), 7);
+});
+
+test("resolveDerivedInsertIndex returns max+1 for after-last-selected-column", () => {
+  const { resolveDerivedInsertIndex } = runtimeTest;
+  assert.equal(resolveDerivedInsertIndex(
+    [{ index: 2 }, { index: 5 }],
+    { position: "after-last-selected-column" }
+  ), 6);
+});
+
+test("resolveDerivedInsertIndex returns min for before-first-selected-column", () => {
+  const { resolveDerivedInsertIndex } = runtimeTest;
+  assert.equal(resolveDerivedInsertIndex(
+    [{ index: 2 }, { index: 5 }],
+    { position: "before-first-selected-column" }
+  ), 2);
+});
+
+test("resolveDerivedInsertIndex defaults to before-first when position is unknown", () => {
+  const { resolveDerivedInsertIndex } = runtimeTest;
+  assert.equal(resolveDerivedInsertIndex(
+    [{ index: 2 }, { index: 5 }],
+    { position: "unknown" }
+  ), 2);
+});
+
+test("resolveDerivedInsertIndex returns 0 when no valid selectedColumns", () => {
+  const { resolveDerivedInsertIndex } = runtimeTest;
+  assert.equal(resolveDerivedInsertIndex([], { position: "after-last-selected-column" }), 0);
+  assert.equal(resolveDerivedInsertIndex(
+    [{ header: "无" }],
+    { position: "before-first-selected-column" }
+  ), 0);
+});

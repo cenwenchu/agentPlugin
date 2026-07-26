@@ -29,6 +29,9 @@ import { createSkillDraft, cancelSkillDraft, selectSkillTable, saveSkillDraft, r
 import { isJtv1LikePage, jtv1SourceDirectUrl } from './business-tab-dom.js';
 import {
   DEFAULT_DERIVED_METHOD_VERSION,
+  DERIVED_OUTPUT_POSITION_BEFORE_FIRST,
+  DERIVED_OUTPUT_POSITION_AFTER_LAST,
+  DERIVED_OUTPUT_POSITION_AT_COLUMN,
   SKILL_TYPE_DERIVED_COLUMN,
   SKILL_TYPE_TABLE_ANALYSIS,
   normalizeDerivedColumnOutput,
@@ -1576,6 +1579,47 @@ function render() {
               draft.output = normalizeDerivedColumnOutput({ ...draft.output, columnName: event.target.value });
             }
           })
+        ]),
+        el("label", { class: "skillField" }, [
+          el("span", { class: "skillFieldLabel" }, ["插入位置"]),
+          el("span", { style: { display: "flex", alignItems: "center", gap: "6px" } }, (() => {
+            const currentPosition = draft.output?.position || DERIVED_OUTPUT_POSITION_BEFORE_FIRST;
+            return [
+            el("select", {
+              class: "skillInput",
+              style: { width: "auto", minWidth: "110px" },
+              onChange: (event) => {
+                const nextPosition = event.target.value;
+                const nextIndex = nextPosition === DERIVED_OUTPUT_POSITION_AT_COLUMN
+                  ? (draft.output?.positionIndex >= 0 ? draft.output.positionIndex : 0)
+                  : -1;
+                draft.output = normalizeDerivedColumnOutput({ ...draft.output, position: nextPosition, positionIndex: nextIndex });
+                requestAnimationFrame(() => render());
+              }
+            }, [
+              el("option", { value: DERIVED_OUTPUT_POSITION_BEFORE_FIRST, selected: currentPosition === DERIVED_OUTPUT_POSITION_BEFORE_FIRST ? true : undefined }, ["所选列最前面"]),
+              el("option", { value: DERIVED_OUTPUT_POSITION_AFTER_LAST, selected: currentPosition === DERIVED_OUTPUT_POSITION_AFTER_LAST ? true : undefined }, ["所选列最后面"]),
+              el("option", { value: DERIVED_OUTPUT_POSITION_AT_COLUMN, selected: currentPosition === DERIVED_OUTPUT_POSITION_AT_COLUMN ? true : undefined }, ["指定列"])
+            ]),
+            draft.output?.position === DERIVED_OUTPUT_POSITION_AT_COLUMN
+              ? el("span", { style: { display: "inline-flex", alignItems: "center", gap: "2px", fontSize: "12px", color: "#374151" } }, [
+                "第",
+                el("input", {
+                  class: "skillInput",
+                  type: "number",
+                  min: "1",
+                  value: (draft.output?.positionIndex >= 0 ? draft.output.positionIndex : 0) + 1,
+                  style: { width: "48px", textAlign: "center" },
+                  onInput: (event) => {
+                    const col = Math.max(1, Math.trunc(Number(event.target.value) || 1));
+                    draft.output = normalizeDerivedColumnOutput({ ...draft.output, positionIndex: col - 1 });
+                  }
+                }),
+                "列"
+              ])
+              : null
+            ];
+          })())
         ]),
         el("label", {
           class: "skillField",
