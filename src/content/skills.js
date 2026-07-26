@@ -244,7 +244,13 @@ function renderSkillBars(skills = []) {
     document.querySelectorAll("[data-web2ai-skill-bar]").forEach((node) => node.remove());
     return;
   }
-  document.querySelectorAll("[data-web2ai-skill-bar]").forEach((node) => node.remove());
+  // 保留上一次渲染时的横条：按 tableElement → barElement 建立映射，
+  // 后续只移除不再需要的旧横条、重建内容变化的横条，避免每 3s 全量清除+重建。
+  const existingBarMap = new Map();
+  document.querySelectorAll("[data-web2ai-skill-bar]").forEach((bar) => {
+    const siblingTable = bar.nextElementSibling;
+    if (siblingTable) existingBarMap.set(siblingTable, bar);
+  });
   const grouped = new Map();
   // 某些技能在当前 frame 已不可用，但用户仍需要在表格上方看到它并获知原因。
   // 这里把“未能定位到表”的技能挂到首个可见表格上统一展示，避免直接消失。
@@ -290,13 +296,30 @@ function renderSkillBars(skills = []) {
     }
     grouped.set(fallbackTable, list);
   }
+  // 移除已不再对应任意表格的旧横条（表格被 SPA 销毁或技能关联变更）。
+  for (const [table, bar] of existingBarMap) {
+    if (!grouped.has(table)) bar.remove();
+  }
   for (const [table, tableSkills] of grouped) {
+    // 若横条内容未变化（同一张表、相同技能集合），保留 DOM 不做任何操作，
+    // 避免无效的 remove + insertBefore 与事件监听器重建。
+    const existingBar = existingBarMap.get(table);
+    // 指纹包含 revision 和 sourceStatus，确保技能属性变化（如列模式勾选/取消）
+    // 或数据源状态变化时能触发横条重建，避免误报"技能已被其他页面修改"。
+    const newSkillFingerprint = tableSkills.map((s) => {
+      const statusKey = (STATE.skillSourceStatuses?.[s.id]?.status) || "available";
+      return `${s.id}:${s.revision || 0}:${statusKey}`;
+    }).sort().join("|");
+    if (existingBar && existingBar.dataset.web2aiSkillFingerprint === newSkillFingerprint) continue;
+    // 内容已变化或首次出现：移除旧横条（若有），重新创建。
+    if (existingBar) existingBar.remove();
     // 统一插入到表格上方（文档流）。jtv1 等"写死高度的虚拟滚动表"（适配器声明了
     // scroller）需要等量压缩表体高度，否则 bar 会把底部 pagebar 挤出可视区。
     const fixedHeightScroller = resolveTableRootAdapter(table)?.scroller?.(table) || null;
     const bar = document.createElement("div");
     bar.dataset.web2aiSkillBar = "1";
     bar.dataset.web2aiUi = "1";
+    bar.dataset.web2aiSkillFingerprint = newSkillFingerprint;
     Object.assign(bar.style, {
       display: "flex", flexDirection: "column", alignItems: "stretch", gap: "4px",
       boxSizing: "border-box", width: "100%", margin: "0 0 6px", padding: "4px 10px",
@@ -600,7 +623,7 @@ function scheduleSkillBars(skills = []) {
         type: "BROADCAST_TO_TAB",
         payload: { message: { type: "SYNC_SKILL_BARS", skills } }
       }).catch(() => void 0);
-    }, 3000);
+    }, 10000);
   }
 }
 
@@ -1496,6 +1519,27 @@ function initSkills(onRender) {
   // ant-design Tabs 可能尚未挂载到 DOM。调度 3 次短间隔重试（180ms / 700ms / 1600ms），
   // 确保业务页面初次打开时无需用户手动展开 Chat 即可渲染技能列表。
   if (IS_TOP_FRAME && isJtv1LikePage()) scheduleBusinessTabSkillRefresh();
+  // 固定间隔重试在页面加载慢时可能仍不够（React 渲染 >1.6s 即漏掉）。
+  // 补充 MutationObserver 兜底：一旦观测到业务 Tab 元素出现在 DOM，
+  // 立即触发技能列表加载，无需等待固定间隔。
+  if (IS_TOP_FRAME && isJtv1LikePage()) {
+    let jtv1TabObserverDone = false;
+    const jtv1TabObserver = new MutationObserver(() => {
+      if (jtv1TabObserverDone) return;
+      if (findBusinessTabElements().length > 0) {
+        jtv1TabObserverDone = true;
+        jtv1TabObserver.disconnect();
+        loadSkills().catch(() => void 0);
+      }
+    });
+    jtv1TabObserver.observe(document.documentElement, { childList: true, subtree: true });
+    setTimeout(() => {
+      if (!jtv1TabObserverDone) {
+        jtv1TabObserverDone = true;
+        jtv1TabObserver.disconnect();
+      }
+    }, 60000);
+  }
 }
 
 const reloadSkills = loadSkills;

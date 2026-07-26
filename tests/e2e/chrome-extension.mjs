@@ -1766,6 +1766,22 @@ try {
       .find((node) => node.textContent?.includes("自动风险A") && node.querySelector('input[type="checkbox"]'));
     return item?.querySelector('input[type="checkbox"]')?.checked === false;
   });
+  // 等待 toggle-off 的异步保存完成（showToast 出现说明 updateDerivedSkillAutoRun 已完成），
+  // 否则立即 toggle 回开会与未完成的 bar 重建产生竞态，导致 checkbox 被后续重建覆盖回 false。
+  await derivedPage.waitForFunction(
+    () => document.querySelector("#web2ai_toast")?.textContent?.includes("已关闭自动执行"),
+    { timeout: 10000 }
+  );
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  // 验证 toggle 重新开启后 bar 能正确重建（覆盖 revision 指纹修复：toggle 后
+  // skill.revision 递增，bar 必须重建才能反映新的 checkbox 状态，否则会误报"已被其他页面修改"）
+  await clickDerivedSkillControl(derivedPage, "自动风险A", "toggle");
+  await derivedPage.waitForFunction(() => {
+    const bar = document.querySelector("[data-web2ai-skill-bar]");
+    const item = Array.from(bar?.querySelectorAll("span") || [])
+      .find((node) => node.textContent?.includes("自动风险A") && node.querySelector('input[type="checkbox"]'));
+    return item?.querySelector('input[type="checkbox"]')?.checked === true;
+  });
   const beforeListChangeCount = derivedAiRequestCount;
   await derivedPage.$eval("#derived-page-2", (button) => button.click());
   await derivedPage.waitForFunction(() => document.querySelector("#derived-current-page")?.textContent?.trim() === "2");
@@ -1921,7 +1937,126 @@ try {
   await multiTableStatusPage.close();
 
   reportE2eSection("multi-table source fallback passed");
-console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, runtime CSV/XLSX sources, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing, derived runtime auto/manual/page-guard coverage");
+
+  // ==========================================================================
+  // Section 10: 技能删除
+  // 验证从 Chat 面板删除技能后，skillCard 和 skill bar 均被正确移除。
+  // ==========================================================================
+  const deleteSkillTestUrl = url; // 复用 fixture 页面
+  await setStoredSkillsWithFreshWorker(browser, {
+    skills: [
+      makeLocatorDerivedSkill({
+        id: "delete-target-skill",
+        name: "待删除技能",
+        pageUrl: deleteSkillTestUrl,
+        selector: "#orders",
+        headers: ["订单号", "金额", "状态"],
+        selectedColumns: ["金额", "状态"],
+        columnName: "待删列"
+      })
+    ],
+    pageNames: { [deleteSkillTestUrl]: "删除测试页" }
+  });
+  const deletePage = await createPage();
+  deletePage.on("pageerror", (error) => console.log(`[e2e][delete][pageerror] ${error.message}`));
+  await deletePage.goto(deleteSkillTestUrl);
+  await deletePage.waitForSelector("#web2ai_overlay_host");
+  await deletePage.waitForFunction(
+    () => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("待删除技能"),
+    { timeout: 15000 }
+  );
+  await openSkillsPanel(deletePage);
+  await deletePage.waitForFunction(({ skillName }) => {
+    const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+    return Array.from(shadow?.querySelectorAll(".skillCard") || []).some(
+      (card) => card.querySelector(".skillTitle")?.textContent?.includes(skillName)
+    );
+  }, {}, { skillName: "待删除技能" });
+  await deletePage.$eval("#web2ai_overlay_host", (host, { skillName }) => {
+    const shadow = host.shadowRoot;
+    const card = Array.from(shadow.querySelectorAll(".skillCard")).find(
+      (card) => card.querySelector(".skillTitle")?.textContent?.includes(skillName)
+    );
+    const deleteButton = Array.from(card?.querySelectorAll(".btn.danger") || []).find(
+      (btn) => btn.textContent?.trim() === "删除"
+    );
+    if (!deleteButton) throw new Error(`delete button not found for ${skillName}`);
+    deleteButton.click();
+  }, { skillName: "待删除技能" });
+  // 等待 skillCard 从面板中消失
+  await deletePage.waitForFunction(({ skillName }) => {
+    const shadow = document.querySelector("#web2ai_overlay_host")?.shadowRoot;
+    return !Array.from(shadow?.querySelectorAll(".skillCard") || []).some(
+      (card) => card.querySelector(".skillTitle")?.textContent?.includes(skillName)
+    );
+  }, { timeout: 15000 }, { skillName: "待删除技能" });
+  // 验证页面上的 skill bar 也被移除
+  const deleteBarRemaining = await deletePage.$eval(
+    "[data-web2ai-skill-bar]",
+    (bar) => bar?.textContent?.includes("待删除技能") || false
+  ).catch(() => false);
+  assert.equal(
+    deleteBarRemaining,
+    false,
+    "deleting a skill must also remove its bar from the page"
+  );
+  await deletePage.close();
+  reportE2eSection("skill deletion passed");
+
+  // ==========================================================================
+  // Section 11: 源状态 UI（灰度卡片 + 执行阻断）
+  // 验证技能数据源不可用时，卡片显示灰色状态且执行按钮被正确拦截。
+  // ==========================================================================
+  const sourceStatusUiUrl = `${url}skill-source-tabs`;
+  await setStoredSkillsWithFreshWorker(browser, {
+    skills: [
+      makeLocatorDerivedSkill({
+        id: "changed-status-ui-skill",
+        name: "数据源异常技能",
+        pageUrl: sourceStatusUiUrl,
+        selector: "#non-existent-selector",
+        headers: ["序号", "不存在的列A", "不存在的列B"],
+        selectedColumns: ["不存在的列A"]
+      })
+    ]
+  });
+  const statusUiPage = await createPage();
+  statusUiPage.on("pageerror", (error) => console.log(`[e2e][status-ui][pageerror] ${error.message}`));
+  await statusUiPage.goto(sourceStatusUiUrl);
+  await statusUiPage.waitForSelector("#web2ai_overlay_host");
+  await openSkillsPanel(statusUiPage);
+  // 等待源状态评估为 changed
+  await waitForSkillStatusClass(statusUiPage, "数据源异常技能", "changed");
+  const sourceStatusCard = await readSkillStatuses(statusUiPage);
+  const changedCard = sourceStatusCard.find((item) => item.name === "数据源异常技能");
+  assert.ok(
+    changedCard?.statusClass.includes("changed"),
+    `skill with non-matching source must show "changed" status: ${JSON.stringify(sourceStatusCard)}`
+  );
+  // 点击"测试预览"按钮应触发 toast 阻断，而非进入工作台
+  await statusUiPage.$eval("#web2ai_overlay_host", (host, { skillName }) => {
+    const shadow = host.shadowRoot;
+    const card = Array.from(shadow.querySelectorAll(".skillCard")).find(
+      (card) => card.querySelector(".skillTitle")?.textContent?.includes(skillName)
+    );
+    const testButton = Array.from(card?.querySelectorAll(".btn.primary") || []).find(
+      (btn) => btn.textContent?.trim() === "测试预览"
+    );
+    if (!testButton) throw new Error(`test button not found for ${skillName}`);
+    testButton.click();
+  }, { skillName: "数据源异常技能" });
+  await statusUiPage.waitForFunction(
+    () => document.querySelector("#web2ai_toast")?.textContent?.includes("数据源"),
+    { timeout: 10000 }
+  );
+  const toastText = await statusUiPage.$eval("#web2ai_toast", (node) => node.textContent || "");
+  assert.ok(
+    toastText.includes("数据源"),
+    `clicking test on unavailable skill must show blocking toast, got: "${toastText}"`
+  );
+  await statusUiPage.close();
+  reportE2eSection("source status UI passed");
+console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, runtime CSV/XLSX sources, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing, derived runtime auto/manual/page-guard, toggle-rebuild, skill-deletion, source-status-ui coverage");
 } finally {
   await browser.close();
   server.close();

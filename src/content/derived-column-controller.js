@@ -959,6 +959,25 @@ function ensureRuntimeObserver() {
       logDerivedRuntime("observer-skip-scrolling", { quietUntil: runtimeScrollQuietAt });
       return;
     }
+    // 没有任何活跃或 blocked 控制器、且所有按列分析技能均为手动触发模式时，
+    // 观察器不再需要持续轮询（无自动执行、无阻断重试、无渲染状态需要维护）。
+    // jtv1 页面除外：虚拟滚动需要观察器检测 scrollGeneration 变化以触发重渲染。
+    if (runtimeControllers.size === 0) {
+      const hasBlocked = [...runtimeControllers.values()].some(
+        (c) => (c.status === "blocked" || Number(c.blockedUntil) > Date.now())
+      );
+      if (!hasBlocked) {
+        const derivedSkills = (Array.isArray(STATE.skills) ? STATE.skills : [])
+          .filter((s) => skillTypeOf(s) === SKILL_TYPE_DERIVED_COLUMN);
+        const hasJtv1Table = typeof document !== "undefined" && document.querySelector("#_jt_row_head");
+        if (!hasJtv1Table && derivedSkills.every((s) => !skillAutoRunEnabled(s))) {
+          clearInterval(runtimeObserverTimer);
+          runtimeObserverTimer = null;
+          logDerivedRuntime("observer-stop-idle");
+          return;
+        }
+      }
+    }
     for (const controller of runtimeControllers.values()) {
       if (controller.status === "running") continue;
       const skill = resolveControllerSkill(controller);

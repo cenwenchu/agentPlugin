@@ -213,7 +213,7 @@ function preferVisibleTables(tables = []) {
 
 function cellTexts(cells) {
   return cells
-    .map((cell) => compactOneLine(cell.innerText || cell.textContent || ""))
+    .map((cell) => compactOneLine(cell.textContent || ""))
     .filter(Boolean)
     .slice(0, 80);
 }
@@ -425,7 +425,13 @@ function buildSelectedColumnCoverage(selectedColumns = [], actualHeaders = []) {
 }
 
 function buildStoredSourceCandidate(table, source = {}, options = {}, context = {}) {
-  const headers = extractHeaders(table);
+  let headers;
+  if (context.headerCache?.has(table)) {
+    headers = context.headerCache.get(table);
+  } else {
+    headers = extractHeaders(table);
+    if (context.headerCache) context.headerCache.set(table, headers);
+  }
   const headerCoverage = Array.isArray(source?.headers) && source.headers.length
     ? headerSimilarity(source.headers, headers)
     : 0;
@@ -637,11 +643,13 @@ function locateStoredSource(source, options = {}) {
     ? visibleCandidates[0]
     : indexedTable;
   const selectorSet = new Set(selectorTables);
+  const headerCache = new Map();
   const scoredCandidates = preferVisibleTables(candidates).map((table, candidateIndex) => (
     buildStoredSourceCandidate(table, source, resolvedOptions, {
       candidateIndex,
       selectorSet,
-      indexedCandidate: preferredIndexedTable
+      indexedCandidate: preferredIndexedTable,
+      headerCache
     })
   ));
   const chosen = pickBestStoredSourceCandidate(scoredCandidates, source, resolvedOptions);
