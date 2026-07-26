@@ -342,7 +342,13 @@ function controllerHasFreshRenderedState(controller) {
 function shouldKeepManualRuntimeWhenAutoDisabled(controller) {
   if (!controller) return false;
   if (controller.status === "running") return true;
-  if (controller?.runOptions?.manual) return true;
+  if (controller?.runOptions?.manual) {
+    // Manual controllers must also verify rendered state is fresh;
+    // page turns invalidate the rendered state and stale columns must be cleared.
+    if (!controller.root?.isConnected) return false;
+    return controllerHasFreshRenderedState(controller) &&
+      ["complete", "partial", "error", "blocked"].includes(String(controller.status || ""));
+  }
   if (!controller.root?.isConnected) return false;
   return shouldKeepStableRenderedRuntime(controller);
 }
@@ -936,7 +942,9 @@ async function runDerivedRuntimeSkill(controller) {
     }
   } finally {
     controller.lastPendingRows = [];
-    controller.runOptions = null;
+    if (!controller.runOptions?.manual) {
+      controller.runOptions = null;
+    }
   }
 }
 

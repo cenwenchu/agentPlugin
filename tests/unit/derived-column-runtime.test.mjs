@@ -305,7 +305,7 @@ test("manual runtime is preserved when auto run is disabled", () => {
     status: "idle",
     runOptions: { manual: true },
     root: null
-  }), true);
+  }), false);
   assert.equal(shouldKeepManualRuntimeWhenAutoDisabled({
     status: "running",
     runOptions: null,

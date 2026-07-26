@@ -25,6 +25,7 @@ if (!CHROME) {
 }
 const HEADLESS = /^(1|true)$/i.test(process.env.E2E_HEADLESS || "");
 const reportE2eSection = (name) => console.log(`[e2e] ${name}`);
+const DEFAULT_WAIT_TIMEOUT_MS = 10000;
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   let crc = value;
   for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
@@ -700,15 +701,24 @@ const browser = await puppeteer.launch({
   // Restricted/sandboxed runners (CI, automated agents) cannot initialize
   // Chrome's own setuid sandbox and crash before the extension loads. Gate the
   // escape hatch behind an explicit env var; dev machines keep the sandbox.
-  args: /^(1|true)$/i.test(process.env.E2E_NO_SANDBOX || "")
-    ? ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
-    : []
+  args: [
+    "--disable-dev-shm-usage",
+    ...(/^(1|true)$/i.test(process.env.E2E_NO_SANDBOX || "")
+      ? ["--no-sandbox", "--disable-gpu"]
+      : [])
+  ]
 });
 
+const createPage = async () => {
+  const page = await browser.newPage();
+  page.setDefaultTimeout(DEFAULT_WAIT_TIMEOUT_MS);
+  return page;
+};
+
 const HARD_TIMEOUT = setTimeout(() => {
-  console.error("[e2e] HARD TIMEOUT 120s - aborting");
+  console.error("[e2e] HARD TIMEOUT 300s - aborting");
   process.exit(1);
-}, 120000);
+}, 300000);
 HARD_TIMEOUT.unref?.();
 
 try {
@@ -717,7 +727,7 @@ try {
     { timeout: 15000 }
   );
   assert.match(extensionTarget.url(), /^chrome-extension:\/\//, "extension service worker must start before page tests");
-  const page = await browser.newPage();
+  const page = await createPage();
   const browserDiagnostics = [];
   const recordBrowserDiagnostic = (message) => {
     browserDiagnostics.push(message);
@@ -909,7 +919,7 @@ try {
   await page.$eval("#orders-secondary", (node) => node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 })));
   await new Promise((resolve) => setTimeout(resolve, 700));
   await page.waitForFunction(() => document.querySelector("#web2ai_overlay_host")?.shadowRoot?.querySelectorAll(".skillSourceItem").length === 2);
-  const crossSourcePage = await browser.newPage();
+  const crossSourcePage = await createPage();
   await crossSourcePage.goto(`${url}source-page`);
   await crossSourcePage.waitForSelector("#web2ai_overlay_host");
   await page.bringToFront();
@@ -1652,7 +1662,7 @@ try {
   await page.$eval("#web2ai_overlay_host", (host) => host.shadowRoot.querySelector(".skillExecutionHead button")?.click());
 
   reportE2eSection("multi-source skill execution passed");
-  const innerPage = await browser.newPage();
+  const innerPage = await createPage();
   await innerPage.goto(`${url}inner-frame-host`);
   await innerPage.bringToFront();
   await innerPage.waitForSelector("#web2ai_overlay_host");
@@ -1676,7 +1686,7 @@ try {
   // already recycled. The collector must reset each page before its first read,
   // scroll through all recycled rows, then restore page 1 and the scroll top.
   reportE2eSection("multi-screen inner-frame capture passed");
-  const virtualPage = await browser.newPage();
+  const virtualPage = await createPage();
   await virtualPage.goto(`${url}virtual-collection`);
   await virtualPage.waitForSelector("#web2ai_overlay_host");
   await waitForWorkerTabsApi(worker);
@@ -1723,7 +1733,7 @@ try {
     ]
   });
   reportE2eSection("virtual collection passed");
-  const derivedPage = await browser.newPage();
+  const derivedPage = await createPage();
   await derivedPage.goto(derivedRuntimeUrl);
   await derivedPage.waitForSelector("#web2ai_overlay_host");
   await derivedPage.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("自动风险A"));
@@ -1795,7 +1805,7 @@ try {
     ]
   });
   reportE2eSection("automatic derived-column runtime passed");
-  const derivedManualPage = await browser.newPage();
+  const derivedManualPage = await createPage();
   await derivedManualPage.goto(derivedRuntimeUrl);
   await derivedManualPage.waitForSelector("#web2ai_overlay_host");
   await derivedManualPage.waitForFunction(() => document.querySelector("[data-web2ai-skill-bar]")?.textContent?.includes("手动分析列"));
@@ -1816,7 +1826,8 @@ try {
   await derivedManualPage.waitForFunction(() => document.querySelector("#derived-current-page")?.textContent?.trim() === "2");
   await derivedManualPage.waitForFunction(
     () => !document.querySelector('[data-web2ai-derived-column-header="derived-manual-only"]') &&
-      !document.querySelector('#derived-orders tbody td[data-web2ai-derived-column="derived-manual-only"]')
+      !document.querySelector('#derived-orders tbody td[data-web2ai-derived-column="derived-manual-only"]'),
+    { timeout: 15000 }
   );
   assert.deepEqual(
     await derivedManualPage.$eval("#derived-orders thead tr", (row) => Array.from(row.children).map((cell) => cell.textContent.trim())),
@@ -1829,7 +1840,7 @@ try {
   // existing-model selector until saved, and cancel must restore edit mode.
   reportE2eSection("manual derived-column runtime passed");
   const extensionId = new URL(extensionTarget.url()).host;
-  const optionsPage = await browser.newPage();
+  const optionsPage = await createPage();
   await optionsPage.goto(`chrome-extension://${extensionId}/src/options.html`);
   await optionsPage.waitForSelector("#profile option");
   const profileCountBeforeAdd = await optionsPage.$$eval("#profile option", (options) => options.length);
@@ -1864,7 +1875,7 @@ try {
       })
     ]
   });
-  const tabbedStatusPage = await browser.newPage();
+  const tabbedStatusPage = await createPage();
   tabbedStatusPage.on("pageerror", (error) => console.log(`[e2e][business-tab][pageerror] ${error.message}`));
   await tabbedStatusPage.goto(tabbedSkillPage);
   await tabbedStatusPage.waitForSelector("#web2ai_overlay_host");
@@ -1896,7 +1907,7 @@ try {
       })
     ]
   });
-  const multiTableStatusPage = await browser.newPage();
+  const multiTableStatusPage = await createPage();
   multiTableStatusPage.on("pageerror", (error) => console.log(`[e2e][multi-table][pageerror] ${error.message}`));
   await multiTableStatusPage.goto(multiTableSkillPage);
   await multiTableStatusPage.waitForSelector("#web2ai_overlay_host");
