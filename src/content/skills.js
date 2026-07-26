@@ -40,6 +40,7 @@ let renderCallback = () => void 0;
 let activePickSession = "";
 let cancelActivePick = null;
 let observedPageKey = "";
+let observedJtv1Href = "";
 let pageWatchTimer = null;
 let skillBarTimer = null;
 let skillBarBroadcastTimer = null;
@@ -237,7 +238,6 @@ async function anchorSkillSourceBar(source, fallbackPage = {}) {
 }
 
 function renderSkillBars(skills = []) {
-  const renderStart = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
   // 优化：本 frame 无任何匹配技能时，直接清掉残留横条后返回，
   // 不做全文档表格定位与逐 source 校验（那些只为渲染横条服务，无匹配时纯属浪费）。
   if (!frameHasMatchingSkill(skills)) {
@@ -475,12 +475,19 @@ function renderSkillBars(skills = []) {
           event.stopPropagation();
           const nextEnabled = Boolean(toggle.checked);
           try {
-            await updateDerivedSkillAutoRun(skill, nextEnabled);
             if (!nextEnabled) {
+              await updateDerivedSkillAutoRun(skill, nextEnabled);
               await stopDerivedColumnRuntime(skill.id, { clearUi: true, clearHistory: true });
+              // 兜底清理：stopDerivedColumnRuntime 依赖 controller.root 定位表格，
+              // 若 controller 不存在或 root 为 null（如 jtv1 虚拟滚动已替换 DOM），
+              // 清除操作会被跳过。这里直接从文档级移除所有残留的派生列单元格。
+              document.querySelectorAll(
+                `[data-web2ai-derived-column="${skill.id}"],[data-web2ai-derived-column-col="${skill.id}"]`
+              ).forEach((node) => node.remove());
               showToast(`已关闭自动执行，并清除当前页历史结果：${skill.name}`);
             } else {
-              const started = triggerDerivedColumnRuntime(skill, {
+              const updatedSkill = await updateDerivedSkillAutoRun(skill, nextEnabled);
+              const started = triggerDerivedColumnRuntime(updatedSkill, {
                 manual: true,
                 bypassPageGuard: false,
                 ignoreCache: false,
@@ -555,7 +562,6 @@ function renderSkillBars(skills = []) {
       }
     }
   }
-  const durationMs = renderStart ? Math.round(((typeof performance !== "undefined" && performance.now) ? performance.now() : 0) - renderStart) : 0;
   // 去重用的签名不含 durationMs——它每次都变，会导致日志去重失效、每 1.5s 刷屏。
   // 只有内容（技能/匹配/表格/probes）真正变化，或未匹配技能超 10s 时才打印。
   const diagnosticSignature = JSON.stringify({
@@ -567,7 +573,7 @@ function renderSkillBars(skills = []) {
     tableCandidateCount: tableCandidates().length,
     probes
   });
-  const diagnostic = JSON.stringify({ ...JSON.parse(diagnosticSignature), durationMs });
+  const diagnostic = JSON.stringify({ ...JSON.parse(diagnosticSignature) });
   const now = Date.now();
   const hasUnmatchedSkills = skills.length > 0 && grouped.size === 0;
   if (diagnosticSignature !== lastSkillBarDiagnostic || (hasUnmatchedSkills && now - lastSkillBarDiagnosticAt >= 10000)) {
@@ -661,13 +667,20 @@ async function updateDerivedSkillAutoRun(skillOrId = "", enabled = false) {
     },
     updatedAt: Date.now()
   };
-  await mutateSkills({
+  const saved = await mutateSkills({
     type: "UPSERT_SKILL",
     skill,
     expectedRevision: current?.revision ?? 0
   });
+  // 把 save 返回的 skill（含递增后的 revision）同步到 STATE.skills，
+  // 确保后续 triggerDerivedColumnRuntime 用的 revision 与缓存一致。
+  if (saved?.id) {
+    const idx = STATE.skills.findIndex((s) => s.id === saved.id);
+    if (idx >= 0) STATE.skills[idx] = saved;
+  }
   if (IS_TOP_FRAME) await loadSkills();
   await chrome.runtime.sendMessage({ type: "REFRESH_SKILLS_ALL_TABS" }).catch(() => void 0);
+  return saved;
 }
 
 async function mutateSkills(mutation) {
@@ -1489,10 +1502,26 @@ function initSkills(onRender) {
   }
   if (IS_TOP_FRAME && !pageWatchTimer) {
     observedPageKey = pageKey();
+    if (isJtv1LikePage()) observedJtv1Href = location.href;
     // SPA 的 pushState/replaceState 不会重新执行 content script，也没有统一事件。
     // 轮询规范化后的页面键可同时覆盖 history API、前进后退和站点自定义路由。
     pageWatchTimer = setInterval(() => {
       const currentPageKey = pageKey();
+      // jtv1：业务 Tab 切换仅改变 URL query 参数，pageKey() 不变，
+      // 导致 loadSkills 不会重新执行，技能列表始终为空。
+      // 额外监控 location.href 以捕获同 pageKey 内的 SPA 切 Tab。
+      if (isJtv1LikePage()) {
+        const currentHref = location.href;
+        if (currentHref !== observedJtv1Href) {
+          observedJtv1Href = currentHref;
+          observedPageKey = currentPageKey;
+          confirmedBusinessTabTitle = "";
+          pendingBusinessTabTitle = "";
+          STATE.skillSourceStatuses = {};
+          loadSkills().catch(() => void 0);
+          return;
+        }
+      }
       if (currentPageKey === observedPageKey) return;
       if (currentPageKey !== observedPageKey) {
         // 切页：confirmed/pendingBusinessTabTitle 是上一页的页签标题，
@@ -1508,6 +1537,7 @@ function initSkills(onRender) {
         pendingBusinessTabTitle = "";
       }
       observedPageKey = currentPageKey;
+      if (isJtv1LikePage()) observedJtv1Href = location.href;
       // 查看模式跟随业务路由刷新；新建/修改模式必须保留草稿，
       // 页面切换只用于选择跨页面数据源，不能中断正在进行的编辑。
       STATE.skillSourceStatuses = {};
@@ -1519,25 +1549,58 @@ function initSkills(onRender) {
   // ant-design Tabs 可能尚未挂载到 DOM。调度 3 次短间隔重试（180ms / 700ms / 1600ms），
   // 确保业务页面初次打开时无需用户手动展开 Chat 即可渲染技能列表。
   if (IS_TOP_FRAME && isJtv1LikePage()) scheduleBusinessTabSkillRefresh();
-  // 固定间隔重试在页面加载慢时可能仍不够（React 渲染 >1.6s 即漏掉）。
-  // 补充 MutationObserver 兜底：一旦观测到业务 Tab 元素出现在 DOM，
-  // 立即触发技能列表加载，无需等待固定间隔。
+  // jtv1 业务 Tab 由 React 异步渲染且存在两阶段切换：
+  //   1. 框架先渲染默认首页 Tab（如"聚水潭欢迎您"）
+  //   2. 随后异步切换到 URL 参数指定的业务 Tab
+  // 固定间隔重试和单次 MutationObserver 可能在阶段 2 之前就结束了，
+  // 导致技能列表始终为空。
+  // 解决方案：两阶段 Observer — 第一阶段检测 Tab 出现；第二阶段监听
+  // aria-selected 变化以捕获框架的异步 Tab 切换。
   if (IS_TOP_FRAME && isJtv1LikePage()) {
-    let jtv1TabObserverDone = false;
+    let jtv1TabObserverPhase = 0; // 0=等待Tab出现, 1=监听激活态变化
+    let jtv1TabObserverLastActiveTitle = "";
+    let jtv1TabObserverDebounce = 0;
+    let jtv1TabAttrObserver = null;
     const jtv1TabObserver = new MutationObserver(() => {
-      if (jtv1TabObserverDone) return;
-      if (findBusinessTabElements().length > 0) {
-        jtv1TabObserverDone = true;
-        jtv1TabObserver.disconnect();
+      if (jtv1TabObserverPhase !== 0) return;
+      const tabs = findBusinessTabElements();
+      if (tabs.length === 0) return;
+      const active = tabs.find((tab) => businessTabActive(tab));
+      const activeTitle = active ? businessTabTitle(active) : "";
+      if (!activeTitle) return;
+      // 阶段 1 完成：Tab 已出现，触发首次加载
+      jtv1TabObserverPhase = 1;
+      jtv1TabObserverLastActiveTitle = activeTitle;
+      jtv1TabObserver.disconnect();
+      loadSkills().catch(() => void 0);
+      // 阶段 2：找到 Tab 容器，监听 aria-selected 属性变化，
+      // 以捕获框架异步切换激活 Tab（如从"聚水潭欢迎您"切到"采购单管理"）
+      const firstTabEl = tabs[0].element;
+      const tabContainer = firstTabEl.closest(".ant-tabs-nav") || firstTabEl.closest(".ant-tabs") || firstTabEl.parentElement;
+      if (!tabContainer) return;
+      jtv1TabAttrObserver = new MutationObserver(() => {
+        const now = Date.now();
+        if (now - jtv1TabObserverDebounce < 500) return;
+        const currentTabs = findBusinessTabElements();
+        if (currentTabs.length === 0) return;
+        const currentActive = currentTabs.find((tab) => businessTabActive(tab));
+        const currentActiveTitle = currentActive ? businessTabTitle(currentActive) : "";
+        if (!currentActiveTitle || currentActiveTitle === jtv1TabObserverLastActiveTitle) return;
+        const previousTitle = jtv1TabObserverLastActiveTitle;
+        jtv1TabObserverLastActiveTitle = currentActiveTitle;
+        jtv1TabObserverDebounce = now;
+        SKILL_DIAGNOSTICS() && console.info("[web2ai.jtv1-tab] active tab switched", JSON.stringify({
+          from: previousTitle, to: currentActiveTitle
+        }));
         loadSkills().catch(() => void 0);
-      }
+      });
+      jtv1TabAttrObserver.observe(tabContainer, { attributes: true, subtree: true, attributeFilter: ["aria-selected"] });
     });
     jtv1TabObserver.observe(document.documentElement, { childList: true, subtree: true });
+    // 整体超时保护：60s 后无论处于哪个阶段都断开
     setTimeout(() => {
-      if (!jtv1TabObserverDone) {
-        jtv1TabObserverDone = true;
-        jtv1TabObserver.disconnect();
-      }
+      if (jtv1TabObserverPhase === 0) jtv1TabObserver.disconnect();
+      if (jtv1TabAttrObserver) jtv1TabAttrObserver.disconnect();
     }, 60000);
   }
 }

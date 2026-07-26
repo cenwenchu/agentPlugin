@@ -58,6 +58,7 @@ const DERIVED_RUNTIME_PAGE_WINDOW_MS = 60 * 1000;
 
 let runtimeSessionCounter = 0;
 let runtimeObserverTimer = null;
+let runtimeStaleSweepCounter = 0;
 const runtimeControllers = new Map();
 const inflightDerivedBatchRequests = new Map();
 const derivedRuntimePageRequestGuards = new Map();
@@ -368,6 +369,12 @@ function shouldKeepStableRenderedRuntime(controller) {
 function clearStaleRuntimeController(controller, reason = "stale") {
   if (!controller) return false;
   if (controller.root) clearDerivedRuntimeSkill(controller.skillId, controller.root);
+  // 文档级兜底清理：jtv1 虚拟滚动回收的行可能已脱离 controller.root DOM 子树
+  if (typeof document !== "undefined") {
+    document.querySelectorAll(
+      `[data-web2ai-derived-column="${controller.skillId}"],[data-web2ai-derived-column-col="${controller.skillId}"]`
+    ).forEach((node) => node.remove());
+  }
   controller.root = null;
   controller.status = "idle";
   controller.runOptions = null;
@@ -451,13 +458,48 @@ function restoreRecentRuntimeResults(controller, {
   pendingRows = []
 } = {}) {
   const recent = controller?.lastCompletedResult;
-  if (!recent) return null;
+  if (!recent) {
+    console.warn("[web2ai.diag] restoreRecent-fail", { reason: "no-recent-result" });
+    return null;
+  }
   const pendingSignature = buildPendingFingerprintSignature(pendingRows);
-  if (!analysisFingerprint || !pendingSignature) return null;
-  if (recent.analysisFingerprint !== analysisFingerprint || recent.pendingSignature !== pendingSignature) return null;
-  if (Date.now() - Number(recent.completedAt || 0) > DERIVED_RUNTIME_RECENT_RESULT_TTL_MS) return null;
+  if (!analysisFingerprint || !pendingSignature) {
+    console.warn("[web2ai.diag] restoreRecent-fail", { reason: "empty-fingerprint-or-signature", analysisFingerprint: !!analysisFingerprint, pendingSignature: !!pendingSignature });
+    return null;
+  }
+  if (recent.analysisFingerprint !== analysisFingerprint) {
+    console.warn("[web2ai.diag] restoreRecent-fail", {
+      reason: "analysisFingerprint-mismatch",
+      recent: recent.analysisFingerprint?.substring(0, 16) + "...",
+      current: analysisFingerprint.substring(0, 16) + "..."
+    });
+    return null;
+  }
+  if (recent.pendingSignature !== pendingSignature) {
+    console.warn("[web2ai.diag] restoreRecent-fail", {
+      reason: "pendingSignature-mismatch",
+      recentLen: recent.pendingSignature?.length,
+      currentLen: pendingSignature.length
+    });
+    return null;
+  }
+  if (Date.now() - Number(recent.completedAt || 0) > DERIVED_RUNTIME_RECENT_RESULT_TTL_MS) {
+    console.warn("[web2ai.diag] restoreRecent-fail", {
+      reason: "ttl-expired",
+      age: Date.now() - Number(recent.completedAt || 0),
+      ttl: DERIVED_RUNTIME_RECENT_RESULT_TTL_MS
+    });
+    return null;
+  }
   const resultMap = new Map(Array.isArray(recent.results) ? recent.results : []);
-  if (!resultMap.size) return null;
+  if (!resultMap.size) {
+    console.warn("[web2ai.diag] restoreRecent-fail", { reason: "empty-result-map" });
+    return null;
+  }
+  console.warn("[web2ai.diag] restoreRecent-ok", {
+    resultCount: resultMap.size,
+    pendingCount: pendingRows.length
+  });
   return {
     resultMap,
     pendingSignature
@@ -603,11 +645,12 @@ async function runDerivedRuntimeSkill(controller) {
   const { skillId } = controller;
   const currentSkill = resolveControllerSkill(controller);
   const runOptions = normalizeRuntimeRunOptions(controller.runOptions);
-  logDerivedRuntime("run-start", {
+  console.warn("[web2ai.diag] runDerived-start", {
     skillId,
-    hasControllerSkill: Boolean(controller?.skill),
-    stateSkillCount: STATE.skills.length,
+    status: controller.status,
     sessionId: controller.sessionId,
+    scrollGeneration: runtimeScrollGeneration,
+    lastScrollGeneration: controller.lastScrollGeneration,
     runOptions
   });
   if (!currentSkill || skillTypeOf(currentSkill) !== SKILL_TYPE_DERIVED_COLUMN) {
@@ -657,6 +700,16 @@ async function runDerivedRuntimeSkill(controller) {
       resultSchemaVersion: DEFAULT_RUNTIME_RESULT_SCHEMA_VERSION
     });
     controller.lastAnalysisFingerprint = analysisFingerprint;
+    console.warn("[web2ai.diag] fingerprint-detail", {
+      skillId: skill.id,
+      fingerprint: analysisFingerprint.substring(0, 20) + "...",
+      sourceId: located.source.id,
+      modelId: STATE.activeModelId,
+      revision: skill.revision,
+      selectedColumnCount: (skill.selectedColumns || []).length,
+      selectedColumns: (skill.selectedColumns || []).map(c => `${c.normalizedHeader || c.header || "?"}:${c.occurrence || 1}`).join(", "),
+      methodPreview: (skill.analysisMethod?.description || "").substring(0, 30)
+    });
     const runtimeModel = buildRuntimeRows({
       skill,
       table: located.table,
@@ -718,10 +771,13 @@ async function runDerivedRuntimeSkill(controller) {
         pendingRows.push(unique);
       }
     }
-    logDerivedRuntime("cache-restored", {
+    console.warn("[web2ai.diag] run-cache-summary", {
       skillId,
-      cachedRows: cachedRenderable.length,
-      pendingFingerprints: pendingRows.length
+      totalUnique: uniqueRows.length,
+      cacheHits: cachedRenderable.length,
+      cacheMisses: pendingRows.length,
+      hasSessionStorage: Boolean(globalThis.chrome?.storage?.session),
+      analysisFingerprint: analysisFingerprint.substring(0, 16) + "..."
     });
     renderDerivedRuntimeNotes(skillId, cachedRenderable, renderOptions);
 
@@ -1006,26 +1062,36 @@ function ensureRuntimeObserver() {
         continue;
       }
       if (!skillAutoRunEnabled(skill) && !shouldKeepManualRuntimeWhenAutoDisabled(controller)) {
+        console.warn("[web2ai.diag] observer-clear-stale", {
+          skillId: controller.skillId,
+          status: controller.status,
+          hasRoot: Boolean(controller.root?.isConnected)
+        });
         clearStaleRuntimeController(controller, "auto-disabled-stale-page");
         continue;
       }
       const root = controller.root;
       const renderedCellCount = countRenderedRuntimeCells(controller);
       const rowCount = root?.isConnected ? countRenderableRuntimeRows(root) : 0;
-      // jtv1 虚拟滚动：DOM 行回收换内容后派生列 [data-web2ai-derived-column] 属性残留，
-      // renderedCellCount === rowCount 假阳。用 scrollGeneration 计数器判断自上次渲染后
-      // jtv1 虚拟滚动会回收 DOM 行换内容，但派生列 [data-web2ai-derived-column] 属性残留。
-      // 不清空单元格（避免闪烁），直接触发热重跑：renderDerivedRuntimeNote 会原地更新已有单元格。
       const hasJtv1Head = root?.querySelector?.("#_jt_row_head");
       const jtv1StaleSuppressed = Number(controller.jtv1StaleSuppressUntil || 0) > Date.now();
+      console.warn("[web2ai.diag] observer-tick", {
+        skillId: controller.skillId,
+        status: controller.status,
+        renderedCellCount,
+        rowCount,
+        hasJtv1Head: Boolean(hasJtv1Head),
+        lastScrollGen: controller.lastScrollGeneration,
+        scrollGen: runtimeScrollGeneration,
+        jtv1StaleSuppressed
+      });
       if (
-        renderedCellCount > 0 &&
         root?.isConnected &&
         controller.lastScrollGeneration !== runtimeScrollGeneration &&
         !jtv1StaleSuppressed &&
         hasJtv1Head
       ) {
-        logDerivedRuntime("observer-jtv1-scroll-stale", {
+        console.warn("[web2ai.diag] observer-jtv1-scroll-stale-FIRING", {
           skillId: controller.skillId,
           renderedCellCount,
           rowCount,
@@ -1040,16 +1106,66 @@ function ensureRuntimeObserver() {
         continue;
       }
       if (!root || !root.isConnected || countRenderedRuntimeCells(controller) < rowCount) {
-        logDerivedRuntime("observer-rerun", {
+        // jtv1 虚拟滚动回收 DOM 行导致 renderedCellCount < rowCount 是常态；
+        // 已完成分析的 controller 由上方 scroll-stale 分支负责补渲染，
+        // 此处不重复触发热重跑，避免 unnecessary 全量重跑 → 重排 → 滚动卡顿。
+        if (hasJtv1Head && renderedCellCount > 0 &&
+            ["complete", "partial"].includes(String(controller.status || ""))) {
+          console.warn("[web2ai.diag] observer-missing-blocked-jtv1", {
+            skillId: controller.skillId,
+            reason: "jtv1-complete-skip",
+            renderedCellCount,
+            rowCount,
+            status: controller.status
+          });
+          continue;
+        }
+        console.warn("[web2ai.diag] observer-missing-FIRING", {
           skillId: controller.skillId,
           hasRoot: Boolean(root),
           rootConnected: Boolean(root?.isConnected),
           renderedCellCount,
-          rowCount
+          rowCount,
+          hasJtv1Head: Boolean(hasJtv1Head),
+          status: controller.status
         });
         controller.sessionId = nextRuntimeSessionId();
         controller.runOptions = { manual: true };
         void runDerivedRuntimeSkill(controller);
+      }
+    }
+    // 周期性清扫：每 3 个 tick (~4.5s) 检查文档中是否存在孤儿派生列单元格
+    //（controller 已删除但 DOM 残留，常见于 jtv1 虚拟滚动回收行后重入 DOM）。
+    runtimeStaleSweepCounter += 1;
+    if (runtimeStaleSweepCounter >= 3) {
+      runtimeStaleSweepCounter = 0;
+      if (typeof document !== "undefined") {
+        const activeIds = new Set([...runtimeControllers.keys()]);
+        const orphanCells = document.querySelectorAll(
+          `[data-web2ai-derived-column]:not([data-web2ai-derived-column-header])`
+        );
+        let sweepRemoved = 0;
+        for (const cell of orphanCells) {
+          const sid = cell.getAttribute("data-web2ai-derived-column");
+          if (!sid || activeIds.has(sid)) continue;
+          cell.remove();
+          sweepRemoved += 1;
+        }
+        const orphanCols = document.querySelectorAll(`[data-web2ai-derived-column-col]`);
+        let sweepColsRemoved = 0;
+        for (const col of orphanCols) {
+          const sid = col.getAttribute("data-web2ai-derived-column-col");
+          if (!sid || activeIds.has(sid)) continue;
+          col.remove();
+          sweepColsRemoved += 1;
+        }
+        if (sweepRemoved > 0 || sweepColsRemoved > 0) {
+          console.warn("[web2ai.diag] sweep-orphan-cleanup", {
+            activeControllerIds: [...activeIds],
+            cellsRemoved: sweepRemoved,
+            colsRemoved: sweepColsRemoved
+          });
+        }
       }
     }
   }, 1500);
@@ -1228,6 +1344,34 @@ async function stopDerivedColumnRuntime(skillId = "", { clearUi = true, clearHis
   const normalizedSkillId = String(skillId || "").trim();
   if (!normalizedSkillId) return false;
   const existing = runtimeControllers.get(normalizedSkillId);
+  if (clearUi && typeof document !== "undefined") {
+    // 文档级清理：jtv1 虚拟滚动回收的行可能已脱离 controller.root DOM 子树，
+    // 需在文档级确保所有派生列单元格（含 colgroup/col 占位）被移除。
+    const cells = document.querySelectorAll(
+      `[data-web2ai-derived-column="${normalizedSkillId}"],[data-web2ai-derived-column-col="${normalizedSkillId}"]`
+    );
+    console.warn("[web2ai.diag] stopRuntime-doc-cleanup", {
+      skillId: normalizedSkillId,
+      removedCount: cells.length
+    });
+    cells.forEach((node) => node.remove());
+    // jtv1 虚拟滚动回收的行在初次清理时可能不在 DOM 中，
+    // 1.5s 后追加一次清理以捕获滚动后重入 DOM 的残留单元格。
+    setTimeout(() => {
+      if (typeof document !== "undefined") {
+        const delayed = document.querySelectorAll(
+          `[data-web2ai-derived-column="${normalizedSkillId}"],[data-web2ai-derived-column-col="${normalizedSkillId}"]`
+        );
+        if (delayed.length > 0) {
+          console.warn("[web2ai.diag] stopRuntime-delayed-cleanup", {
+            skillId: normalizedSkillId,
+            removedCount: delayed.length
+          });
+          delayed.forEach((node) => node.remove());
+        }
+      }
+    }, 1500);
+  }
   if (!existing) return false;
   existing.sessionId = nextRuntimeSessionId();
   existing.status = "idle";
