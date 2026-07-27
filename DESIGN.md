@@ -69,7 +69,7 @@
 
 `headerRef` 用于处理固定表头和表体被框架拆成两个 `<table>` 的情况；`tableId` 用于避免页面上两个列名相同的表格被合并。列数和表头文本只用于发现与校验，不作为主要身份。
 
-表格身份由 `table-adapters.js` 解析组件级作用域：Ant Design 使用 `.ant-table-wrapper`，Arco 使用 `.arco-table`，ArtTable 严格使用组件根 `.art-table`，随后回退到 ARIA 和原生 table。每个 frame 先生成运行实例命名空间，每个实际根节点再通过 `WeakMap` 获得组件实例编号，两者共同组成当前页面生命周期内唯一的 `tableKey`。固定表头与表体共享 wrapper 时共享 key；同 URL 的多个 iframe、两个结构和列内容完全相同的 wrapper 也不会碰撞。项目已删除刷新恢复，因此无需用脆弱的 CSS selector 换取跨刷新稳定性。
+表格身份由 `table-adapters.js` 解析组件级作用域：Ant Design 使用 `.ant-table-wrapper`，Arco 使用 `.arco-table`，ArtTable 严格使用组件根 `.art-table`，随后回退到 ARIA 和原生 table。**`_jtv1` 适配器（聚水潭 ERP）必须排在 `native` 之前**：jtv1 页面外层常被 `<table class="full fixed">` 布局包裹，若 `native` 先通过 `closest("table")` 命中，会跳过 `_jtv1` 适配器的 `rowCells` 钩子（负责过滤 `_jt_cell_index` 序号列和 checkbox 列），导致数据列错位。每个 frame 先生成运行实例命名空间，每个实际根节点再通过 `WeakMap` 获得组件实例编号，两者共同组成当前页面生命周期内唯一的 `tableKey`。固定表头与表体共享 wrapper 时共享 key；同 URL 的多个 iframe、两个结构和列内容完全相同的 wrapper 也不会碰撞。项目已删除刷新恢复，因此无需用脆弱的 CSS selector 换取跨刷新稳定性。
 
 虚拟滚动优先读取 `data-row-key`、`data-key`、`data-id`、`row-key` 等业务标识。普通表格没有显式 key 时使用前三个非空业务列的规范化指纹；ArtTable 使用前两个非空业务列，并额外维护 `tableKey + pageIndex + data-rowindex` 的位置身份，覆盖顶部常驻行和回收行。选中时立即保存文本快照。DOM 节点复用于新数据时只解除旧节点 UI 绑定，不删除旧快照；同一数据重新渲染时自动恢复 check、高亮和原 ref。
 
@@ -240,7 +240,7 @@ Chat 的“全部技能”区域继续按全局统一顺序编号。当前页面
 
 **跳转与重开**。点击“其他页面技能”分组走 `switchToSkillPage` → background `SWITCH_TO_SKILL_PAGE`：先按 pageKey 找到目标浏览器 tab，若 source 带 `businessTabTitle` 则向顶帧发 `ACTIVATE_BUSINESS_PAGE_TAB` 激活对应业务页签（`main.js` 在 `findBusinessTabElements` 里按标题找页签并 dispatch click，realTab 优先于 ant Tabs）；激活失败（页签已关闭）时用 `?n=` 直达 URL 导航重开，再打开技能面板并聚焦高亮数据源表格。前端传单个 source 对象（不是 `focusSources` 数组），background 据此读取 `businessTabTitle`；`focusSources` 数组仅作聚焦兜底。
 
-**执行链路的页签激活**。采集（`LOAD_SKILL_SOURCE_DATA`）、预览（`EXTRACT_SKILL_SOURCE_PREVIEW_DATA`）、分页探测（`INSPECT_SKILL_SOURCE_PAGINATION`）在定位数据源前，若 source 带 `businessTabTitle` 会先尝试激活对应业务页签再校验。技能横条（`renderSkillBars`）按 `frameUrl === pageKey(location.href)` 定位目标 frame，jtv1 每个业务页签 iframe 的 src 不同，天然按页签区分，无需特殊处理。**性能**：`renderSkillBars` 与 3s 低频重建定时器先做 `frameHasMatchingSkill` 判断（仅比较 `source.frameUrl` 与本 frame URL，不定位表格）——当前 frame 无任何匹配技能时直接早退/不启动定时器，避免无技能 frame 每 3s 空转全文档扫描；有匹配的 frame 仍保留 3s 重建以兜底业务框架整块替换表格 DOM（横条丢失需重建，不能按"技能/页面无变化"跳过）。jtv1 表格（`#_jt` 写死高度的虚拟滚动表）上方注入技能横条时，会按横条实际高度等量压缩 `#_jt` 与 `#_jt_body` 高度，保持底部翻页器可见；压缩基于容器当前实测高度按比例计算、幂等（横条每 3s 重建不叠加误差），以适配框架按视口/手动拖拽动态算高的特性。
+**执行链路的页签激活**。采集（`LOAD_SKILL_SOURCE_DATA`）、预览（`EXTRACT_SKILL_SOURCE_PREVIEW_DATA`）、分页探测（`INSPECT_SKILL_SOURCE_PAGINATION`）在定位数据源前，若 source 带 `businessTabTitle` 会先尝试激活对应业务页签再校验。技能横条（`renderSkillBars`）按 `frameUrl === pageKey(location.href)` 定位目标 frame，jtv1 每个业务页签 iframe 的 src 不同，天然按页签区分，无需特殊处理。**性能**：`renderSkillBars` 与 3s 低频重建定时器先做 `frameHasMatchingSkill` 判断（仅比较 `source.frameUrl` 与本 frame URL，不定位表格）——当前 frame 无任何匹配技能时直接早退/不启动定时器，避免无技能 frame 每 3s 空转全文档扫描；有匹配的 frame 仍保留 3s 重建以兜底业务框架整块替换表格 DOM（横条丢失需重建，不能按"技能/页面无变化"跳过）。jtv1 表格（`#_jt` 写死高度的虚拟滚动表）上方注入技能横条时，会按横条实际高度等量压缩 `#_jt` 与 `#_jt_body` 高度，保持底部翻页器可见；压缩基于容器当前实测高度按比例计算、幂等（横条每 3s 重建不叠加误差），以适配框架按视口/手动拖拽动态算高的特性。**jtv1 容器定位**：`tableCandidates()` 在过滤阶段会豁免 jtv1 容器（包含 `#_jt_row_head`/`#_jt_body` 的 `div#_jt`），防止其被外层布局 `<table class="full fixed">` 过滤掉。若容器被误过滤，`locateStoredSource` 会退化为外层 `<table>`，导致技能条挂在页面顶部且数据提取路径错误。
 
 **首次加载与页签切换检测**。`initSkills` 中的 `pageWatchTimer` 在 jtv1 页面额外监控 `location.href` 变化，处理 SPA 框架内同一 pageKey 下的查询参数切换（如 `?n=` 直达不同业务页签）。业务页签的加载采用两阶段 MutationObserver：（1）**Phase 1（childList）**：检测页签 DOM 元素的出现 → 触发首次 `loadSkills`；（2）**Phase 2（aria-selected）**：监听 Ant Design 页签的 `aria-selected` 属性变化 → 在活跃页签切换时（如从框架首页切到业务页签）自动刷新技能列表。
 

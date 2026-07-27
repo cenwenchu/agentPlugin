@@ -211,3 +211,25 @@ test("distinguishes recycled virtual rows by business key or leading-column fing
     getRowContentFingerprint("1 ||| ORDER-1 ||| 已刷新", 2)
   );
 });
+
+test("resolveTableAdapter on jtv1 row prefers _jtv1 over native even inside wrapper table", () => {
+  // jtv1 页面外层常被 <table> 布局包裹，若 native 适配器先于 _jtv1
+  // 通过 closest("table") 匹配，会用通用行/单元格提取逻辑，漏掉
+  // _jt_cell_index 和 checkbox 列过滤，导致数据列错位。
+  const commonParent = { id: "_jt" };
+  const body = { parentElement: commonParent };
+  const outerTable = { tagName: "TABLE" };
+  const row = {
+    closest: (selector) => {
+      if (selector === "#_jt_body") return body;
+      if (selector === "table") return outerTable; // native adapter
+      return null;
+    },
+    getAttribute: () => null,
+    querySelector: () => null,
+    matches: () => false
+  };
+  const resolved = resolveTableAdapter(row);
+  assert.equal(resolved.adapter.name, "_jtv1");
+  assert.equal(resolved.scope, commonParent);
+});

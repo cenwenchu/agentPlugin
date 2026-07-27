@@ -571,3 +571,86 @@ test("jtv1 source data ignores nested toolbar table and aligns visible cells wit
     cleanup();
   }
 });
+
+test("tableCandidates keeps jtv1 container when wrapped by layout <table>", () => {
+  // jtv1 页面外层常被 <table class="full fixed"> 布局包裹，
+  // tableCandidates 不应因此过滤掉真正的数据表容器 div#_jt。
+  const cleanup = installDom(`
+    <table class="full fixed">
+      <tbody><tr><td>
+        <div id="_jt">
+          <table id="_jt_toolbar"><tbody><tr><td>toolbar</td></tr></tbody></table>
+          <div id="_jt_row_head">
+            <div id="_jt_row_head_list">
+              <div class="_jt_cell_head _jt_cell_head_index">&nbsp;</div>
+              <div class="_jt_cell_head _jt_cbx"><input type="checkbox"></div>
+              <div class="_jt_cell_head nobr"><span>订单号</span></div>
+            </div>
+          </div>
+          <div id="_jt_body">
+            <div class="_jt_row _jt_rh" index="0">
+              <div class="_jt_cell _jt_cell_index _jt_ch">1</div>
+              <div class="_jt_cell _jt_ch"><input type="checkbox"></div>
+              <div class="_jt_cell _jt_ch">S001</div>
+            </div>
+          </div>
+        </div>
+      </td></tr></tbody>
+    </table>
+  `);
+  try {
+    const candidates = tableCandidates();
+    const ids = candidates.map((node) => node.id);
+    assert.ok(ids.includes("_jt"), "div#_jt should be a candidate even inside a wrapper <table>");
+  } finally {
+    cleanup();
+  }
+});
+
+test("jtv1 data extraction keeps correct columns when wrapped by layout <table>", () => {
+  // 验证 jtv1 适配器在 table-adapters 数组中排在 native 之前后，
+  // 数据行提取不会漏掉 _jt_cell_index 和 checkbox 过滤，列不会错位。
+  const cleanup = installDom(`
+    <table class="full fixed">
+      <tbody><tr><td>
+        <div id="_jt">
+          <table id="_jt_toolbar"><tbody><tr><td>toolbar</td></tr></tbody></table>
+          <div id="_jt_row_head">
+            <div id="_jt_row_head_list">
+              <div class="_jt_cell_head _jt_cell_head_index">&nbsp;</div>
+              <div class="_jt_cell_head _jt_cbx"><input type="checkbox"></div>
+              <div class="_jt_cell_head nobr"><span>订单号</span></div>
+              <div class="_jt_cell_head nobr"><span>客户</span></div>
+              <div class="_jt_cell_head nobr"><span>金额</span></div>
+            </div>
+          </div>
+          <div id="_jt_body">
+            <div class="_jt_row _jt_rh" index="0">
+              <div class="_jt_cell _jt_cell_index _jt_ch">1</div>
+              <div class="_jt_cell _jt_ch"><input type="checkbox"></div>
+              <div class="_jt_cell _jt_ch">S001</div>
+              <div class="_jt_cell _jt_ch">张三</div>
+              <div class="_jt_cell _jt_ch">100.00</div>
+            </div>
+          </div>
+        </div>
+      </td></tr></tbody>
+    </table>
+  `);
+  try {
+    const source = {
+      selector: "#_jt",
+      selectorStrength: "stable-id",
+      headers: ["订单号", "客户", "金额"],
+      locatorVersion: 2
+    };
+    const data = extractStoredSourceData(source);
+    assert.equal(data.found, true);
+    assert.deepEqual(data.headers, ["订单号", "客户", "金额"]);
+    assert.equal(data.rowCount, 1);
+    // 不应包含序号 "1" 或 checkbox — jtv1 适配器应正确过滤
+    assert.deepEqual(data.rows, [["S001", "张三", "100.00"]]);
+  } finally {
+    cleanup();
+  }
+});
