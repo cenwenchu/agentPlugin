@@ -4,8 +4,10 @@ const TABLE_ADAPTERS = [
   // 只能匹配组件根节点；[class*='art-table'] 会误把 .art-table-row/.art-table-cell 当成 tableKey。
   { name: "art", scope: ".art-table", rowKeyAttrs: ["data-row-key", "data-key"] },
   { name: "aria", scope: "[role='grid'],[role='table'],[role='treegrid']", rowKeyAttrs: ["data-row-key", "data-key", "aria-rowindex"] },
-  { name: "native", scope: "table", rowKeyAttrs: ["data-row-key", "data-key", "id"] },
   // _jtv1（聚水潭 ERP）：表头(#_jt_row_head)和表体(#_jt_body)是兄弟 div，
+  // 必须放在 native 适配器之前：jtv1 页面外层常被 <table> 布局包裹，
+  // 若 native 先通过 closest("table") 匹配，会用通用行/单元格提取逻辑，
+  // 漏掉 _jt_cell_index 和 checkbox 列过滤，导致数据列错位。
   // 共同父元素才是真正的表格根节点。适配器使用函数式 scope 解析。
   // 该组件在根节点内嵌套原生 table#_jt_toolbar（按钮工具栏），
   // 因此行/单元格/表头提取全部由适配器钩子接管，与通用逻辑隔离。
@@ -48,7 +50,8 @@ const TABLE_ADAPTERS = [
         return true;
       });
     }
-  }
+  },
+  { name: "native", scope: "table", rowKeyAttrs: ["data-row-key", "data-key", "id"] }
 ];
 
 function resolveTableAdapter(rowEl) {

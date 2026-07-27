@@ -4,7 +4,7 @@
  * 绑定字段和旧版定位优先级保持不变；本模块不负责技能存储或跨页采集。
  */
 
-import { DEBUG, IS_TOP_FRAME, compactOneLine } from "./state.js";
+import { IS_TOP_FRAME, compactOneLine, web2aiDiagnosticsEnabled } from "./state.js";
 import { getCssSelector, isVisibleElement } from "./dom.js";
 import { skillHeadersMatch } from "./skill-collection-model.js";
 import { SOURCE_LOCATOR_VERSION } from "./skill-source-model.js";
@@ -19,7 +19,7 @@ const TABLE_SELECTOR = [
   "table", '[role="table"]', '[role="grid"]', '[role="treegrid"]',
   ".art-table", ".ant-table-wrapper", ".arco-table"
 ].join(",");
-const SKILL_DIAGNOSTICS = DEBUG;
+const SKILL_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 // 详细诊断：默认关闭。常规 DEBUG 日志保持轻量（locateStoredSource 每次渲染技能条都会跑，
 // 其 candidates 逐项序列化会对每个候选表做 innerText 提取 + getCssSelector + rect 读取，
 // 在大表上单次可达数百 ms）。需深挖定位细节时，控制台 window.__WEB2AI_DEBUG_VERBOSE = true。
@@ -67,9 +67,24 @@ function tableCandidates() {
       candidates.push(parent);
     }
   });
-  return candidates.filter((candidate, index) => !candidates.some((parent, parentIndex) => (
-    parentIndex !== index && parent.contains(candidate) && parent.matches(TABLE_SELECTOR)
-  )));
+  // jtv1: #_jt 容器本身就是合法的表格候选，不依赖 #_jt_row_head 是否已渲染。
+  // 当通过保存的 CSS 选择器 #_jt 重新定位时，selectorCandidateCount 需要 > 0。
+  if (isJtv1LikePage()) {
+    Array.from(document.querySelectorAll("#_jt")).forEach((jtContainer) => {
+      if (!candidates.includes(jtContainer)) {
+        candidates.push(jtContainer);
+      }
+    });
+  }
+  return candidates.filter((candidate, index) => {
+    // jtv1 页面：div#_jt 是真正的表格根节点，但其外层常被 <table> 布局包裹。
+    // 若父级 table 包含 jtv1 容器就过滤掉它，会导致候选池丢失真正的数据表，
+    // 退化为外层布局 table，使技能条挂在页面顶部且数据采集行为不一致。
+    const isJtv1Container = isJtv1LikePage() && candidate.querySelector?.("#_jt_row_head, #_jt_body, ._jt_row._jt_rh");
+    return !candidates.some((parent, parentIndex) => (
+      parentIndex !== index && parent.contains(candidate) && parent.matches(TABLE_SELECTOR) && !isJtv1Container
+    ));
+  });
 }
 
 function dataRowsInTable(table) {
@@ -135,7 +150,7 @@ function resolveStoredSourceDataTable(table, source = {}) {
   const best = candidates[0];
   if (!best) return table;
   if (best.similarity < 0.9) return table;
-  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] resolve-data-table", JSON.stringify({
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] resolve-data-table", JSON.stringify({
     sourceId: source?.id || "",
     fromSelector: getCssSelector(table),
     toSelector: getCssSelector(best.table),
@@ -188,6 +203,10 @@ function resolveTableFromTarget(target) {
     if (jtv1Body) return jtv1Body.parentElement;
     const jtv1Head = target.closest("#_jt_row_head");
     if (jtv1Head) return jtv1Head.parentElement;
+    // target 本身就是 jtv1 表格容器（如 div#_jt），内部包含表格结构元素，
+    // 但 closest() 向上查找不会命中（因为结构元素在 target 内部而非祖先节点）。
+    // 场景：保存技能后通过 CSS 选择器 #_jt 重新定位时进入此路径。
+    if (target.querySelector?.("#_jt_row_head, #_jt_body, ._jt_row._jt_rh")) return target;
     return null;
   }
   const row = target.closest("tr, [role='row'], .art-table-row, .ant-table-row, .arco-table-tr, ._jt_row._jt_rh");
@@ -268,6 +287,15 @@ function extractHeaders(table, preferredTarget = null) {
         .filter((cell) => !cell.matches?.(DERIVED_COLUMN_SELECTOR));
     }
   }
+  // jtv1 兜底：当 resolveTableRootAdapter 无法匹配（scope 为函数且 matchesRoot 不满足时），
+  // 直接从 #_jt_row_head 提取表头单元格，避免 fallback 到整页文本提取。
+  if (!cells.length && isJtv1LikePage()) {
+    const jtv1Head = table.querySelector?.("#_jt_row_head");
+    if (jtv1Head) {
+      cells = Array.from(jtv1Head.querySelectorAll("._jt_cell_head"))
+        .filter((cell) => !cell.matches?.(DERIVED_COLUMN_SELECTOR));
+    }
+  }
   // 非标准 div 表格无法标识完整表头区域时，再使用用户实际点击行兜底。
   if (!cells.length) cells = clickedHeaderCells(preferredTarget);
   // 复用 Chat 的表头关联算法，兼容固定表头与表体拆成兄弟 table 的组件。
@@ -335,7 +363,7 @@ function describeTable(table, preferredTarget = null) {
   const tableTitle = inferTableTitle(table);
   const selector = getCssSelector(table);
   const tableIndex = Math.max(0, candidates.indexOf(table));
-  SKILL_DIAGNOSTICS && console.info("[web2ai.skill] selected table", {
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill] selected table", {
     frame: IS_TOP_FRAME ? "top" : "child",
     frameUrl: pageKey(location.href),
     root: `${table.tagName.toLowerCase()}${table.id ? `#${table.id}` : ""}.${String(table.className || "").split(/\s+/).slice(0, 3).join(".")}`,
@@ -634,8 +662,34 @@ function locateStoredSource(source, options = {}) {
     const matches = source?.selector
       ? (versioned ? Array.from(document.querySelectorAll(source.selector)) : [document.querySelector(source.selector)].filter(Boolean))
       : [];
-    selectorTables = preferVisibleTables(matches.map(resolveTableFromTarget).filter((table) => table && candidates.includes(table)));
-  } catch {
+    const resolvedTables = matches.map(resolveTableFromTarget);
+    selectorTables = preferVisibleTables(resolvedTables.filter((table) => table && (candidates.includes(table) || (isJtv1LikePage() && table.querySelector?.("#_jt_row_head, #_jt_body, ._jt_row._jt_rh")))));
+    // 诊断：selector 匹配详情
+    if (SKILL_DIAGNOSTICS() && source?.selector && selectorTables.length === 0) {
+      console.warn("[web2ai.skill-source] selector-match-debug", JSON.stringify({
+        sourceId: source?.id?.substring(0, 12),
+        selector: source.selector,
+        matchCount: matches.length,
+        resolvedCount: resolvedTables.filter(Boolean).length,
+        inCandidates: resolvedTables.map((table, i) => ({
+          index: i,
+          resolved: Boolean(table),
+          tag: table?.tagName?.toLowerCase?.() || "",
+          id: table?.id || "",
+          className: String(table?.className || "").trim().split(/\s+/).slice(0, 4).join(" "),
+          inCandidates: Boolean(table) && candidates.includes(table),
+          hasJtv1Children: Boolean(table) && Boolean(table.querySelector?.("#_jt_row_head, #_jt_body, ._jt_row._jt_rh"))
+        })),
+        candidateCount: candidates.length,
+        candidateTags: candidates.map((c) => `${c.tagName?.toLowerCase?.() || ""}${c.id ? `#${c.id}` : ""}.${String(c.className || "").trim().split(/\s+/).slice(0, 2).join(".")}`).slice(0, 6)
+      }));
+    }
+  } catch (err) {
+    SKILL_DIAGNOSTICS() && console.warn("[web2ai.skill-source] selector-match-error", JSON.stringify({
+      sourceId: source?.id?.substring(0, 12),
+      selector: source?.selector || "",
+      error: String(err?.message || err || "")
+    }));
     selectorTables = [];
   }
   const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
@@ -654,7 +708,7 @@ function locateStoredSource(source, options = {}) {
   ));
   const chosen = pickBestStoredSourceCandidate(scoredCandidates, source, resolvedOptions);
   // 轻量摘要：每次渲染都跑，保持低开销
-  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] locate", JSON.stringify({
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] locate", JSON.stringify({
     page: pageKey(location.href),
     sourceId: source?.id || "",
     sourceName: source?.displayName || source?.tableTitle || "",
@@ -689,10 +743,26 @@ function locateStoredSource(source, options = {}) {
     }))
   }));
   if (chosen.ambiguous) {
+    SKILL_DIAGNOSTICS() && typeof console?.warn === "function" && console.warn("[web2ai.skill-source] locate-ambiguous", JSON.stringify({
+      sourceId: source?.id?.substring(0, 12),
+      candidateCount: candidates.length,
+      bestScore: chosen.candidates?.[0]?.score,
+      secondScore: chosen.candidates?.[1]?.score,
+      bestHeaders: chosen.candidates?.[0]?.headers?.slice(0, 3),
+      secondHeaders: chosen.candidates?.[1]?.headers?.slice(0, 3)
+    }));
     return { table: null, status: "ambiguous", ambiguous: true, candidateCount: candidates.length };
   }
   const table = resolveStoredSourceDataTable(chosen.table, source);
-  if (!table) return { table: null, status: chosen.status || "missing", candidateCount: candidates.length };
+  if (!table) {
+    SKILL_DIAGNOSTICS() && typeof console?.warn === "function" && console.warn("[web2ai.skill-source] locate-table-not-found", JSON.stringify({
+      sourceId: source?.id?.substring(0, 12),
+      status: chosen.status || "missing",
+      matchMethod: chosen.matchMethod,
+      candidateCount: candidates.length
+    }));
+    return { table: null, status: chosen.status || "missing", candidateCount: candidates.length };
+  }
   const identityWarnings = [];
   if (versioned && source.componentType && source.componentType !== tableComponentType(table)) identityWarnings.push("component-type-changed");
   if (versioned && source.containerSignature && source.containerSignature !== tableContainerSignature(table)) identityWarnings.push("container-signature-changed");
@@ -701,7 +771,7 @@ function locateStoredSource(source, options = {}) {
   const detailOptions = resolveStoredSourceOptions(source, options);
   const selectedColumnCoverageDetail = chosen.candidate?.selectedColumnCoverageDetail
     || buildSelectedColumnCoverage(detailOptions.selectedColumns, headers);
-  return {
+  const locateResult = {
     table,
     status: chosen.status || "available",
     matchMethod: chosen.matchMethod,
@@ -718,6 +788,27 @@ function locateStoredSource(source, options = {}) {
     actualHeaders: headers.slice(0, 80),
     candidate: chosen.candidate || null
   };
+  if (locateResult.status !== "available" && SKILL_DIAGNOSTICS() && typeof console?.warn === "function") {
+    console.warn("[web2ai.skill-source] locate-status-not-available", JSON.stringify({
+      sourceId: source?.id?.substring(0, 12),
+      status: locateResult.status,
+      matchMethod: locateResult.matchMethod,
+      headerCoverage: locateResult.headerCoverage,
+      selectedColumnCoverage: locateResult.selectedColumnCoverage,
+      score: locateResult.score,
+      candidateCount: locateResult.candidateCount,
+      identityWarnings: locateResult.identityWarnings,
+      headersMatch: skillHeadersMatch(source?.headers || [], headers),
+      expectedHeadersSample: (source?.headers || []).slice(0, 5),
+      actualHeadersSample: headers.slice(0, 5),
+      selectorStrength: source?.selectorStrength || "",
+      hasSelector: Boolean(source?.selector),
+      hasTableIndex: typeof source?.tableIndex === "number",
+      componentType: source?.componentType || "",
+      candidateExactHeaderMatch: chosen.candidate?.exactHeaderMatch
+    }));
+  }
+  return locateResult;
 }
 
 function resolveStoredSource(source, options = {}) {
@@ -762,10 +853,35 @@ function resolveStoredSource(source, options = {}) {
     selectedTable: summarizeTableCandidate(selected)
   };
   // 单行 JSON 便于从复杂业务页面控制台直接复制；仅包含表头，不输出业务数据行。
-  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] resolve", JSON.stringify(diagnostic));
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] resolve", JSON.stringify(diagnostic));
+  const finalStatus = located.status || (skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed");
+  // 诊断日志：非 available 状态强制输出，便于排查"保存后立即显示数据源已变化"类问题
+  if (finalStatus !== "available" && SKILL_DIAGNOSTICS() && typeof console?.warn === "function") {
+    console.warn("[web2ai.skill-source] source-not-available", JSON.stringify({
+      sourceId: source.id?.substring(0, 12),
+      skillType: options?.skillType || "",
+      frameUrl: (source.frameUrl || "").substring(0, 50),
+      businessTabTitle: source.businessTabTitle || "",
+      status: finalStatus,
+      locatedStatus: located.status || "",
+      headersMatch: skillHeadersMatch(source?.headers || [], headers),
+      similarity: Number(similarity.toFixed(3)),
+      headerCoverage: located.headerCoverage,
+      selectedColumnCoverage: located.selectedColumnCoverage,
+      score: located.score || 0,
+      matchMethod: located.matchMethod || "",
+      candidateCount: located.candidateCount || 0,
+      expectedHeadersSample: (source?.headers || []).slice(0, 5),
+      actualHeadersSample: (headers || []).slice(0, 5),
+      selectorStrength: source?.selectorStrength || "",
+      hasSelector: Boolean(source?.selector),
+      hasTableIndex: typeof source?.tableIndex === "number",
+      exactHeaderMatch: located.candidate?.exactHeaderMatch
+    }));
+  }
   return {
     found: true,
-    status: located.status || (skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed"),
+    status: finalStatus,
     headers,
     similarity,
     headerCoverage: located.headerCoverage ?? similarity,
@@ -826,7 +942,7 @@ function extractStoredSourceData(source, limit = 200, options = {}) {
   }
   const rows = uniqueRows.slice(0, limit);
   const extractionDiagnostics = buildRowExtractionDiagnostics(rawRows, headers, allRows, uniqueRows);
-  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] extract-data", JSON.stringify({
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] extract-data", JSON.stringify({
     sourceId: source?.id || "",
     status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
     found: true,
@@ -858,7 +974,7 @@ function extractStoredSourcePreviewData(source, limit = 20, options = {}) {
     .filter((cells) => cells.length && cells.some(Boolean));
   const rows = allRows.slice(0, Math.max(1, limit));
   const extractionDiagnostics = buildRowExtractionDiagnostics(rawRows, headers, allRows, allRows);
-  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-source] extract-preview", JSON.stringify({
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] extract-preview", JSON.stringify({
     sourceId: source?.id || "",
     status: skillHeadersMatch(source?.headers || [], headers) ? "available" : "changed",
     found: true,
