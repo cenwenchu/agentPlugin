@@ -5,7 +5,7 @@
  * 保持既有 class/id 与事件时序，避免拆分影响已发布页面和端到端测试。
  */
 
-import { STATE, clamp, normalizeText, refs } from "./state.js";
+import { STATE, clamp, normalizeText, refs, web2aiDiagnosticsEnabled } from "./state.js";
 import { el } from "./dom.js";
 import { renderMarkdown } from "./markdown.js";
 import { MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS } from "./skill-collection-model.js";
@@ -20,7 +20,7 @@ import {
   runDerivedColumnPreview, saveSkillTestMethod, stopSkillExecution, uploadSkillRuntimeFiles, viewSkillSubmittedPrompt
 } from "./skill-workspace-controller.js";
 
-const SKILL_DIAGNOSTICS = true;
+const SKILL_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 
 function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, render: renderOverlay }) {
   const renderUsageBox = (lines = []) => el("div", { class: "skillUsageNote" }, [
@@ -180,7 +180,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
               disabled: test.pending,
               style: test.pending ? { display: "none" } : {},
               onClick: () => {
-                SKILL_DIAGNOSTICS && console.info("[web2ai.skill-preview]", "workspace-test-click", JSON.stringify({
+                SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-preview]", "workspace-test-click", JSON.stringify({
                   skillId: test.skillId || "",
                   mode: test.mode || "",
                   sourceCount: (test.dataSources || []).length
@@ -346,7 +346,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
               id: "web2ai_run_skill",
               class: "btn primary",
               onClick: () => {
-                SKILL_DIAGNOSTICS && console.info("[web2ai.skill-preview]", "workspace-click", JSON.stringify({
+                SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-preview]", "workspace-click", JSON.stringify({
                   skillId: execution.skillId || "",
                   mode: execution.mode || "",
                   sourceCount: (execution.dataSources || []).length
@@ -359,7 +359,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
             el("button", {
               class: "btn primary",
               onClick: () => {
-                SKILL_DIAGNOSTICS && console.info("[web2ai.skill-preview]", "workspace-reuse-click", JSON.stringify({
+                SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-preview]", "workspace-reuse-click", JSON.stringify({
                   skillId: execution.skillId || "",
                   mode: execution.mode || "",
                   sourceCount: (execution.dataSources || []).length

@@ -2056,7 +2056,52 @@ try {
   );
   await statusUiPage.close();
   reportE2eSection("source status UI passed");
-console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, runtime CSV/XLSX sources, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing, derived runtime auto/manual/page-guard, toggle-rebuild, skill-deletion, source-status-ui coverage");
+  // ==========================================================================
+  // Section 12: Recovery hints on source-changed cards
+  // 验证数据源变化时，技能卡片显示恢复引导文案（buildSkillSourceRecoveryHint）。
+  // ==========================================================================
+  const recoveryHintUrl = `${url}skill-source-tabs`;
+  await setStoredSkillsWithFreshWorker(browser, {
+    skills: [
+      makeLocatorDerivedSkill({
+        id: "recovery-hint-skill",
+        name: "恢复引导技能",
+        pageUrl: recoveryHintUrl,
+        selector: "#missing-recovery-selector",
+        headers: ["序号", "已删除的列A", "已删除的列B"],
+        selectedColumns: ["已删除的列A"]
+      })
+    ]
+  });
+  const recoveryPage = await createPage();
+  recoveryPage.on("pageerror", (error) => console.log(`[e2e][recovery-hint][pageerror] ${error.message}`));
+  await recoveryPage.goto(recoveryHintUrl);
+  await recoveryPage.waitForSelector("#web2ai_overlay_host");
+  await openSkillsPanel(recoveryPage);
+  await waitForSkillStatusClass(recoveryPage, "恢复引导技能", "changed");
+  // 检查卡片中是否渲染了恢复引导文案
+  const recoveryHintText = await recoveryPage.$eval("#web2ai_overlay_host", (host, { skillName }) => {
+    const shadow = host.shadowRoot;
+    const cards = Array.from(shadow.querySelectorAll(".skillCard"));
+    const card = cards.find((c) => c.querySelector(".skillTitle")?.textContent?.includes(skillName));
+    if (!card) throw new Error(`card not found for ${skillName}`);
+    // recoveryHint 渲染在 skillMeta 中，颜色为 #9a3412
+    const metaDivs = Array.from(card.querySelectorAll(".skillMeta div"));
+    const hint = metaDivs.find((div) => div.style.color === "rgb(154, 52, 18)");
+    return hint?.textContent || "";
+  }, { skillName: "恢复引导技能" });
+  assert.ok(
+    recoveryHintText.includes("切换到正确的 Tab"),
+    `source-changed card must show recovery hint about tab switching, got: "${recoveryHintText}"`
+  );
+  assert.ok(
+    recoveryHintText.includes("修改技能"),
+    `source-changed card must mention "修改技能" as a recovery option, got: "${recoveryHintText}"`
+  );
+  await recoveryPage.close();
+  reportE2eSection("recovery hints passed");
+
+console.log("Chrome E2E passed: model switching/configuration, screenshots, skill create/edit/test/execute, runtime CSV/XLSX sources, multi-source persistence/loading, hybrid virtual pagination, internal scrolling, launcher toggle, table gating, iframe injection, virtual rows, refresh clearing, derived runtime auto/manual/page-guard, toggle-rebuild, skill-deletion, source-status-ui, recovery-hints coverage");
 } finally {
   await browser.close();
   server.close();

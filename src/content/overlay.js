@@ -14,7 +14,7 @@
  * content script → messaging.js (Port) → background.js (fetch SSE) → messaging.js → scheduleRender
  */
 
-import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, Z_INDEX, TABLE_UI_Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs } from './state.js';
+import { DEBUG, IS_TOP_FRAME, STATE, COL_SEPARATOR, Z_INDEX, TABLE_UI_Z_INDEX, uid, normalizeText, compactOneLine, clamp, refs, web2aiDiagnosticsEnabled } from './state.js';
 import { el } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { openOptionsPage, streamChat, stopGeneration, sendToBackground } from './messaging.js';
@@ -45,8 +45,8 @@ import {
   initSkillWorkspaceController, startDerivedColumnPreview, startSkillExecution, startSkillTest
 } from './skill-workspace-controller.js';
 
-const SKILL_PANEL_DIAGNOSTICS = true;
-const SKILL_DIAGNOSTICS = true;
+const SKILL_PANEL_DIAGNOSTICS = web2aiDiagnosticsEnabled;
+const SKILL_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 import { SKILL_WORKSPACE_CSS } from './skill-workspace-style.js';
 import { renderSkillWorkspace } from './skill-workspace-view.js';
 
@@ -1718,7 +1718,7 @@ function render() {
                   showToast(unavailableMessage, 3500, { position: "center" });
                   return;
                 }
-                SKILL_DIAGNOSTICS && console.info("[web2ai.skill-preview]", "overlay-click", JSON.stringify({
+                SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-preview]", "overlay-click", JSON.stringify({
                   skillId: skill.id || "",
                   skillName: skill.name || "",
                   type
@@ -1735,7 +1735,7 @@ function render() {
                   return;
                 }
                 if (analysisPrompt) {
-                  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-test]", "overlay-click", JSON.stringify({
+                  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-test]", "overlay-click", JSON.stringify({
                     skillId: skill.id || "",
                     skillName: skill.name || "",
                     type
@@ -1787,7 +1787,7 @@ function render() {
       })
     };
     const panelSignature = JSON.stringify(panelSnapshot);
-    if (SKILL_PANEL_DIAGNOSTICS && refs.lastSkillPanelRenderLog !== panelSignature) {
+    if (SKILL_PANEL_DIAGNOSTICS() && refs.lastSkillPanelRenderLog !== panelSignature) {
       refs.lastSkillPanelRenderLog = panelSignature;
       DEBUG && console.info("[web2ai.skill-panel] render", panelSignature);
     }

@@ -5,7 +5,7 @@
  * Overlay 初始化时注入 render，避免形成 controller → overlay 的循环依赖。
  */
 
-import { DEBUG, STATE, refs, uid, normalizeText } from "./state.js";
+import { DEBUG, STATE, refs, uid, normalizeText, web2aiDiagnosticsEnabled } from "./state.js";
 import { streamChat, stopGeneration, sendToBackground } from "./messaging.js";
 import { showConfirmDialog, showPromptDialog, showTextDialog } from "./dialog.js";
 import { showToast } from "./toast.js";
@@ -34,10 +34,10 @@ import {
 
 let renderWorkspace = () => void 0;
 let scheduleWorkspaceRender = () => renderWorkspace();
-const SKILL_DIAGNOSTICS = true;
+const SKILL_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 
 function logSkillWorkspaceCollection(event, details = {}) {
-  SKILL_DIAGNOSTICS && console.info("[web2ai.skill-workspace]", event, JSON.stringify(details));
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-workspace]", event, JSON.stringify(details));
 }
 
 function initSkillWorkspaceController({ render, scheduleRender } = {}) {
