@@ -274,6 +274,99 @@ test("runtime renderer inserts jtv1 column before selected business column (not 
   }
 });
 
+test("jtv runtime observer reserves the derived column as soon as a virtual row is created", async () => {
+  const cleanup = installDom(`
+    <div id="_jt">
+      <div id="_jt_row_head"><div id="_jt_row_head_list">
+        <div class="_jt_cell_head"><span>订单号</span></div>
+        <div class="_jt_cell_head"><span>金额</span></div>
+      </div></div>
+      <div id="_jt_body"><div id="_jt_body_list"></div></div>
+    </div>
+  `);
+  const controller = {
+    skillId: "skill_jtv_observer",
+    root: document.querySelector("#_jt"),
+    lastRenderOptions: {
+      root: document.querySelector("#_jt"),
+      headerCount: 2,
+      insertIndex: 1,
+      outputColumnName: "AI结论",
+      columnWidth: 190
+    }
+  };
+  try {
+    assert.equal(runtimeTest.ensureJtvRuntimeRowObserver(controller), true);
+    document.querySelector("#_jt_body_list").insertAdjacentHTML("beforeend", `
+      <div class="_jt_row _jt_rh" index="0" id="virtual-row">
+        <div class="_jt_cell">A-1</div>
+        <div class="_jt_cell">100</div>
+      </div>
+    `);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const cell = document.querySelector("#virtual-row [data-web2ai-derived-column='skill_jtv_observer']");
+    assert.ok(cell, "new jtv rows should receive a placeholder without waiting for the polling timer");
+    assert.equal(cell.nextElementSibling?.textContent.trim(), "100");
+    assert.equal(cell.style.getPropertyValue("--web2ai-derived-column-width"), "190px");
+  } finally {
+    runtimeTest.disconnectJtvRuntimeRowObserver(controller);
+    cleanup();
+  }
+});
+
+test("jtv runtime observer renders an in-memory result without flashing loading", async () => {
+  const cleanup = installDom(`
+    <div id="_jt">
+      <div id="_jt_row_head"><div id="_jt_row_head_list">
+        <div class="_jt_cell_head"><span>订单号</span></div>
+        <div class="_jt_cell_head"><span>金额</span></div>
+      </div></div>
+      <div id="_jt_body"><div id="_jt_body_list"></div></div>
+    </div>
+  `);
+  const analysisFingerprint = "sha256:jtv-memory";
+  const controller = {
+    skillId: "skill_jtv_memory",
+    skill: {
+      id: "skill_jtv_memory",
+      type: "derived-column",
+      sources: [{ id: "source_jtv" }],
+      selectedColumns: [{ index: 1, header: "金额", normalizedHeader: "金额", occurrence: 1 }]
+    },
+    root: document.querySelector("#_jt"),
+    lastAnalysisFingerprint: analysisFingerprint,
+    lastRenderOptions: {
+      root: document.querySelector("#_jt"),
+      headerCount: 2,
+      insertIndex: 1,
+      outputColumnName: "AI结论",
+      columnWidth: 190
+    }
+  };
+  runtimeTest.rememberControllerResults(controller, analysisFingerprint, [{
+    fingerprint: buildDerivedColumnRowFingerprint(["100"]),
+    conclusion: "缓存结论",
+    needsAttention: true
+  }]);
+  try {
+    assert.equal(runtimeTest.ensureJtvRuntimeRowObserver(controller), true);
+    document.querySelector("#_jt_body_list").insertAdjacentHTML("beforeend", `
+      <div class="_jt_row _jt_rh" index="0" id="cached-row">
+        <div class="_jt_cell">A-1</div>
+        <div class="_jt_cell">100</div>
+      </div>
+    `);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const note = document.querySelector("#cached-row [data-web2ai-derived-runtime-note]");
+    assert.equal(note?.textContent, "缓存结论");
+    assert.equal(note?.dataset.status, "complete");
+    assert.equal(note?.dataset.attention, "true");
+  } finally {
+    runtimeTest.disconnectJtvRuntimeRowObserver(controller);
+    cleanup();
+  }
+});
+
 test("runtime renderer cleanup removes generated header, colgroup and body cells", () => {
   const cleanup = installDom(`
     <table id="orders">
@@ -642,6 +735,116 @@ test("runtime cache entries can be written then read back immediately", async ()
   assert.equal(cached.get("sha256:row-1")?.needsAttention, true);
   assert.equal(cached.get("sha256:row-2")?.conclusion, "正常");
   assert.equal(cached.get("sha256:row-2")?.needsAttention, false);
+});
+
+test("runtime controller accumulates row results across different jtv virtual windows", () => {
+  const { ensureControllerResultMap, rememberControllerResults } = runtimeTest;
+  const controller = {};
+  rememberControllerResults(controller, "sha256:analysis", [
+    { fingerprint: "sha256:row-1", conclusion: "第一屏结果", needsAttention: true }
+  ]);
+  rememberControllerResults(controller, "sha256:analysis", [
+    { fingerprint: "sha256:row-20", conclusion: "第二屏结果", needsAttention: false }
+  ]);
+
+  const accumulated = ensureControllerResultMap(controller, "sha256:analysis");
+  assert.equal(accumulated.size, 2);
+  assert.deepEqual(accumulated.get("sha256:row-1"), {
+    conclusion: "第一屏结果",
+    needsAttention: true
+  });
+  assert.equal(accumulated.get("sha256:row-20")?.conclusion, "第二屏结果");
+
+  const changedAnalysis = ensureControllerResultMap(controller, "sha256:changed-analysis");
+  assert.equal(changedAnalysis.size, 0, "changing model/method/output must invalidate accumulated results");
+});
+
+test("rapid jtv windows are deduplicated and merged in first-seen order", () => {
+  const controller = {};
+  runtimeTest.queueRuntimeRows(controller, [
+    { fingerprint: "sha256:row-1", content: "第一屏" },
+    { fingerprint: "sha256:row-2", content: "第一屏末尾" }
+  ]);
+  runtimeTest.queueRuntimeRows(controller, [
+    { fingerprint: "sha256:row-2", content: "重复" },
+    { fingerprint: "sha256:row-20", content: "后续屏" }
+  ]);
+  const merged = runtimeTest.mergeQueuedRuntimeRows(controller, [
+    { fingerprint: "sha256:row-20", content: "当前窗口", instances: [{ rowEl: "current" }] },
+    { fingerprint: "sha256:row-21", content: "当前窗口新行", instances: [] }
+  ], new Map(), { queuedFirst: true });
+  assert.deepEqual(merged.map((row) => row.fingerprint), [
+    "sha256:row-1",
+    "sha256:row-2",
+    "sha256:row-20",
+    "sha256:row-21"
+  ]);
+  assert.equal(merged[2].instances.length, 1, "current DOM instances should attach to an already queued fingerprint");
+});
+
+test("missing rows retry once before later batches continue", () => {
+  const requested = [
+    { fingerprint: "sha256:early" },
+    { fingerprint: "sha256:middle" },
+    { fingerprint: "sha256:late" }
+  ];
+  const retryCounts = new Map();
+  const firstRetry = runtimeTest.selectRetryRuntimeRows(
+    requested,
+    new Map([
+      ["sha256:early", { conclusion: "已有" }],
+      ["sha256:late", { conclusion: "已有" }]
+    ]),
+    retryCounts,
+    1
+  );
+  assert.deepEqual(firstRetry.map((row) => row.fingerprint), ["sha256:middle"]);
+  assert.equal(retryCounts.get("sha256:middle"), 1);
+  const secondRetry = runtimeTest.selectRetryRuntimeRows(requested, new Map(), retryCounts, 1);
+  assert.deepEqual(
+    secondRetry.map((row) => row.fingerprint),
+    ["sha256:early", "sha256:late"],
+    "the already retried middle row must not enter an infinite retry loop"
+  );
+});
+
+test("completed results are persisted even when scrolling invalidates the requesting session", async () => {
+  const controller = {
+    sessionId: 2,
+    lastAnalysisFingerprint: "sha256:analysis"
+  };
+  const count = await runtimeTest.persistDerivedRuntimeBatchResults({
+    controller,
+    analysisFingerprint: "sha256:analysis",
+    parsed: {
+      results: [{ fingerprint: "sha256:middle-row", conclusion: "中间行结果", needsAttention: true }]
+    }
+  });
+  assert.equal(count, 1);
+  assert.deepEqual(controller.resolvedResultMap?.get("sha256:middle-row"), {
+    conclusion: "中间行结果",
+    needsAttention: true
+  });
+  const cached = await readDerivedColumnCacheEntries("sha256:analysis", ["sha256:middle-row"]);
+  assert.equal(cached.get("sha256:middle-row")?.conclusion, "中间行结果");
+});
+
+test("a stale batch from an old analysis cannot replace the current controller result map", async () => {
+  const controller = {
+    lastAnalysisFingerprint: "sha256:new-analysis",
+    resolvedResultFingerprint: "sha256:new-analysis",
+    resolvedResultMap: new Map([["sha256:new-row", { conclusion: "新配置结果", needsAttention: false }]])
+  };
+  await runtimeTest.persistDerivedRuntimeBatchResults({
+    controller,
+    analysisFingerprint: "sha256:old-analysis",
+    parsed: {
+      results: [{ fingerprint: "sha256:old-row", conclusion: "旧配置结果" }]
+    }
+  });
+  assert.equal(controller.resolvedResultFingerprint, "sha256:new-analysis");
+  assert.equal(controller.resolvedResultMap.has("sha256:new-row"), true);
+  assert.equal(controller.resolvedResultMap.has("sha256:old-row"), false);
 });
 
 test("runtime cache can restore a previously analyzed page without another model request", async () => {

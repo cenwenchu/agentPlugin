@@ -60,9 +60,13 @@ async function readDerivedColumnCacheEntries(
   // 读取顺序：先查当前页面内存缓存，再回落到 chrome.storage.session；
   // 过期项或空结论会在读取过程中顺手清理。
   const fingerprints = [...new Set((Array.isArray(rowFingerprints) ? rowFingerprints : []).map((item) => String(item || "").trim()).filter(Boolean))];
-  if (!analysisFingerprint || !fingerprints.length || !hasSessionStorage()) return new Map();
+  if (!analysisFingerprint || !fingerprints.length) return new Map();
   const keys = fingerprints.map((rowFingerprint) => buildDerivedColumnCacheKey(analysisFingerprint, rowFingerprint));
-  const stored = await chrome.storage.session.get(keys).catch(() => ({}));
+  // 页面内存缓存不依赖 chrome.storage.session。部分 frame 中 session storage
+  // 可能暂时不可访问，仍应复用当前页面已经得到的模型结果，避免虚拟滚动回看时重复请求。
+  const stored = hasSessionStorage()
+    ? await chrome.storage.session.get(keys).catch(() => ({}))
+    : {};
   const cached = new Map();
   const expiredKeys = [];
   for (const rowFingerprint of fingerprints) {
@@ -96,7 +100,7 @@ async function readDerivedColumnCacheEntries(
       createdAt: Number(entry.createdAt) || Date.now()
     });
   }
-  if (expiredKeys.length) chrome.storage.session.remove(expiredKeys).catch(() => void 0);
+  if (expiredKeys.length && hasSessionStorage()) chrome.storage.session.remove(expiredKeys).catch(() => void 0);
   return cached;
 }
 
@@ -104,7 +108,7 @@ async function pruneDerivedColumnCacheEntries(
   analysisFingerprint = "",
   { maxEntries = DEFAULT_DERIVED_CACHE_MAX_ENTRIES } = {}
 ) {
-  if (!analysisFingerprint || !hasSessionStorage()) return 0;
+  if (!analysisFingerprint) return 0;
   const allEntries = await chrome.storage.session.get(null).catch(() => ({}));
   const prefix = `${DERIVED_CACHE_PREFIX}:${analysisFingerprint}:`;
   const matched = Object.entries(allEntries)
@@ -167,8 +171,10 @@ async function writeDerivedColumnCacheEntries(
     count += 1;
   }
   if (!count) return 0;
-  await chrome.storage.session.set(payload).catch(() => void 0);
-  await pruneDerivedColumnCacheEntries(analysisFingerprint, { maxEntries });
+  if (hasSessionStorage()) {
+    await chrome.storage.session.set(payload).catch(() => void 0);
+    await pruneDerivedColumnCacheEntries(analysisFingerprint, { maxEntries });
+  }
   return count;
 }
 

@@ -309,10 +309,13 @@ function renderDerivedRuntimeNotes(skillId = "", items = [], options = {}) {
     outputColumnName: options?.outputColumnName || DEFAULT_OUTPUT_COLUMN_NAME,
     headerCount: options?.headerCount || 0
   });
-  const width = estimateColumnWidth({
-    items: connectedItems,
-    outputColumnName: options?.outputColumnName || DEFAULT_OUTPUT_COLUMN_NAME
-  });
+  const requestedWidth = Number(options?.columnWidth);
+  const width = Number.isFinite(requestedWidth) && requestedWidth > 0
+    ? requestedWidth
+    : estimateColumnWidth({
+      items: connectedItems,
+      outputColumnName: options?.outputColumnName || DEFAULT_OUTPUT_COLUMN_NAME
+    });
   let renderedCount = 0;
   for (const item of connectedItems) {
     if (renderDerivedRuntimeNote({

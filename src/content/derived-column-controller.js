@@ -73,6 +73,9 @@ const RUNTIME_TABLE_ROW_SELECTOR = "tbody tr, [role='row'], .art-table-row, .ant
 const DERIVED_RUNTIME_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 const DERIVED_RUNTIME_RECENT_RESULT_TTL_MS = 60 * 1000;
 const DERIVED_RUNTIME_PAGE_WINDOW_MS = 60 * 1000;
+// jtv 虚拟行会反复销毁重建；固定列宽可确保占位态、缓存态和模型结果态
+// 使用同一空间，避免内容长度变化造成横向跳动。
+const JTV_RUNTIME_COLUMN_WIDTH = 190;
 
 let runtimeSessionCounter = 0;
 let runtimeObserverTimer = null;
@@ -330,6 +333,104 @@ function buildRuntimeFailureMap(failures = []) {
   return map;
 }
 
+function ensureControllerResultMap(controller, analysisFingerprint = "") {
+  if (!(controller?.resolvedResultMap instanceof Map) || controller.resolvedResultFingerprint !== analysisFingerprint) {
+    controller.resolvedResultMap = new Map();
+    controller.resolvedResultFingerprint = analysisFingerprint;
+  }
+  return controller.resolvedResultMap;
+}
+
+function rememberControllerResults(controller, analysisFingerprint = "", results = []) {
+  const resultMap = ensureControllerResultMap(controller, analysisFingerprint);
+  for (const item of Array.isArray(results) ? results : []) {
+    const fingerprint = String(item?.fingerprint || item?.rowFingerprint || "").trim();
+    const conclusion = String(item?.conclusion || "").trim();
+    if (!fingerprint || !conclusion) continue;
+    resultMap.set(fingerprint, {
+      conclusion,
+      needsAttention: item?.needsAttention === true
+    });
+  }
+  return resultMap;
+}
+
+function queueRuntimeRows(controller, rows = [], maxRows = 1000) {
+  if (!(controller?.queuedRowsByFingerprint instanceof Map)) controller.queuedRowsByFingerprint = new Map();
+  const limit = Math.max(1, Number(maxRows) || 1000);
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const fingerprint = String(row?.fingerprint || "").trim();
+    if (!fingerprint || controller.queuedRowsByFingerprint.has(fingerprint)) continue;
+    if (controller.queuedRowsByFingerprint.size >= limit) break;
+    // jtv DOM 实例会被复用，队列只保存请求所需的稳定数据；真正显示时重新按
+    // 当前窗口构建 instances，不能持有已经滚出视口的 rowEl。
+    controller.queuedRowsByFingerprint.set(fingerprint, {
+      fingerprint,
+      content: String(row?.content || ""),
+      instances: []
+    });
+  }
+  return controller.queuedRowsByFingerprint.size;
+}
+
+function mergeQueuedRuntimeRows(controller, rows = [], resultMap = new Map(), { queuedFirst = false, maxRows = 1000 } = {}) {
+  const queued = Array.from(controller?.queuedRowsByFingerprint?.values?.() || []);
+  controller?.queuedRowsByFingerprint?.clear?.();
+  const ordered = queuedFirst ? [...queued, ...rows] : [...rows, ...queued];
+  const merged = [];
+  const byFingerprint = new Map();
+  const limit = Math.max(1, Number(maxRows) || 1000);
+  for (const row of ordered) {
+    const fingerprint = String(row?.fingerprint || "").trim();
+    if (!fingerprint || resultMap?.has?.(fingerprint)) continue;
+    const existing = byFingerprint.get(fingerprint);
+    if (existing) {
+      existing.instances.push(...(Array.isArray(row?.instances) ? row.instances : []));
+      continue;
+    }
+    if (merged.length >= limit) continue;
+    const normalized = { ...row, fingerprint, instances: Array.isArray(row?.instances) ? [...row.instances] : [] };
+    byFingerprint.set(fingerprint, normalized);
+    merged.push(normalized);
+  }
+  return merged;
+}
+
+function selectRetryRuntimeRows(requestedRows = [], resultMap = new Map(), retryCounts = new Map(), maxRetries = 1) {
+  const retryRows = [];
+  for (const row of Array.isArray(requestedRows) ? requestedRows : []) {
+    if (resultMap?.has?.(row.fingerprint)) continue;
+    const attempts = Number(retryCounts.get(row.fingerprint) || 0);
+    if (attempts >= Math.max(0, Number(maxRetries) || 0)) continue;
+    retryCounts.set(row.fingerprint, attempts + 1);
+    retryRows.push(row);
+  }
+  return retryRows;
+}
+
+async function persistDerivedRuntimeBatchResults({
+  controller,
+  analysisFingerprint = "",
+  parsed = null
+} = {}) {
+  const results = Array.isArray(parsed?.results) ? parsed.results : [];
+  // 旧滚动窗口返回时，只有分析配置仍一致才写入当前 controller 内存；不同配置
+  // 的结果仍可安全写入其独立的持久缓存键，但不能覆盖新配置的即时结果表。
+  if (controller?.lastAnalysisFingerprint === analysisFingerprint) {
+    rememberControllerResults(controller, analysisFingerprint, results);
+  }
+  await writeDerivedColumnCacheEntries(
+    analysisFingerprint,
+    results.map((item) => ({
+      rowFingerprint: item.fingerprint,
+      conclusion: item.conclusion,
+      needsAttention: item.needsAttention === true
+    })),
+    { maxEntries: DEFAULT_DERIVED_CACHE_MAX_ENTRIES }
+  );
+  return results.length;
+}
+
 function countRenderableRuntimeRows(root) {
   // 与 buildRuntimeRows 同基准：优先适配器行枚举，回退通用选择器。
   // jtv1 下若用通用选择器会数成工具栏行，导致虚拟滚动观察器误判"已渲染稳定"而永不重插。
@@ -348,6 +449,50 @@ function countRenderedRuntimeCells(controller) {
   return root.querySelectorAll?.(
     `[${RUNTIME_CELL_ATTR}="${controller.skillId}"]:not([${RUNTIME_HEADER_ATTR}])`
   )?.length || 0;
+}
+
+function disconnectJtvRuntimeRowObserver(controller) {
+  controller?.jtvRowObserver?.disconnect?.();
+  if (controller) {
+    controller.jtvRowObserver = null;
+    controller.jtvRowObserverRoot = null;
+    controller.jtvPlaceholderScheduled = false;
+  }
+}
+
+/**
+ * jtv 的表头长期存在，但可见数据行会在滚动时被销毁并重新创建。用表体级
+ * MutationObserver 在同一轮 DOM 更新后补入等宽占位单元格，避免等待 1.5 秒
+ * 轮询期间整列收缩；内存已有结果时同步回填，只有新行才显示分析中。
+ */
+function ensureJtvRuntimeRowObserver(controller) {
+  const root = controller?.root;
+  const body = root?.querySelector?.("#_jt_body");
+  if (!body || !root.querySelector?.("#_jt_row_head")) {
+    disconnectJtvRuntimeRowObserver(controller);
+    return false;
+  }
+  if (controller.jtvRowObserver && controller.jtvRowObserverRoot === root) return true;
+  disconnectJtvRuntimeRowObserver(controller);
+  const observer = new MutationObserver((mutations) => {
+    // 写入派生列文本本身也会触发 childList mutation；忽略这些自有变更，
+    // 只处理 jtv 新行、业务单元格替换或业务内容更新，避免观察器自循环。
+    const hasBusinessMutation = mutations.some((mutation) => !mutation.target?.closest?.(
+      `[${RUNTIME_CELL_ATTR}="${controller.skillId}"]`
+    ));
+    if (!hasBusinessMutation) return;
+    if (controller.jtvPlaceholderScheduled) return;
+    controller.jtvPlaceholderScheduled = true;
+    queueMicrotask(() => {
+      controller.jtvPlaceholderScheduled = false;
+      if (controller.jtvRowObserver !== observer || !controller.root?.isConnected) return;
+      renderDerivedRuntimeWindowFromMemory(controller);
+    });
+  });
+  observer.observe(body, { childList: true, subtree: true });
+  controller.jtvRowObserver = observer;
+  controller.jtvRowObserverRoot = root;
+  return true;
 }
 
 function controllerHasFreshRenderedState(controller) {
@@ -386,6 +531,7 @@ function shouldKeepStableRenderedRuntime(controller) {
 
 function clearStaleRuntimeController(controller, reason = "stale") {
   if (!controller) return false;
+  disconnectJtvRuntimeRowObserver(controller);
   if (controller.root) clearDerivedRuntimeSkill(controller.skillId, controller.root);
   // 文档级兜底清理：jtv1 虚拟滚动回收的行可能已脱离 controller.root DOM 子树
   if (typeof document !== "undefined") {
@@ -535,6 +681,7 @@ function buildRuntimeRenderableItems(uniqueRows = [], resultMap = new Map(), fai
       items.push({
         rowEl: instance.rowEl,
         rowIdentity: instance.rowIdentity,
+        fingerprint: unique.fingerprint,
         status,
         conclusion: matched?.conclusion || "",
         needsAttention: matched?.needsAttention || false,
@@ -651,6 +798,43 @@ function renderDerivedRuntimePlaceholders(controller) {
   return missingRows.length;
 }
 
+/**
+ * 同步渲染当前 jtv 可见窗口。controller 内按行指纹累计的结果无需经过
+ * storage、重新定位或滚动静默期；命中时直接写入结论，未命中才落到占位态。
+ */
+function renderDerivedRuntimeWindowFromMemory(controller) {
+  const { root, skillId, lastRenderOptions } = controller || {};
+  const skill = resolveControllerSkill(controller);
+  const resultMap = controller?.resolvedResultFingerprint === controller?.lastAnalysisFingerprint &&
+    controller?.resolvedResultMap instanceof Map
+    ? controller.resolvedResultMap
+    : new Map();
+  if (!root?.isConnected || !lastRenderOptions || !skill) {
+    return renderDerivedRuntimePlaceholders(controller);
+  }
+  try {
+    const headers = extractHeaders(root);
+    const runtimeModel = buildRuntimeRows({ skill, table: root, headers });
+    const uniqueRows = buildRuntimeUniqueRows({
+      rows: runtimeModel.rows,
+      selectedColumns: runtimeModel.selectedColumns,
+      skill
+    });
+    const items = buildRuntimeRenderableItems(uniqueRows, resultMap, new Map()).map((item) => (
+      item.status === "complete" ? item : { ...item, status: "loading" }
+    ));
+    queueRuntimeRows(
+      controller,
+      uniqueRows.filter((row) => !resultMap.has(row.fingerprint)),
+      normalizeDerivedColumnSkill(skill).execution.maxRows
+    );
+    if (!items.length) return 0;
+    return renderDerivedRuntimeNotes(skillId, items, lastRenderOptions);
+  } catch {
+    return renderDerivedRuntimePlaceholders(controller);
+  }
+}
+
 async function runDerivedRuntimeSkill(controller) {
   const { skillId } = controller;
   const currentSkill = resolveControllerSkill(controller);
@@ -702,6 +886,7 @@ async function runDerivedRuntimeSkill(controller) {
       resultSchemaVersion: DEFAULT_RUNTIME_RESULT_SCHEMA_VERSION
     });
     controller.lastAnalysisFingerprint = analysisFingerprint;
+    const controllerResultMap = ensureControllerResultMap(controller, analysisFingerprint);
     const runtimeModel = buildRuntimeRows({
       skill,
       table: located.table,
@@ -712,9 +897,11 @@ async function runDerivedRuntimeSkill(controller) {
       root: located.table,
       headerCount: located.headers.length,
       insertIndex: resolveDerivedInsertIndex(runtimeModel.selectedColumns, { position: output.position, positionIndex: output.positionIndex }),
-      outputColumnName: output.columnName
+      outputColumnName: output.columnName,
+      columnWidth: located.table.querySelector?.("#_jt_row_head") ? JTV_RUNTIME_COLUMN_WIDTH : undefined
     };
     controller.lastRenderOptions = renderOptions;
+    ensureJtvRuntimeRowObserver(controller);
     const uniqueRows = buildRuntimeUniqueRows({
       rows: runtimeModel.rows,
       selectedColumns: runtimeModel.selectedColumns,
@@ -738,11 +925,19 @@ async function runDerivedRuntimeSkill(controller) {
 
     const cachedMap = runOptions.ignoreCache
       ? new Map()
-      : await readDerivedColumnCacheEntries(
+      : new Map(controllerResultMap);
+    if (!runOptions.ignoreCache) {
+      const storedCacheMap = await readDerivedColumnCacheEntries(
         analysisFingerprint,
         uniqueRows.map((item) => item.fingerprint),
         { ttlMs: DEFAULT_DERIVED_CACHE_TTL_MS }
       );
+      for (const [fingerprint, result] of storedCacheMap) cachedMap.set(fingerprint, result);
+      rememberControllerResults(controller, analysisFingerprint, Array.from(storedCacheMap, ([fingerprint, result]) => ({
+        fingerprint,
+        ...result
+      })));
+    }
     if (controller.sessionId !== sessionId) return;
 
     const cachedRenderable = [];
@@ -764,6 +959,12 @@ async function runDerivedRuntimeSkill(controller) {
         pendingRows.push(unique);
       }
     }
+    // 快速滚动期间由 jtv 行监听累计的未知行按首次出现顺序排在当前窗口之前，
+    // 相同 fingerprint 会合并；已在内存命中的行会被剔除。
+    pendingRows = mergeQueuedRuntimeRows(controller, pendingRows, controllerResultMap, {
+      queuedFirst: true,
+      maxRows: skill.execution.maxRows
+    });
     renderDerivedRuntimeNotes(skillId, cachedRenderable, renderOptions);
 
     if (!pendingRows.length) {
@@ -804,6 +1005,7 @@ async function runDerivedRuntimeSkill(controller) {
     const pageListGuardKey = buildPageRequestListGuardKey(STATE.activeModelId, currentListSignature);
     let pageGuardGrantedForRun = Boolean(runOptions.bypassPageGuard);
     let hasFailures = false;
+    const retryCounts = new Map();
     while (pendingRows.length) {
       const loadingRenderable = pendingRows.flatMap((unique) => unique.instances.map((instance) => ({
         rowEl: instance.rowEl,
@@ -890,7 +1092,18 @@ async function runDerivedRuntimeSkill(controller) {
         output,
         modelId: STATE.activeModelId
       });
-      if (controller.sessionId !== sessionId) return;
+      // 滚动会使 sessionId 变化，但已经完成的模型结果不能丢弃。先按分析指纹和
+      // 行指纹写入缓存，再决定是否还能安全更新当前（可能已被 jtv 复用）的 DOM。
+      await persistDerivedRuntimeBatchResults({ controller, analysisFingerprint, parsed });
+      if (controller.sessionId !== sessionId) {
+        logDerivedRuntime("request-batch-stale-persisted", {
+          skillId,
+          successCount: parsed.results.length,
+          staleSessionId: sessionId,
+          currentSessionId: controller.sessionId
+        });
+        return;
+      }
       logDerivedRuntime("request-batch-done", {
         skillId,
         batchSize: requestedRows.length,
@@ -900,13 +1113,20 @@ async function runDerivedRuntimeSkill(controller) {
         }).length
       });
       const failureMap = buildRuntimeFailureMap(parsed.failures);
-      hasFailures = hasFailures || parsed.failures.length > 0;
+      const retryRows = selectRetryRuntimeRows(requestedRows, parsed.resultMap, retryCounts, 1);
+      const retryFingerprints = new Set(retryRows.map((row) => row.fingerprint));
+      const terminalFailureMap = new Map(failureMap);
+      for (const row of retryRows) terminalFailureMap.delete(row.fingerprint);
+      hasFailures = hasFailures || terminalFailureMap.size > 0;
       logDerivedRuntime("parse-results", {
         skillId,
         successCount: parsed.results.length,
         failureCount: parsed.failures.length
       }, parsed.failures.length ? "warn" : "info");
-      const renderableItems = buildRuntimeRenderableItems(requestedRows, parsed.resultMap, failureMap);
+      const renderableItems = buildRuntimeRenderableItems(requestedRows, parsed.resultMap, terminalFailureMap)
+        .map((item) => retryFingerprints.has(item.fingerprint)
+          ? { ...item, status: "loading", error: "" }
+          : item);
       const renderedCount = renderDerivedRuntimeNotes(skillId, renderableItems, renderOptions);
       logDerivedRuntime("render-results", {
         skillId,
@@ -921,16 +1141,15 @@ async function runDerivedRuntimeSkill(controller) {
           completedAt: Date.now()
         };
       }
-      await writeDerivedColumnCacheEntries(
-        analysisFingerprint,
-        parsed.results.map((item) => ({
-          rowFingerprint: item.fingerprint,
-          conclusion: item.conclusion,
-          needsAttention: item.needsAttention === true
-        })),
-        { maxEntries: DEFAULT_DERIVED_CACHE_MAX_ENTRIES }
+      const remainingRows = pendingRows.slice(batchSize);
+      // 漏回/空结论/解析失败的行优先重试一次，避免后一批先完成而中间留下空洞；
+      // 滚动期间新发现的行合并到剩余队列尾部，尽量填满下一次模型批量请求。
+      pendingRows = mergeQueuedRuntimeRows(
+        controller,
+        [...retryRows, ...remainingRows],
+        controller.resolvedResultMap,
+        { queuedFirst: false, maxRows: skill.execution.maxRows }
       );
-      pendingRows = pendingRows.slice(batchSize);
       controller.lastPendingRows = pendingRows;
     }
     controller.status = hasFailures ? "partial" : "complete";
@@ -940,6 +1159,15 @@ async function runDerivedRuntimeSkill(controller) {
       status: controller.status
     }, hasFailures ? "warn" : "info");
   } catch (error) {
+    if (controller.sessionId !== sessionId) {
+      logDerivedRuntime("stale-session-error-ignored", {
+        skillId,
+        staleSessionId: sessionId,
+        currentSessionId: controller.sessionId,
+        error: String(error?.message ?? error)
+      });
+      return;
+    }
     if (
       error?.code === "SOURCE_CHANGED" &&
       !runOptions.manual
@@ -983,9 +1211,12 @@ async function runDerivedRuntimeSkill(controller) {
       }, "warn");
     }
   } finally {
-    controller.lastPendingRows = [];
-    if (!controller.runOptions?.manual) {
-      controller.runOptions = null;
+    // 旧滚动窗口不得清除或改写新窗口正在使用的运行状态。
+    if (controller.sessionId === sessionId) {
+      controller.lastPendingRows = [];
+      if (!controller.runOptions?.manual) {
+        controller.runOptions = null;
+      }
     }
   }
 }
@@ -1301,6 +1532,7 @@ async function stopDerivedColumnRuntime(skillId = "", { clearUi = true, clearHis
   const normalizedSkillId = String(skillId || "").trim();
   if (!normalizedSkillId) return false;
   const existing = runtimeControllers.get(normalizedSkillId);
+  disconnectJtvRuntimeRowObserver(existing);
   if (clearUi && typeof document !== "undefined") {
     // 文档级清理：jtv1 虚拟滚动回收的行可能已脱离 controller.root DOM 子树，
     // 需在文档级确保所有派生列单元格（含 colgroup/col 占位）被移除。
@@ -1395,14 +1627,23 @@ export const __test = {
   buildRuntimeUniqueRows,
   canRequestDerivedRuntimePage,
   countRenderableRuntimeRows,
+  disconnectJtvRuntimeRowObserver,
+  ensureJtvRuntimeRowObserver,
   getPageRequestGuardState,
+  ensureControllerResultMap,
+  mergeQueuedRuntimeRows,
   getPageRequestGuardState,
   isRuntimeBlockedByCooldown,
   recordDerivedRuntimePageRequest,
+  renderDerivedRuntimeWindowFromMemory,
+  persistDerivedRuntimeBatchResults,
+  queueRuntimeRows,
+  rememberControllerResults,
   resolveControllerSkill,
   resolveControllerListSignature,
   resolveDerivedInsertIndex,
   shouldRetryBlockedRuntimeForListChange,
+  selectRetryRuntimeRows,
   shouldKeepStableRenderedRuntime,
   shouldKeepManualRuntimeWhenAutoDisabled
 };
