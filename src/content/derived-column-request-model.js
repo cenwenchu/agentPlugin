@@ -12,7 +12,9 @@ import {
 import { calculateSkillRequestBudget } from "./skill-request-model.js";
 import { estimateTokens } from "./token-budget.js";
 
-const DEFAULT_DERIVED_PREVIEW_ROWS = 20;
+// 工作台一次最多采集 1000 行；预览模型不应保留超过采集上限的副本。
+// 实际提交仍受 DERIVED_PREVIEW_MAX_BATCH_ROWS 和模型 token 预算双重约束。
+const DEFAULT_DERIVED_PREVIEW_ROWS = 1000;
 const DERIVED_PREVIEW_MAX_BATCH_ROWS = 20;
 const DERIVED_PREVIEW_ESTIMATED_OUTPUT_CHARS = 160;
 const DEFAULT_DERIVED_ANALYSIS_METHOD = [
@@ -109,6 +111,11 @@ function buildDerivedPreviewRows({ headers = [], rows = [], selectedColumns = []
   };
 }
 
+function selectSubmittedPreviewRows(previewRows = [], requestRows = []) {
+  const submittedFingerprints = new Set((Array.isArray(requestRows) ? requestRows : []).map((row) => row?.fingerprint).filter(Boolean));
+  return (Array.isArray(previewRows) ? previewRows : []).filter((row) => submittedFingerprints.has(row?.fingerprint));
+}
+
 function buildDerivedColumnPreviewPrompt({
   method = "",
   rows = [],
@@ -132,12 +139,13 @@ function buildDerivedColumnPreviewPrompt({
       `分析方法：${effectiveMethodInfo.description}`,
       `单条结论要求：简短明确，不超过 ${normalizedOutput.maxChars} 个字符。`,
       "返回格式必须是：",
-      '{"results":[{"fingerprint":"sha256:...","conclusion":"..."}]}',
+      '{"results":[{"fingerprint":"sha256:...","conclusion":"结论","needsAttention":true}]}',
       "要求：",
       "1. 必须按 fingerprint 返回结果；",
       "2. 不得返回未知 fingerprint；",
       "3. 每个 fingerprint 只能出现一次；",
       "4. 若无法判断，也请给出简短结论，不要留空；",
+      "5. needsAttention 为 true 表示结论需要用户关注（如风险、异常、待处理），false 表示无需关注；",
       `输入数据：\n${JSON.stringify(payload, null, 2)}`
     ].join("\n\n")
   };
@@ -199,5 +207,6 @@ export {
   calculateDerivedColumnPreviewBatchSize,
   effectiveDerivedMethod,
   resolveSelectedColumns,
+  selectSubmittedPreviewRows,
   selectedRowMarkdown
 };

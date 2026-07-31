@@ -537,6 +537,7 @@ function buildRuntimeRenderableItems(uniqueRows = [], resultMap = new Map(), fai
         rowIdentity: instance.rowIdentity,
         status,
         conclusion: matched?.conclusion || "",
+        needsAttention: matched?.needsAttention || false,
         error
       });
     }
@@ -755,6 +756,7 @@ async function runDerivedRuntimeSkill(controller) {
             rowIdentity: instance.rowIdentity,
             status: "complete",
             conclusion: cached.conclusion,
+            needsAttention: cached.needsAttention === true,
             error: ""
           });
         }
@@ -923,7 +925,8 @@ async function runDerivedRuntimeSkill(controller) {
         analysisFingerprint,
         parsed.results.map((item) => ({
           rowFingerprint: item.fingerprint,
-          conclusion: item.conclusion
+          conclusion: item.conclusion,
+          needsAttention: item.needsAttention === true
         })),
         { maxEntries: DEFAULT_DERIVED_CACHE_MAX_ENTRIES }
       );

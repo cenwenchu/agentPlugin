@@ -126,6 +126,42 @@ test("runtime renderer inserts body cell before selected business column", () =>
   }
 });
 
+test("runtime renderer marks the whole derived cell only when attention is required", () => {
+  const cleanup = installDom(`
+    <table>
+      <tbody>
+        <tr id="attention"><td>A-1</td></tr>
+        <tr id="normal"><td>A-2</td></tr>
+      </tbody>
+    </table>
+  `);
+  try {
+    renderDerivedRuntimeNote({
+      skillId: "skill_attention",
+      rowEl: document.querySelector("#attention"),
+      status: "complete",
+      conclusion: "需要处理",
+      needsAttention: true
+    });
+    renderDerivedRuntimeNote({
+      skillId: "skill_attention",
+      rowEl: document.querySelector("#normal"),
+      status: "complete",
+      conclusion: "正常",
+      needsAttention: false
+    });
+
+    const attentionCell = document.querySelector("#attention [data-web2ai-derived-column]");
+    const normalCell = document.querySelector("#normal [data-web2ai-derived-column]");
+    assert.equal(attentionCell?.dataset.attention, "true");
+    assert.equal(normalCell?.dataset.attention, "false");
+    assert.equal(attentionCell?.querySelector("[data-web2ai-derived-runtime-note]")?.dataset.attention, "true");
+    assert.equal(normalCell?.querySelector("[data-web2ai-derived-runtime-note]")?.dataset.attention, "false");
+  } finally {
+    cleanup();
+  }
+});
+
 test("runtime renderer inserts native column before selected business column", () => {
   const cleanup = installDom(`
     <table id="orders">
@@ -595,7 +631,7 @@ test("runtime cache keys round-trip and analysis fingerprint changes with output
 
 test("runtime cache entries can be written then read back immediately", async () => {
   await writeDerivedColumnCacheEntries("sha256:analysis", [
-    { rowFingerprint: "sha256:row-1", conclusion: "优先处理" },
+    { rowFingerprint: "sha256:row-1", conclusion: "优先处理", needsAttention: true },
     { rowFingerprint: "sha256:row-2", conclusion: "正常" }
   ]);
   const cached = await readDerivedColumnCacheEntries("sha256:analysis", [
@@ -603,7 +639,9 @@ test("runtime cache entries can be written then read back immediately", async ()
     "sha256:row-2"
   ]);
   assert.equal(cached.get("sha256:row-1")?.conclusion, "优先处理");
+  assert.equal(cached.get("sha256:row-1")?.needsAttention, true);
   assert.equal(cached.get("sha256:row-2")?.conclusion, "正常");
+  assert.equal(cached.get("sha256:row-2")?.needsAttention, false);
 });
 
 test("runtime cache can restore a previously analyzed page without another model request", async () => {

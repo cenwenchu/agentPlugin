@@ -41,6 +41,7 @@ const SKILL_WORKSPACE_CSS = `
     .skillDerivedPreviewCell.markdown :is(p, ul, ol, blockquote, pre) { margin-top: 0; }
     .skillDerivedPreviewCell.markdown > :last-child { margin-bottom: 0; }
     .skillDerivedPreviewAiBox { padding: 8px 10px; border-radius: 8px; background: #dcfce7; border: 1px solid #86efac; box-shadow: inset 0 0 0 1px rgba(34,197,94,.08); }
+    .skillDerivedAttention { border-color: #fecaca; background: #fef2f2; color: #991b1b; box-shadow: inset 0 0 0 1px rgba(239,68,68,.08); }
     .skillDataPreviewEmpty { padding: 18px 8px; color: #64748b; font-size: 11px; text-align: center; }
     .skillDataPreviewMore { padding: 6px 2px 0; color: #64748b; font-size: 10px; text-align: center; }
     .skillDataSourceTabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }

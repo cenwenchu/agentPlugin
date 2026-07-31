@@ -161,10 +161,11 @@ function tableRectInDocument(table, targetDocument) {
 
 function collectionScrollBounds(scroller, table) {
   const documentScroller = scroller === scroller?.ownerDocument?.scrollingElement;
-  const isAncestorFrameScroller = scroller?.ownerDocument !== document;
-  if (!documentScroller || !isAncestorFrameScroller) {
+  if (!documentScroller) {
     return { start: 0, end: Math.max(0, scroller.scrollHeight - scroller.clientHeight), external: false };
   }
+  // 当前文档和同源祖先 frame 都可能承载嵌入式虚拟表格的纵向滚动。
+  // 文档很长不等于数据表很长，必须把采集边界裁剪到表格自身区域。
   const rect = tableRectInDocument(table, scroller.ownerDocument);
   if (!rect) return { start: scroller.scrollTop, end: Math.max(0, scroller.scrollHeight - scroller.clientHeight), external: true };
   const absoluteTop = scroller.scrollTop + rect.top;
@@ -202,6 +203,17 @@ function classifyVerticalCollection(scroller, table) {
   });
 }
 
+function resolveScrollerCollectionMode(scroller, table, adapter = resolveTableRootAdapter(table)) {
+  if (!scroller) return tableHasVirtualLayoutEvidence(table) ? "into-view" : "none";
+  if (adapter?.scroller?.(table) === scroller) return "confirmed";
+  // ArtTable 在大页容量下会把虚拟高度放在 .art-virtual-blank 中，真正的纵向
+  // viewport 却可能是当前文档或祖先 frame，而不是 .art-table-body。确认虚拟
+  // 证据后允许驱动文档滚动；collectionScrollBounds 会把范围裁剪到表格区域。
+  const isDocumentScroller = scroller === scroller.ownerDocument?.scrollingElement;
+  if (isDocumentScroller && tableHasVirtualLayoutEvidence(table)) return "confirmed";
+  return classifyVerticalCollection(scroller, table);
+}
+
 function tableHasVirtualLayoutEvidence(table) {
   if (!table) return false;
   // _jtv1（聚水潭）：#_jt_body 固定高度 + overflow，本身就是虚拟滚动证据
@@ -215,7 +227,9 @@ function tableHasVirtualLayoutEvidence(table) {
     return style.position === "absolute" || /translate(?:3d|Y)?\s*\(/i.test(inlineTransform);
   });
   const ariaRowCount = Number(table.getAttribute?.("aria-rowcount") || 0);
-  return Boolean(virtualCss || hasTransform || (ariaRowCount > 0 && ariaRowCount > renderedRows.length));
+  // art-table 虚拟滚动：通过 .art-virtual-blank 占位高度判断
+  const hasVirtualBlank = Boolean(table.parentElement?.querySelector?.(".art-virtual-blank") || table.closest?.(".art-table")?.querySelector?.(".art-virtual-blank"));
+  return Boolean(virtualCss || hasTransform || hasVirtualBlank || (ariaRowCount > 0 && ariaRowCount > renderedRows.length));
 }
 
 function safeScrollIntoView(target, block = "start") {
@@ -250,9 +264,7 @@ async function resolvePageScrollCollection(source, initialTable, page) {
   // 不再走启发式分类——真实页面 overflow-y 为容器默认 visible 时，
   // renderedRowHeights 为 0 / isDocumentScroller 都会把分类误判成 none/probe，
   // 导致"滚动一步无新增就停止"。
-  let mode = scroller
-    ? (rootAdapter?.scroller?.(table) === scroller ? "confirmed" : classifyVerticalCollection(scroller, table))
-    : "none";
+  let mode = resolveScrollerCollectionMode(scroller, table, rootAdapter);
   // 诊断：适配器是否命中、scroller 钩子是否返回了节点，帮助定位"滚动容器找不到"
   logSkillCollection("scroll detection init", {
     page,
@@ -267,11 +279,13 @@ async function resolvePageScrollCollection(source, initialTable, page) {
   });
   // 有些虚拟表格的真实滚动由祖先文档承载，当前 frame 看不到 scrollTop/scrollHeight。
   // 这类场景不能误判成普通表格直接翻页，而是改用 scrollIntoView 的保守采集模式。
-  if (!scroller && tableHasVirtualLayoutEvidence(table)) mode = "into-view";
   // 分页切换完成不等于虚拟列表布局已完成。每一页都允许占位高度、
   // overflow 容器和首批行再经历几个渲染周期，否则后续页会被误判为
   // 普通表格并直接翻页。重试只读布局，不对普通表格产生滚动副作用。
-  const attempts = 4;
+  // 大页容量的 ArtTable 常先挂出第 1 行，随后才创建 .art-virtual-blank。
+  // 首屏只有一行时延长纯读取重试窗口；真正只有一条数据的普通表最多多等
+  // 约 1.5 秒，不会发生额外滚动或改变分页状态。
+  const attempts = dataRowsInTable(table).length <= 1 ? 12 : 4;
   for (let attempt = 1; mode === "none" && attempt < attempts; attempt++) {
     logSkillCollection("scroll detection retry", {
       page,
@@ -284,9 +298,7 @@ async function resolvePageScrollCollection(source, initialTable, page) {
     table = findStoredSourceTable(source) || table;
     scroller = findStoredSourceVerticalScroller(table);
     const retryAdapter = resolveTableRootAdapter(table);
-    mode = scroller
-      ? (retryAdapter?.scroller?.(table) === scroller ? "confirmed" : classifyVerticalCollection(scroller, table))
-      : (tableHasVirtualLayoutEvidence(table) ? "into-view" : "none");
+    mode = resolveScrollerCollectionMode(scroller, table, retryAdapter);
   }
   logSkillCollection("scroll detection result", {
     page,
@@ -394,6 +406,20 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
     added, totalRows: rows.length, scrollTop: Math.round(scroller?.scrollTop || 0),
     extractionDiagnostics: lastExtractionDiagnostics
   });
+  SKILL_COLLECTION_DIAGNOSTICS() && console.info("[web2ai.derived-preview] collectStoredSourcePage first read:", {
+    collectionId, page,
+    found: Boolean(current.found),
+    renderedRows: current.rowCount || 0,
+    totalRowsInTable: current.totalRowCount || 0,
+    added,
+    maxPages, maxRows,
+    waitForInitialRowsMs,
+    scrollMode: "checking",
+    scrollerExists: Boolean(scroller),
+    scrollerScrollTop: Math.round(scroller?.scrollTop || 0),
+    scrollerClientHeight: scroller?.clientHeight || 0,
+    scrollerScrollHeight: scroller?.scrollHeight || 0
+  });
   if (!current.found) {
     return {
       found: false,
@@ -439,6 +465,14 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
   const scrollMode = scrollCollection.mode;
   // 等待期间首屏可能继续补行，先收录再开始滚动。
   current = addRenderedRows();
+  SKILL_COLLECTION_DIAGNOSTICS() && console.info("[web2ai.derived-preview] collectStoredSourcePage scroll decision:", {
+    collectionId, page,
+    scrollMode,
+    renderedRows: current.rowCount || 0,
+    totalRowsInTable: current.totalRowCount || 0,
+    addedSoFar: added,
+    totalAccumulated: rows.length
+  });
   if (!current.found) {
     return {
       found: false,
@@ -808,6 +842,11 @@ async function collectStoredSourceData(source, options = {}) {
   let restoredFirstPage = false;
   let extractionDiagnostics = null;
   logSkillCollection("start", { collectionId, maxPages, maxRows });
+  SKILL_COLLECTION_DIAGNOSTICS() && console.info("[web2ai.derived-preview] collectStoredSourceData start:", {
+    collectionId, maxPages, maxRows,
+    waitForInitialRowsMs: options.waitForInitialRowsMs,
+    sourceOptions: options.sourceOptions ? "present" : "none"
+  });
   try {
     for (let page = 1; page <= maxPages; page++) {
       if (control.stopped) { reason = "stopped"; break; }
@@ -889,13 +928,23 @@ async function collectStoredSourceData(source, options = {}) {
       extractionDiagnostics
     });
     const completion = classifyCollectionCompletion(reason);
-    return {
+    const finalResult = {
       found: true, status: "available", headers, rows, rowCount: rows.length,
       totalRowCount: rows.length, collectedPages: pages, collectionReason: reason,
       extractionDiagnostics,
       ...completion,
       stopped: reason === "stopped", truncated: reason === "row-limit" || reason === "page-limit"
     };
+    SKILL_COLLECTION_DIAGNOSTICS() && console.info("[web2ai.derived-preview] collectStoredSourceData return:", {
+      collectionId,
+      rowCount: finalResult.rowCount,
+      totalRowCount: finalResult.totalRowCount,
+      collectedPages: finalResult.collectedPages,
+      reason,
+      completeForRequest: finalResult.completeForRequest,
+      truncated: finalResult.truncated
+    });
+    return finalResult;
   } finally {
     if (pageTurned && !restoredFirstPage) {
       emitCollectionProgress(collectionId, { phase: "restoring", pages, rowCount: rows.length, maxPages, maxRows });

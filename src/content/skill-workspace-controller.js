@@ -16,7 +16,8 @@ import {
 import {
   buildDerivedColumnPreviewPrompt,
   buildDerivedPreviewRows,
-  calculateDerivedColumnPreviewBatchSize
+  calculateDerivedColumnPreviewBatchSize,
+  selectSubmittedPreviewRows
 } from "./derived-column-request-model.js";
 import { parseDerivedColumnResults } from "./derived-column-result-parser.js";
 import {
@@ -367,6 +368,13 @@ async function runDerivedColumnPreview() {
   if (!await ensureSkillModelConfigured()) return;
   const sourceItem = test.dataSources?.[0];
   if (!sourceItem?.source) return showToast("请先绑定数据源");
+
+  const collectionMaxPages = await chooseSkillCollectionPages(sourceItem.source);
+  if (collectionMaxPages === null) {
+    showToast("已取消数据源载入，本次未提交给模型");
+    return;
+  }
+
   test.pending = true;
   test.status = "loading";
   test.error = "";
@@ -385,31 +393,82 @@ async function runDerivedColumnPreview() {
   sourceItem.status = "loading";
   sourceItem.error = "";
   sourceItem.data = null;
+  sourceItem.previewPage = 1;
+  sourceItem.collectionMaxPages = collectionMaxPages;
+  sourceItem.collectionId = uid();
+  sourceItem.collection = { phase: "locating", pages: 0, rowCount: 0, maxPages: collectionMaxPages, maxRows: MAX_SKILL_COLLECTION_ROWS };
   renderWorkspace();
   try {
     logSkillWorkspaceCollection("preview-request", {
       skillId: test.skillId || "",
       sourceId: sourceItem.source?.id || "",
       sourceName: sourceItem.name || "",
-      selectedColumns: test.selectedColumns || []
+      selectedColumns: test.selectedColumns || [],
+      maxPages: collectionMaxPages
     });
-    const previewResponse = await sendToBackground({
-      type: "EXTRACT_SKILL_SOURCE_PREVIEW_DATA",
+
+    const options = {
+      skillType: test.skillType,
+      selectedColumns: test.selectedColumns
+    };
+
+    let loaded = await sendToBackground({
+      type: "LOAD_SKILL_SOURCE_DATA",
       source: sourceItem.source,
-      limit: 20,
-      options: {
-        skillType: test.skillType,
-        selectedColumns: test.selectedColumns
-      }
-    }).catch(() => null);
+      collectionId: sourceItem.collectionId,
+      maxPages: collectionMaxPages,
+      maxRows: MAX_SKILL_COLLECTION_ROWS,
+      options
+    });
     logSkillWorkspaceCollection("preview-response", {
       skillId: test.skillId || "",
       sourceId: sourceItem.source?.id || "",
-      ok: Boolean(previewResponse?.ok),
-      hasData: Boolean(previewResponse?.data),
-      error: previewResponse?.error || ""
+      ok: Boolean(loaded?.ok),
+      code: loaded?.code || "",
+      error: loaded?.error || ""
     });
-    const extracted = previewResponse?.data;
+    if (!loaded?.ok && loaded?.code === "SOURCE_STRUCTURE_CHANGED") {
+      const accepted = await showConfirmDialog(
+        `数据源"${sourceItem.name}"的字段结构已经更新，是否使用新结构更新技能并继续获取数据？`,
+        { confirmText: "更新并继续", cancelText: "不更新，停止获取" }
+      );
+      if (!accepted) throw new Error("字段结构已变化，用户取消更新");
+      const updatedSource = await updateSkillSourceHeaders(test.skillId, sourceItem.source.id, loaded.headers);
+      sourceItem.source.headers = [...updatedSource.headers];
+      sourceItem.source.capturedAt = updatedSource.capturedAt;
+      loaded = await sendToBackground({
+        type: "LOAD_SKILL_SOURCE_DATA",
+        source: sourceItem.source,
+        collectionId: sourceItem.collectionId,
+        maxPages: collectionMaxPages,
+        maxRows: MAX_SKILL_COLLECTION_ROWS,
+        options
+      });
+    }
+    if (!loaded?.ok) throw new Error(loaded?.error || "数据源载入失败");
+    if (loaded.requiresFinalize) {
+      await sendToBackground({
+        type: "FINALIZE_SKILL_SOURCE_COLLECTION",
+        sourceTabId: loaded.sourceTabId,
+        collectionId: sourceItem.collectionId
+      }).catch(() => null);
+    }
+    const extracted = loaded.data;
+
+    SKILL_DIAGNOSTICS() && console.info("[web2ai.derived-preview] LOAD_SKILL_SOURCE_DATA result:", {
+      ok: Boolean(loaded?.ok),
+      found: Boolean(extracted?.found),
+      status: extracted?.status || "",
+      rowCount: Number(extracted?.rowCount || 0),
+      totalRowCount: Number(extracted?.totalRowCount || 0),
+      collectedPages: Number(extracted?.collectedPages || 0),
+      collectionReason: extracted?.collectionReason || "",
+      headersCount: Array.isArray(extracted?.headers) ? extracted.headers.length : 0,
+      rowsLength: Array.isArray(extracted?.rows) ? extracted.rows.length : 0,
+      pageKey: sourceItem.source?.pageKey || "",
+      maxPages: collectionMaxPages
+    });
+
     logSkillWorkspaceCollection("source-preview-result", {
       skillId: test.skillId || "",
       sourceId: sourceItem.source?.id || "",
@@ -431,8 +490,7 @@ async function runDerivedColumnPreview() {
     const previewModel = buildDerivedPreviewRows({
       headers: extracted.headers,
       rows: extracted.rows,
-      selectedColumns: test.selectedColumns,
-      limit: 20
+      selectedColumns: test.selectedColumns
     });
     if (previewModel.resolvedSelection.missing.length) {
       throw new Error("选中的字段在当前表格中不存在，请重新选择字段");
@@ -474,26 +532,31 @@ async function runDerivedColumnPreview() {
       output: test.output
     });
     const resultMap = parsed.resultMap;
+    // 预览请求最多提交一个受模型预算约束的唯一指纹批次。只展示这些指纹
+    // 对应的原始行（重复指纹可映射到多行），避免未提交的行在整体完成后
+    // 永久显示为“等待分析”。完整采集数据仍保留在 sourceItem.data 中分页查看。
+    const submittedPreviewRows = selectSubmittedPreviewRows(previewModel.previewRows, requestRows);
     const selectedHeaders = previewModel.resolvedSelection.columns.map((column) => column.displayHeader || column.header);
     const outputColumnName = test.output?.columnName || "智能分析结论";
     test.response = content;
     test.derivedPreview = {
       headers: [...selectedHeaders, outputColumnName],
       selectedColumns: previewModel.resolvedSelection.columns,
-      rows: previewModel.previewRows.map((row) => {
+      rows: submittedPreviewRows.map((row) => {
         const matched = resultMap.get(row.fingerprint);
         const failure = parsed.failures.find((item) => item.fingerprint === row.fingerprint);
         return {
           fingerprint: row.fingerprint,
           selectedValues: row.selectedValues,
           conclusion: matched?.conclusion || "",
+          needsAttention: matched?.needsAttention || false,
           status: matched ? "complete" : failure ? "error" : "pending",
           error: failure?.error || ""
         };
       }),
       outputColumnName,
       uniqueRequestCount: requestRows.length,
-      totalPreviewCount: previewModel.previewRows.length,
+      totalPreviewCount: submittedPreviewRows.length,
       failedFingerprints: parsed.failures,
       usedDefaultMethod: request.usedDefaultMethod
     };

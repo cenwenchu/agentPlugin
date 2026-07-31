@@ -129,6 +129,63 @@ const virtualCollectionFixture = `<!doctype html><meta charset="utf-8"><title>Vi
     scroll.scrollTop = 200;
     render();
   <\/script>`;
+const documentVirtualCollectionFixture = `<!doctype html><meta charset="utf-8"><title>Document virtual collection</title>
+  <style>
+    html,body{margin:0;min-height:100%;font-family:system-ui}.toolbar{height:120px;background:#f8fafc}
+    .art-table{position:relative}.art-table-header{position:sticky;top:0;z-index:2;background:#fff}
+    .art-table-body{position:absolute;left:0;right:0;top:42px;background:#fff}
+    table{width:100%;border-collapse:collapse;table-layout:fixed}.art-table-row{height:120px}
+    th,td{border:1px solid #ddd;padding:8px}.art-virtual-blank{width:1px}
+    .pagination{height:80px;display:flex;gap:8px;align-items:center}
+  </style>
+  <div class="toolbar">模拟 100 条/页的延迟虚拟表格</div>
+  <div id="document-virtual-table" class="art-table">
+    <div class="art-table-header"><table><thead><tr class="art-table-header-row"><th>序号</th><th>订单号</th></tr></thead></table></div>
+    <div id="document-virtual-top"></div>
+    <div id="document-virtual-body" class="art-table-body"><table><tbody id="document-virtual-rows"></tbody></table></div>
+    <div id="document-virtual-bottom"></div>
+  </div>
+  <div class="ant-pagination pagination"><button class="ant-pagination-item ant-pagination-item-active">1</button><button class="ant-pagination-item">2</button><span class="ant-pagination-next"><button class="ant-pagination-item-link" aria-label="下一页">下一页</button></span></div>
+  <script>
+    const PAGE_SIZE = 100;
+    const ROW_HEIGHT = 120;
+    const WINDOW_SIZE = 9;
+    let page = 1;
+    let virtualReady = false;
+    const root = document.querySelector('#document-virtual-table');
+    const topBlank = document.querySelector('#document-virtual-top');
+    const bottomBlank = document.querySelector('#document-virtual-bottom');
+    const bodyWindow = document.querySelector('#document-virtual-body');
+    const body = document.querySelector('#document-virtual-rows');
+    const pageButtons = [...document.querySelectorAll('.ant-pagination-item')];
+    function render() {
+      const tableTop = root.getBoundingClientRect().top + window.scrollY;
+      const start = virtualReady ? Math.max(0, Math.min(PAGE_SIZE - WINDOW_SIZE, Math.floor(Math.max(0, window.scrollY - tableTop) / ROW_HEIGHT))) : 0;
+      const count = virtualReady ? Math.min(WINDOW_SIZE, PAGE_SIZE - start) : 1;
+      topBlank.className = '';
+      bottomBlank.className = virtualReady ? 'art-virtual-blank bottom' : '';
+      topBlank.style.height = '0px';
+      bottomBlank.style.height = virtualReady ? (PAGE_SIZE * ROW_HEIGHT) + 'px' : (count * ROW_HEIGHT) + 'px';
+      bodyWindow.style.transform = 'translateY(' + (start * ROW_HEIGHT) + 'px)';
+      body.innerHTML = Array.from({length:count}, (_, offset) => {
+        const index = start + offset + 1;
+        return '<tr class="art-table-row" data-rowindex="' + (index - 1) + '"><td>' + index + '</td><td>DOC-P' + page + '-ORDER-' + index + '</td></tr>';
+      }).join('');
+      pageButtons.forEach((button, index) => button.classList.toggle('ant-pagination-item-active', index + 1 === page));
+    }
+    function turnPage(nextPage) {
+      page = nextPage;
+      virtualReady = false;
+      window.scrollTo(0, 0);
+      render();
+      setTimeout(() => { virtualReady = true; render(); }, 700);
+    }
+    window.addEventListener('scroll', render, { passive:true });
+    pageButtons.forEach((button, index) => button.addEventListener('click', () => turnPage(index + 1)));
+    document.querySelector('.ant-pagination-next button').addEventListener('click', () => { if (page < 2) turnPage(page + 1); });
+    render();
+    setTimeout(() => { virtualReady = true; render(); }, 700);
+  <\/script>`;
 const derivedRuntimeFixture = `<!doctype html><meta charset="utf-8"><title>Derived runtime</title>
   <style>
     body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:16px}
@@ -305,6 +362,7 @@ const server = http.createServer((req, res) => {
       : req.url === "/inner-scroll" ? innerScrollFixture
       : req.url === "/inner-frame-host" ? innerFrameHostFixture
       : req.url === "/virtual-collection" ? virtualCollectionFixture
+      : req.url === "/document-virtual-collection" ? documentVirtualCollectionFixture
       : req.url === "/derived-runtime" ? derivedRuntimeFixture
       : req.url === "/skill-source-tabs" ? skillSourceTabsFixture
       : req.url === "/skill-source-multi" ? skillSourceMultiTableFixture
@@ -1710,6 +1768,32 @@ try {
   assert.equal(await virtualPage.$eval("#virtual-scroll", (node) => node.scrollTop), 0, "virtual table must return to the top");
   assert.equal(await virtualPage.$eval(".ant-pagination-item-active", (node) => node.textContent.trim()), "1", "hybrid collection must restore page one");
   await virtualPage.close();
+
+  // ArtTable switches to document-driven virtualization at large page sizes:
+  // initially only one row exists, then .art-virtual-blank supplies the remaining
+  // height. The collector must wait for that evidence and scan the table-scoped
+  // document range before turning the page.
+  const documentVirtualPage = await createPage();
+  await documentVirtualPage.goto(`${url}document-virtual-collection`);
+  await documentVirtualPage.waitForSelector("#web2ai_overlay_host");
+  const documentVirtualCollection = await worker.evaluate(async (pageUrl) => {
+    const [tab] = await chrome.tabs.query({ url: pageUrl });
+    if (!tab?.id) throw new Error("document virtual collection tab not found");
+    return chrome.tabs.sendMessage(tab.id, {
+      type: "COLLECT_SKILL_SOURCE_DATA",
+      source: { selector: "#document-virtual-table", tableIndex: 0, headers: ["序号", "订单号"] },
+      options: { collectionId: "e2e-document-virtual-collection", maxPages: 2, maxRows: 250, waitForInitialRowsMs: 2500 }
+    }, { frameId: 0 });
+  }, `${url}document-virtual-collection`);
+  assert.equal(documentVirtualCollection?.ok, true, `document virtual collection failed: ${JSON.stringify(documentVirtualCollection)}`);
+  assert.equal(documentVirtualCollection.data.collectedPages, 2);
+  assert.equal(documentVirtualCollection.data.rowCount, 200, "collector must read all 100 document-virtualized rows on both pages");
+  assert.equal(documentVirtualCollection.data.rows[0]?.[1], "DOC-P1-ORDER-1");
+  assert.equal(documentVirtualCollection.data.rows.at(-1)?.[1], "DOC-P2-ORDER-100");
+  assert.equal(await documentVirtualPage.evaluate(() => window.scrollY), 0, "document virtual table must restore the original scroll position");
+  assert.equal(await documentVirtualPage.$eval(".ant-pagination-item-active", (node) => node.textContent.trim()), "1", "document virtual collection must restore page one");
+  await documentVirtualPage.close();
+  reportE2eSection("document virtual collection passed");
 
   const derivedRuntimeUrl = `${url}derived-runtime`;
   await setDerivedRuntimeSkills(worker, {

@@ -71,6 +71,7 @@ async function readDerivedColumnCacheEntries(
     if (memoryEntry?.conclusion) {
       cached.set(rowFingerprint, {
         conclusion: String(memoryEntry.conclusion || "").trim(),
+        needsAttention: memoryEntry.needsAttention === true,
         createdAt: Number(memoryEntry.createdAt) || Date.now()
       });
       continue;
@@ -91,6 +92,7 @@ async function readDerivedColumnCacheEntries(
     writeDerivedMemoryEntry(key, entry);
     cached.set(rowFingerprint, {
       conclusion,
+      needsAttention: entry.needsAttention === true,
       createdAt: Number(entry.createdAt) || Date.now()
     });
   }
@@ -158,6 +160,7 @@ async function writeDerivedColumnCacheEntries(
       analysisFingerprint,
       rowFingerprint,
       conclusion,
+      needsAttention: entry?.needsAttention === true,
       createdAt: Number(entry?.createdAt) || Date.now()
     };
     writeDerivedMemoryEntry(buildDerivedColumnCacheKey(analysisFingerprint, rowFingerprint), payload[buildDerivedColumnCacheKey(analysisFingerprint, rowFingerprint)]);

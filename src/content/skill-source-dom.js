@@ -27,6 +27,42 @@ const SKILL_DIAGNOSTICS_VERBOSE = () => Boolean(globalThis.__WEB2AI_DEBUG_VERBOS
 const STORED_SOURCE_ACCEPT_HEADER_COVERAGE = 0.78;
 const STORED_SOURCE_CHANGED_HEADER_COVERAGE = 0.45;
 const STORED_SOURCE_AMBIGUOUS_SCORE_DELTA = 0.08;
+// 一个采集/渲染批次经常会在极短时间内为同一 source 连续查询表格。
+// 成功结果短暂复用，避免重复 querySelectorAll、表头读取和布局测量。
+// 只缓存成功结果；DOM 根节点被替换后 isConnected 会立即使缓存失效。
+const STORED_SOURCE_LOCATION_CACHE_MS = 500;
+const storedSourceLocationCache = new WeakMap();
+
+function storedSourceLocationCacheKey(source = {}, options = {}) {
+  const resolved = resolveStoredSourceOptions(source, options);
+  return JSON.stringify({
+    frameUrl: source?.frameUrl || "",
+    selector: source?.selector || "",
+    tableIndex: Number.isInteger(source?.tableIndex) ? source.tableIndex : null,
+    locatorVersion: Number(source?.locatorVersion) || 0,
+    headers: Array.isArray(source?.headers) ? source.headers : [],
+    skillType: resolved.skillType,
+    selectedColumns: resolved.selectedColumns
+  });
+}
+
+function readCachedStoredSourceLocation(source, options) {
+  if (!source || typeof source !== "object" || options?.forceRefresh) return null;
+  const cached = storedSourceLocationCache.get(source);
+  if (!cached || cached.expiresAt < performance.now()) return null;
+  if (cached.key !== storedSourceLocationCacheKey(source, options)) return null;
+  if (!cached.result?.table?.isConnected) return null;
+  return cached.result;
+}
+
+function cacheStoredSourceLocation(source, options, result) {
+  if (!source || typeof source !== "object" || !result?.table || result.status !== "available") return;
+  storedSourceLocationCache.set(source, {
+    key: storedSourceLocationCacheKey(source, options),
+    expiresAt: performance.now() + STORED_SOURCE_LOCATION_CACHE_MS,
+    result
+  });
+}
 
 function getStableTableRoot(rowEl) {
   return resolveTableAdapter(rowEl).scope;
@@ -650,6 +686,8 @@ function sourceMatchesCurrentFrame(source) {
 }
 
 function locateStoredSource(source, options = {}) {
+  const cached = readCachedStoredSourceLocation(source, options);
+  if (cached) return cached;
   if (!sourceMatchesCurrentFrame(source)) {
     return { table: null, status: "missing", frameMismatch: true, candidateCount: 0 };
   }
@@ -808,6 +846,7 @@ function locateStoredSource(source, options = {}) {
       candidateExactHeaderMatch: chosen.candidate?.exactHeaderMatch
     }));
   }
+  cacheStoredSourceLocation(source, options, locateResult);
   return locateResult;
 }
 
@@ -932,6 +971,19 @@ function extractStoredSourceData(source, limit = 200, options = {}) {
   const allRows = rawRows
     .map((row) => alignedRowCellTexts(getRowCells(row), headers.length))
     .filter((cells) => cells.length && cells.some(Boolean));
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.derived-preview] extractStoredSourceData DOM snapshot:", {
+    sourceId: source?.id || "",
+    tableTag: selected?.tagName || "",
+    rawRowsCount: rawRows.length,
+    allRowsCount: allRows.length,
+    headersCount: headers.length,
+    limit,
+    // 诊断只记录结构，不读取或输出业务单元格内容。
+    firstRawRowTag: rawRows[0]?.tagName?.toLowerCase?.() || "",
+    firstRawRowCellCount: rawRows[0] ? getRowCells(rawRows[0]).length : 0,
+    firstRawRowClassCount: String(rawRows[0]?.className || "").trim().split(/\s+/).filter(Boolean).length,
+    tableParentClass: selected?.parentElement?.className?.slice?.(0, 80) || ""
+  });
   const uniqueRows = [];
   const seen = new Set();
   for (const row of allRows) {

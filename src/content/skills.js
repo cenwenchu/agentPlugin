@@ -52,6 +52,8 @@ let observedJtv1Href = "";
 let pageWatchTimer = null;
 let skillBarTimer = null;
 let skillBarBroadcastTimer = null;
+let skillBarScrollQuietAt = 0;
+let skillBarScrollListenerInstalled = false;
 let skillValidationRunId = 0;
 let lastSkillBarDiagnostic = "";
 let lastSkillBarDiagnosticAt = 0;
@@ -67,6 +69,15 @@ const SKILL_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 const SKILL_SOURCE_VALIDATE_RETRY_DELAYS_MS = [400, 900, 1600, 2400];
 const SKILL_BUSINESS_TAB_REFRESH_DELAYS_MS = [180, 700, 1600];
 const EXTENSION_CONTEXT_INVALIDATED_MESSAGE = "扩展已更新，请刷新当前页面后重试";
+const SKILL_BAR_SCROLL_QUIET_MS = 600;
+
+function ensureSkillBarScrollListener() {
+  if (skillBarScrollListenerInstalled || typeof document?.addEventListener !== "function") return;
+  skillBarScrollListenerInstalled = true;
+  document.addEventListener("scroll", () => {
+    skillBarScrollQuietAt = Date.now() + SKILL_BAR_SCROLL_QUIET_MS;
+  }, { passive: true, capture: true });
+}
 
 function isExtensionContextInvalidatedError(error) {
   const message = String(error?.message || error || "");
@@ -625,9 +636,14 @@ function scheduleSkillBars(skills = []) {
   // 它负责把技能列表同步给所有子 frame，与"本 frame 是否匹配"无关。
   const hasMatch = frameHasMatchingSkill(skills);
   if (skills.length && hasMatch) {
+    ensureSkillBarScrollListener();
     // 业务表可能在页面加载十几秒后才出现，也可能被 SPA/虚拟列表整体替换。
     // 低频重建只在当前页面存在技能时运行，确保横条最终出现并持续存在。
-    skillBarTimer = setInterval(() => renderSkillBars(skills), 3000);
+    skillBarTimer = setInterval(() => {
+      // 横条维护不是实时业务逻辑；避开滚动帧，停止滚动后由下一轮自动补做。
+      if (Date.now() < skillBarScrollQuietAt) return;
+      renderSkillBars(skills);
+    }, 3000);
   }
   if (skills.length && IS_TOP_FRAME) {
     // 子 frame 的 main.js 通过动态 import 初始化，首次广播可能早于监听器注册。

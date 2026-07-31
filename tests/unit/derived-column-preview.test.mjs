@@ -6,7 +6,8 @@ import {
   buildDerivedPreviewRows,
   calculateDerivedColumnPreviewBatchSize,
   effectiveDerivedMethod,
-  resolveSelectedColumns
+  resolveSelectedColumns,
+  selectSubmittedPreviewRows
 } from "../../src/content/derived-column-request-model.js";
 import { parseDerivedColumnResults } from "../../src/content/derived-column-result-parser.js";
 
@@ -47,6 +48,20 @@ test("buildDerivedPreviewRows keeps preview rows but dedupes request rows by fin
   assert.notEqual(preview.previewRows[1].fingerprint, preview.previewRows[2].fingerprint);
 });
 
+test("derived preview only displays rows whose fingerprints were submitted", () => {
+  const previewRows = [
+    { fingerprint: "sha256:a", selectedValues: ["A-1"] },
+    { fingerprint: "sha256:a", selectedValues: ["A-2"] },
+    { fingerprint: "sha256:b", selectedValues: ["B-1"] },
+    { fingerprint: "sha256:c", selectedValues: ["C-1"] }
+  ];
+  const selected = selectSubmittedPreviewRows(previewRows, [
+    { fingerprint: "sha256:a" },
+    { fingerprint: "sha256:c" }
+  ]);
+  assert.deepEqual(selected.map((row) => row.selectedValues[0]), ["A-1", "A-2", "C-1"]);
+});
+
 test("derived preview prompt falls back to default method when empty", () => {
   const method = effectiveDerivedMethod("", 1);
   assert.equal(method.usedDefault, true);
@@ -80,7 +95,7 @@ test("parseDerivedColumnResults supports fenced json and reports duplicate or mi
       "```json",
       JSON.stringify({
         results: [
-          { fingerprint: "sha256:a", conclusion: "高风险" },
+          { fingerprint: "sha256:a", conclusion: "高风险", needsAttention: true },
           { fingerprint: "sha256:x", conclusion: "未知" },
           { fingerprint: "sha256:a", conclusion: "重复" }
         ]
@@ -93,6 +108,7 @@ test("parseDerivedColumnResults supports fenced json and reports duplicate or mi
   assert.equal(parsed.results.length, 1);
   assert.equal(parsed.results[0].fingerprint, "sha256:a");
   assert.equal(parsed.results[0].conclusion, "高风险");
+  assert.equal(parsed.results[0].needsAttention, true);
   assert.deepEqual(
     parsed.failures.map((item) => item.error).sort(),
     ["缺少结果", "返回了未知 fingerprint", "返回了重复 fingerprint"].sort()

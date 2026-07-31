@@ -57,9 +57,11 @@ function parseDerivedColumnResults({
       continue;
     }
     const conclusion = rawConclusion.slice(0, normalizedOutput.maxChars);
+    const needsAttention = typeof item?.needsAttention === "boolean" ? item.needsAttention : false;
     mapped.set(fingerprint, {
       fingerprint,
       conclusion,
+      needsAttention,
       truncated: conclusion.length < rawConclusion.length
     });
   }

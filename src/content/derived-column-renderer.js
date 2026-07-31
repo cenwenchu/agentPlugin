@@ -51,14 +51,14 @@ function ensureDerivedRuntimeStyle() {
       width: 100%;
       padding: 8px 10px;
       border-radius: 8px;
-      border: 1px solid #86efac;
-      background: #dcfce7;
-      color: #14532d;
+      border: 1px solid transparent;
+      background: transparent;
+      color: inherit;
       font: 12px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       white-space: normal;
       word-break: break-word;
       text-align: center;
-      box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.08);
+      box-shadow: none;
     }
 
     [${RUNTIME_NOTE_ATTR}][data-status="loading"],
@@ -72,6 +72,17 @@ function ensureDerivedRuntimeStyle() {
     [${RUNTIME_NOTE_ATTR}][data-status="error"] {
       border-color: #fecaca;
       background: #fef2f2;
+      color: #991b1b;
+      box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.08);
+    }
+
+    [${RUNTIME_CELL_ATTR}][data-attention="true"] {
+      background: #fef2f2;
+    }
+
+    [${RUNTIME_CELL_ATTR}][data-attention="true"] [${RUNTIME_NOTE_ATTR}] {
+      border-color: #fecaca;
+      background: transparent;
       color: #991b1b;
       box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.08);
     }
@@ -263,13 +274,19 @@ function renderDerivedRuntimeNote({
   status = "pending",
   conclusion = "",
   error = "",
+  needsAttention = false,
   insertIndex = 0,
   headerCount = 0
 } = {}) {
   if (!rowEl?.isConnected) return false;
   const note = ensureDerivedBodyCell(rowEl, { skillId, insertIndex, headerCount });
   if (!note) return false;
+  // 关注状态属于整条派生结果，因此标记在列单元格上：需要关注时整格红底，
+  // 普通完成态继续继承业务表格的默认底色。note 上保留相同标记以兼容既有查询。
+  const cell = note.closest?.(`[${RUNTIME_CELL_ATTR}]`);
+  if (cell) cell.dataset.attention = needsAttention ? "true" : "false";
   note.dataset.status = status;
+  note.dataset.attention = needsAttention ? "true" : "false";
   note.textContent = formatRuntimeNoteText({ status, conclusion, error });
   note.title = note.textContent;
   return true;
@@ -304,6 +321,7 @@ function renderDerivedRuntimeNotes(skillId = "", items = [], options = {}) {
       status: item.status,
       conclusion: item.conclusion,
       error: item.error,
+      needsAttention: item.needsAttention,
       insertIndex: options?.insertIndex || 0,
       headerCount: options?.headerCount || 0
     })) {

@@ -431,9 +431,10 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
     };
     const renderPreviewConclusionCell = (row) => {
       const message = row.conclusion || (row.status === "error" ? `分析失败：${row.error}` : "等待分析");
-      const content = el("div", {
-        class: `skillDerivedPreviewCell markdown skillDerivedPreviewAiBox${row.status === "error" ? " skillTestError" : ""}`
-      }, []);
+      const classes = ["skillDerivedPreviewCell", "markdown", "skillDerivedPreviewAiBox"];
+      if (row.status === "error") classes.push("skillTestError");
+      if (row.needsAttention) classes.push("skillDerivedAttention");
+      const content = el("div", { class: classes.join(" ") }, []);
       content.innerHTML = renderMarkdown(message);
       return el("td", {
         title: row.error ? `${row.conclusion}${row.error ? `（${row.error}）` : ""}` : row.conclusion,
@@ -489,7 +490,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
         el("div", { class: "skillWorkspaceSpacer" })
       ]),
       el("div", { class: "skillTestSteps" }, [
-        el("span", { class: `skillTestStep${activeData ? " done" : test.status === "loading" ? " active" : ""}` }, ["1. 读取当前页前 20 行"]),
+        el("span", { class: `skillTestStep${activeData ? " done" : test.status === "loading" ? " active" : ""}` }, ["1. 选择并载入数据"]),
         el("span", { class: `skillTestStep${finished ? " done" : test.status === "submitting" ? " active" : ""}` }, ["2. 去重后提交模型"]),
         el("span", { class: `skillTestStep${finished ? " done active" : test.status === "analyzing" ? " active" : ""}` }, ["3. 查看预览结果"])
       ]),
@@ -497,25 +498,25 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
         el("div", { class: "skillTestPanel" }, [
           el("div", { class: "skillBlockTitle" }, ["本次测试配置"]),
           el("div", { class: "skillTestMeta" }, [
-            `当前仅测试 1 个数据源；最多读取前 20 行，并且只提交唯一字段内容。`
+            `当前仅测试 1 个数据源；支持选择一页或多页载入，并且只提交唯一字段内容。`
           ]),
           renderUsageBox([
             "场景说明：按列分析适合针对表格中选中的多行生成单独结论，例如风险识别、异常判断、优先级建议、补充标签等，更适合把结果作为新增列贴回表格查看。",
-            "使用说明：测试预览只验证当前页前 20 行的抽数、去重和结果格式，不会开启正式自动执行。满意后请先保存技能；若希望页面刷新时自动分析，再去技能配置中开启“自动执行”。"
+            "使用说明：测试预览支持选择一页或多页载入；会抽数、去重后提交模型验证结果格式，不会开启正式自动执行。满意后请先保存技能；若希望页面刷新时自动分析，再去技能配置中开启“自动执行”。"
           ]),
           el("div", { class: "skillMeta" }, [`分析字段：${(test.selectedColumns || []).map((column) => column.header || column.normalizedHeader).join("、") || "未选择"}`]),
           el("div", { class: "skillMeta", style: { marginTop: "6px" } }, [`新增列名称：${test.output?.columnName || "智能分析结论"}`]),
           el("div", { class: "skillDataPreview", style: { marginTop: "12px" } }, [
             el("div", { class: "skillDataPreviewHead" }, [
-              "当前页数据预览",
+              "数据预览",
               el("span", { class: `skillDataPreviewStatus${sourceItem.status === "loading" ? " collecting" : ""}` }, [
                 sourceItem.status === "loading"
-                  ? "正在读取当前页数据…"
+                  ? "正在读取数据…"
                   : sourceItem.error
                     ? `读取失败：${sourceItem.error}`
                     : activeData
-                      ? `共识别 ${activeData.totalRowCount ?? activeData.rowCount ?? 0} 行，本次预览 ${Math.min(20, activeData.rowCount || 0)} 行`
-                      : "开始测试后将在这里展示当前页数据"
+                      ? `共识别 ${activeData.totalRowCount ?? activeData.rowCount ?? 0} 行，本次预览 ${activeData.rowCount || 0} 行`
+                      : "开始测试后将在这里展示数据"
               ])
             ]),
             el("div", { class: "skillDataPreviewBody" }, [
@@ -524,8 +525,13 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
                     el("thead", {}, [el("tr", {}, (activeData?.headers || []).map((header) => el("th", { title: header }, [header])))]),
                     el("tbody", {}, sourcePreviewRows.map((row) => el("tr", {}, row.map((cell) => el("td", { title: cell }, [cell])))))
                   ])
-                : el("div", { class: "skillDataPreviewEmpty" }, [sourceItem.status === "loading" ? "正在读取…" : "开始测试后将在这里展示当前页部分数据。"])
-            ])
+                : el("div", { class: "skillDataPreviewEmpty" }, [sourceItem.status === "loading" ? "正在读取…" : "开始测试后将在这里展示部分数据。"])
+            ]),
+            sourcePreview.pageCount > 1 ? el("div", { class: "skillDataPreviewPager" }, [
+              el("button", { disabled: sourcePreview.page <= 1, onClick: () => { sourceItem.previewPage--; renderOverlay(); } }, ["上一页"]),
+              el("span", {}, [`第 ${sourcePreview.page} / ${sourcePreview.pageCount} 页 · 共 ${(activeData?.rows || []).length} 条`]),
+              el("button", { disabled: sourcePreview.page >= sourcePreview.pageCount, onClick: () => { sourceItem.previewPage++; renderOverlay(); } }, ["下一页"])
+            ]) : null
           ]),
           el("label", { class: "skillFieldLabel" }, ["分析方法（可为空，留空时使用默认分析方法）"]),
           el("textarea", {
