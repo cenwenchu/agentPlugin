@@ -13,6 +13,18 @@ const ANT_PAGINATION_DISABLED = "ant-pagination-disabled";
 const ARCO_PAGINATION_DISABLED = "arco-pagination-item-disabled";
 const VXE_PAGER_DISABLED = "is--disabled";
 
+function paginationControlIsDisabled(el) {
+  if (!el) return true;
+  if (el.disabled || el.getAttribute?.("disabled") !== null || el.getAttribute?.("aria-disabled") === "true") return true;
+  return Boolean(el.closest?.([
+    `.${ANT_PAGINATION_DISABLED}`,
+    `.${ARCO_PAGINATION_DISABLED}`,
+    `.${VXE_PAGER_DISABLED}`,
+    "[disabled]",
+    "[aria-disabled='true']"
+  ].join(",")));
+}
+
 function getTableRootForRow(rowEl) {
   if (!rowEl) return null;
   // 通用：沿 DOM 树向上找最近的有表格语义的容器
@@ -300,7 +312,9 @@ function findPaginationNextButton(anchorRowEl) {
     if (ariaNext && (!drawerContainer || drawerContainer.contains(ariaNext))) return ariaNext;
     const nav = p.querySelector?.("[class*='pagination'],[class*='pager'],[role='navigation']");
     if (nav) {
-      const btns = Array.from(nav.querySelectorAll("button,a")).filter((x) => x && isVisibleElement(x));
+      const btns = Array.from(nav.querySelectorAll("button,a")).filter(
+        (x) => x && isVisibleElement(x) && !paginationControlIsDisabled(x)
+      );
       const pick = btns.find((b) => {
         const t = compactOneLine(b.innerText || b.textContent || "");
         if (!t) return false;
@@ -313,7 +327,7 @@ function findPaginationNextButton(anchorRowEl) {
 
   const scope = drawerContainer || document;
   const all = Array.from(scope.querySelectorAll("button,a,[role='button']")).filter(
-    (x) => x && isVisibleElement(x)
+    (x) => x && isVisibleElement(x) && !paginationControlIsDisabled(x)
   );
   const byText =
     all.find((b) => compactOneLine(b.innerText || b.textContent || "") === "下一页") ||

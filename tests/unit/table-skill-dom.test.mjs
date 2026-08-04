@@ -128,6 +128,22 @@ test("pagination lookup recognizes VXE pager next button", () => {
   }
 });
 
+test("pagination lookup does not recover a disabled VXE next button through generic fallbacks", () => {
+  const cleanup = installDom(`
+    <section>
+      <table><tbody><tr id="row"><td>1</td></tr></tbody></table>
+      <div class="vxe-pager">
+        <button class="vxe-pager--next-btn is--disabled">下一页</button>
+      </div>
+    </section>
+  `);
+  try {
+    assert.equal(findPaginationNextButton(document.querySelector("#row")), null);
+  } finally {
+    cleanup();
+  }
+});
+
 test("fast table readiness waits for content stability instead of a fixed two-second delay", async () => {
   const cleanup = installDom(`
     <table id="orders"><tbody><tr><td>A-1</td><td>载入中</td></tr></tbody></table>

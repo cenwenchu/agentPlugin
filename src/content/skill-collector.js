@@ -4,7 +4,7 @@
  * 采集完成语义、页数/行数上限和恢复第一页行为与旧实现一致。
  */
 
-import { DEBUG, IS_TOP_FRAME, compactOneLine, uid } from "./state.js";
+import { DEBUG, IS_TOP_FRAME, compactOneLine, uid, web2aiDiagnosticsEnabled } from "./state.js";
 import { isVisibleElement } from "./dom.js";
 import { resolveTableRootAdapter } from "./table-adapters.js";
 import {
@@ -21,8 +21,9 @@ import {
 } from "./table-pagination-dom.js";
 
 const activeCollections = new Map();
-// 运行时可开关：控制台执行 window.__WEB2AI_DEBUG = true 即可打开采集日志
-const SKILL_COLLECTION_DIAGNOSTICS = () => DEBUG || globalThis.__WEB2AI_DEBUG === true;
+// 采集日志与其他技能日志共用统一诊断开关：支持面板持久化配置，
+// 也保留 window.__WEB2AI_DEBUG 临时开关。
+const SKILL_COLLECTION_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 const SKILL_PAGINATION_SELECTOR = ".ant-pagination,.arco-pagination,.vxe-pager,#_jt_pagebar,[class*='pagination'],[class*='pager'],[role='navigation']";
 
 // 普通跨页选择继续使用 table-pagination-dom 的保守默认值。技能采集已经先
