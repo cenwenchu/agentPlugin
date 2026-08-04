@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv7VYT2JJKJf8CJCGAXf1W7/R16D4Yre/TTkf5HptHnWJqdSmczbUcuD5kRTdgZTIOpiQnHmAoWQ0QdFrAYC2yHeSYi/VB0WDQQPXwF1UE42s6Hv4A4lji2wmwxR15SZcPG4ZAceXYhU//tEfAvT2T/J9xul0HPDwa3tx89/rbHPdO3nwyosMGHEI3JXo0g18leG3bnDizJWQ28FtYrmOtE75REeZbOWF9Ipo41gH9nZSXsWOcr2Yup75AbZzqoycbPJOIW8JpYrqaII31pH6kzpCJAHEz8gcOc8JC9VGjcf8UtSScYB2VazpyftTpVyk4VoFXqnXqVQn7bbDnjNKLQIDAQAB",
   "name": "Web-to-AI Context Chat",
   "version": "0.1.0",
   "description": "Bring webpage tables, region screenshots, and multi-screen captures into an AI chat overlay as context.",

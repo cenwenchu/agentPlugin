@@ -1,0 +1,24 @@
+# Chrome 扩展打包产物
+*.crx
+*.pem
+
+# Node 依赖
+node_modules/
+
+# 日志与临时调试产物（erpDemoFile/ 内的演示数据不受此规则影响）
+*.log
+/*.txt
+
+# macOS 系统文件
+.DS_Store
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 本地测试截图、下载产物
+*.png
+*.jpg
+*.jpeg
