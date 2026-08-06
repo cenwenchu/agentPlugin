@@ -22,6 +22,21 @@ import {
 
 const SKILL_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 
+function renderWorkspaceRequestStatus(session) {
+  const message = skillWorkspaceResultStatusMessage(session);
+  if (!session?.requestStartedAt || !["submitting", "analyzing"].includes(session.status)) return message;
+  return el("span", {}, [
+    session.reasoningActive ? "模型正在推理" : message,
+    el("span", {
+      style: { marginLeft: "6px", color: "#6b7280", fontSize: "11px" },
+      "data-web2ai-request-started-at": String(session.reasoningActive && session.reasoningStartedAt
+        ? session.reasoningStartedAt
+        : session.requestStartedAt),
+      "data-web2ai-elapsed-label": session.reasoningActive ? "已推理" : "已等待"
+    }, [session.reasoningActive ? "已推理 0.0 秒" : "已等待 0.0 秒"])
+  ]);
+}
+
 function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, render: renderOverlay }) {
   const renderUsageBox = (lines = []) => el("div", { class: "skillUsageNote" }, [
     ...lines.flatMap((line, index) => index === 0 ? [line] : [el("br"), line])
@@ -29,6 +44,18 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
   const renderModelSetupHint = () => modelConfigReady
     ? null
     : el("div", { class: "skillTestError", style: { marginBottom: "10px" } }, ["当前模型尚未配置，请先点击右上角“去配置模型”。"]);
+  const renderThinkingToggle = (session) => el("label", { class: "skillThinkingToggle" }, [
+    el("input", {
+      type: "checkbox",
+      checked: session.enableThinking === true,
+      disabled: session.pending,
+      onChange: (event) => {
+        session.enableThinking = event.target.checked === true;
+      }
+    }),
+    el("span", {}, ["启用模型推理"]),
+    el("span", { class: "skillMeta" }, ["仅本次测试或运行有效；推理通常更准确，但首字更慢"])
+  ]);
 
   function renderSkillTestPanel() {
     const test = STATE.skillTest;
@@ -55,7 +82,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
         ? el("div", { class: "skillTestResult bubble assistant" }, [])
         : el("div", { class: `skillTestResult waiting${test.pending ? " skillResultStatus" : ""}` }, [
             test.pending
-              ? skillWorkspaceResultStatusMessage(test)
+              ? renderWorkspaceRequestStatus(test)
               : "点击“开始测试”，这里将原样展示模型按照当前分析方法生成的结果。"
           ]);
     if (test.response && !test.error) resultContent.innerHTML = renderMarkdown(test.response);
@@ -173,6 +200,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
               }
             }
           }, [test.method]),
+          renderThinkingToggle(test),
           renderModelSetupHint(),
           el("div", { class: "skillActions" }, [
             el("button", {
@@ -298,8 +326,9 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
       analysisResult.innerHTML = renderMarkdown(execution.response);
     } else {
       analysisResult.textContent = execution.pending
-        ? skillWorkspaceResultStatusMessage(execution)
+        ? ""
         : "等待执行";
+      if (execution.pending) analysisResult.append(renderWorkspaceRequestStatus(execution));
     }
     const followupTurns = (execution.followups || []).map((turn) => {
       const answer = el("div", { class: "skillFollowupAnswer" }, []);
@@ -312,7 +341,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
     const statusText = execution.status === "loading"
       ? collectionProgress
       : execution.status === "submitting" || execution.status === "analyzing"
-        ? skillWorkspaceResultStatusMessage(execution)
+        ? renderWorkspaceRequestStatus(execution)
         : finished
           ? "分析完成"
           : execution.error
@@ -337,6 +366,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
           dataPreview,
           el("div", { class: "skillBlockTitle" }, ["分析方法"]),
           el("div", { class: "skillExecutionMethod" }, [execution.method]),
+          renderThinkingToggle(execution),
           renderModelSetupHint(),
           execution.submittedPrompt ? el("div", { class: "skillActions" }, [
             el("button", { class: "btn", onClick: () => viewSkillSubmittedPrompt(execution) }, ["查看提交内容"])
@@ -476,7 +506,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
           ])
         : el("div", { class: `skillTestResult waiting${test.pending ? " skillResultStatus" : ""}` }, [
             test.pending
-              ? skillWorkspaceResultStatusMessage(test)
+              ? renderWorkspaceRequestStatus(test)
               : "点击“开始测试预览”，这里会展示所选字段和按列分析结论。"
           ]);
     return el("div", { class: "skillTest" }, [

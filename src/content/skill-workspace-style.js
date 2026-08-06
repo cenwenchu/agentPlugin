@@ -57,6 +57,10 @@ const SKILL_WORKSPACE_CSS = `
     .skillDataPreviewPager button { height: 24px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 0 8px; background: #fff; color: #334155; font-size: 10px; cursor: pointer; }
     .skillDataPreviewPager button:disabled { color: #94a3b8; background: #f8fafc; cursor: not-allowed; }
     .skillTestMethod { width: 100%; min-height: 46px; max-height: 180px; box-sizing: border-box; resize: vertical; border: 1px solid rgba(0,0,0,.14); border-radius: 9px; padding: 10px; color: #111827; font: inherit; font-size: 12px; line-height: 1.55; }
+    .skillThinkingToggle { display: flex; align-items: center; gap: 7px; margin: 9px 0 11px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 9px; background: #f8fafc; color: #334155; font-size: 11px; cursor: pointer; }
+    .skillThinkingToggle input { width: 15px; height: 15px; margin: 0; accent-color: #2563eb; }
+    .skillThinkingToggle .skillMeta { margin-left: auto; color: #64748b; font-size: 10px; }
+    .skillThinkingToggle:has(input:disabled) { cursor: default; opacity: .7; }
     .skillTestResult { color: #111827; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
     .skillTestResult.waiting { color: #64748b; }
     /* 仅强调运行中的阶段反馈；空状态说明和最终模型结果沿用正文排版。 */

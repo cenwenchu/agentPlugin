@@ -17,8 +17,8 @@ import { initHighlightStyle } from './highlight.js';
 import { initOverlay, render, setOpen, clearDraftInput, refreshModelOptions, captureScreenshot, captureMultipleScreens, inspectMultiScreenScrollTarget, setMultiScreenScrollPosition, restoreMultiScreenScrollPosition, startSkillExecution } from './overlay.js';
 import { showToast } from './toast.js';
 import { addContextSnippet, initContextDependencies, removeContextByRef } from './context.js';
-import { initSkills, reloadSkills, createSkillDraft, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars, getBusinessPageTabs } from './skills.js';
-import { findBusinessTabElements, businessTabTitle } from './business-tab-dom.js';
+import { initSkills, reloadSkills, createSkillDraft, startSkillCreation, startSkillTablePickInFrame, cancelSkillTablePickInFrame, acceptSkillTablePickResult, resolveStoredSource, extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource, scheduleSkillBars, setSkillRuntimePaused, getBusinessPageTabs } from './skills.js';
+import { findBusinessTabElements, businessTabTitle, businessTabActive } from './business-tab-dom.js';
 import { applySkillWorkspaceCollectionProgress } from './skill-workspace-controller.js';
 
 // Guard: bail out if extension context was invalidated (extension reloaded/removed)
@@ -333,6 +333,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: `页面“${title}”未打开` });
       return;
     }
+    // 已经在目标业务页签时不能再次派发 click。部分 ERP 页面会把重复点击
+    // 当成重新激活/重建 iframe，子 frame 随后重新向 top frame 查询 Token，
+    // 容易在模型提交的同时触发 queryTokenFromTopFrame 超时。
+    if (businessTabActive(target)) {
+      refs.suppressPanelCloseUntil = Date.now() + 1500;
+      if (refs.panelCloseTimer) clearTimeout(refs.panelCloseTimer);
+      refs.panelCloseTimer = null;
+      STATE.open = true;
+      sendResponse({ ok: true, unchanged: true });
+      return;
+    }
+    // 这是插件为恢复技能工作台来源页签而触发的内部点击，不是用户点击网页。
+    // 顶层 document click 监听器会在 300ms 后自动收起 Chat；先取消可能已经
+    // 排队的关闭任务并覆盖完整的站点 click/异步切页窗口，避免请求提交时面板消失。
+    refs.suppressPanelCloseUntil = Date.now() + 1500;
+    if (refs.panelCloseTimer) clearTimeout(refs.panelCloseTimer);
+    refs.panelCloseTimer = null;
+    STATE.open = true;
     target.element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
     sendResponse({ ok: true });
     return;
@@ -366,6 +384,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "SYNC_SKILL_BARS") {
     scheduleSkillBars(Array.isArray(message.skills) ? message.skills : []);
+    sendResponse({ ok: true });
+    return;
+  }
+  if (message?.type === "SET_SKILL_RUNTIME_PAUSED") {
+    setSkillRuntimePaused(message.paused === true);
     sendResponse({ ok: true });
     return;
   }
@@ -481,6 +504,11 @@ document.addEventListener("web2ai:keep-panel-open", (event) => {
 document.addEventListener("click", (event) => {
   const extensionUi = isExtensionUiPointerEvent(event);
   if (extensionUi) return;
+  // 技能采集翻页、恢复第一页和业务 Tab 恢复都会通过 dispatchEvent 触发
+  // 合成 click。它们可能发生在子 frame，并经 CLOSE_PANEL_FROM_PAGE_CLICK
+  // 转发到顶层；不能把插件内部动作当成用户点击而收起工作台。
+  // 浏览器只会为真实用户输入生成 isTrusted=true，程序无法伪造该标记。
+  if (!event.isTrusted) return;
   if (IS_TOP_FRAME) {
     const target = event.target instanceof Element ? event.target : null;
     const iframeOwnsClick = (target === document.body || target === document.documentElement) &&

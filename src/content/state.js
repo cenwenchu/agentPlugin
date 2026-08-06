@@ -42,6 +42,8 @@ const STATE = {
   /** 首次无输入时生成的欢迎语和快捷问题，不进入模型对话历史 */
   onboarding: null,
   pending: false,
+  /** 普通 Chat 当前请求真正发往模型的时间；仅用于展示等待首段内容的耗时。 */
+  requestStartedAt: 0,
   draftText: "",
   lastInputCursor: null,
   suppressAutoSuggest: false,
@@ -152,6 +154,8 @@ const refs = {
   streamingMsgRef: null,
   /** RAF 调度的渲染标记（防抖） */
   renderScheduled: false,
+  /** 等待模型首段内容时，仅更新耗时文本，避免为计时反复重绘整个面板。 */
+  requestElapsedTimer: null,
   /** WeakMap: 行元素 → ref 标记（仅内存） */
   selectedRowRef: new WeakMap(),
   /** Map: ref → 行元素 */

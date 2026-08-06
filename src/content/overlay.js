@@ -343,6 +343,34 @@ function scheduleRender() {
   });
 }
 
+function formatRequestElapsed(startedAt, now = Date.now(), label = "已等待") {
+  const elapsedMs = Math.max(0, now - Number(startedAt || now));
+  const seconds = elapsedMs / 1000;
+  return `${label || "已等待"} ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} 秒`;
+}
+
+function ensureRequestElapsedTicker() {
+  if (refs.requestElapsedTimer || !refs.overlayShadow) return;
+  const update = () => {
+    const nodes = refs.overlayShadow?.querySelectorAll?.("[data-web2ai-request-started-at]") || [];
+    if (!nodes.length) {
+      clearInterval(refs.requestElapsedTimer);
+      refs.requestElapsedTimer = null;
+      return;
+    }
+    const now = Date.now();
+    for (const node of nodes) {
+      node.textContent = formatRequestElapsed(
+        node.getAttribute("data-web2ai-request-started-at"),
+        now,
+        node.getAttribute("data-web2ai-elapsed-label") || "已等待"
+      );
+    }
+  };
+  update();
+  refs.requestElapsedTimer = setInterval(update, 250);
+}
+
 function selectScreenshotRegion() {
   return new Promise((resolve) => {
     const selector = el("div", {
@@ -1095,10 +1123,14 @@ function render() {
             const bubble = el("div", { class: `bubble ${m.role}${isWaiting ? " waiting" : ""}` });
             if (m.role === "assistant") {
               if (isWaiting) {
-                bubble.append(
-                  el("span", {}, ["正在等待模型回复"]),
-                  el("span", { class: "waitingDots", "aria-label": "加载中" }, [el("i"), el("i"), el("i")])
-                );
+                bubble.append(el("span", {}, ["正在等待模型回复"]));
+                if (STATE.requestStartedAt) {
+                  bubble.append(el("span", {
+                    style: { marginLeft: "6px", color: "#6b7280", fontSize: "11px" },
+                    "data-web2ai-request-started-at": String(STATE.requestStartedAt)
+                  }, [formatRequestElapsed(STATE.requestStartedAt)]));
+                }
+                bubble.append(el("span", { class: "waitingDots", "aria-label": "加载中" }, [el("i"), el("i"), el("i")]));
               } else bubble.innerHTML = renderMarkdown(m.content);
             } else {
               bubble.textContent = m.content;
@@ -1923,6 +1955,7 @@ function render() {
       requestAnimationFrame(() => render());
     }
   }
+  if (refs.overlayShadow.querySelector("[data-web2ai-request-started-at]")) ensureRequestElapsedTicker();
 }
 
 function sliceRecentRounds(messages) {
@@ -1971,6 +2004,7 @@ function sliceRecentRounds(messages) {
 }
 
 async function sendText(rawText, opts = {}) {
+  const preparationStartedAt = performance.now();
   if (!IS_TOP_FRAME) return;
   ensureOverlay();
   const text = normalizeText(rawText);
@@ -2069,6 +2103,18 @@ async function sendText(rawText, opts = {}) {
     };
     STATE.messages.push(assistantMsg);
     refs.streamingMsgRef = assistantMsg;
+    STATE.requestStartedAt = Date.now();
+    web2aiDiagnosticsEnabled() && console.info("[web2ai.ai.pipeline] chat-prepared", JSON.stringify({
+      label: "chat",
+      preparationMs: Number((performance.now() - preparationStartedAt).toFixed(2)),
+      requestMessageCount: requestMessages.length,
+      requestTextLength: requestMessages.reduce((sum, message) => (
+        sum + (Array.isArray(message?.content)
+          ? message.content.reduce((partSum, part) => partSum + String(part?.text || "").length, 0)
+          : String(message?.content || "").length)
+      ), 0),
+      contextCount: STATE.contexts.filter((context) => context.enabled !== false).length
+    }));
     render();
 
     await streamChat({
@@ -2115,6 +2161,7 @@ async function sendText(rawText, opts = {}) {
       };
       STATE.messages.push(retryAssistantMsg);
       refs.streamingMsgRef = retryAssistantMsg;
+      STATE.requestStartedAt = Date.now();
       render();
       await streamChat({
         messages: requestMessages,
@@ -2142,6 +2189,7 @@ async function sendText(rawText, opts = {}) {
   } finally {
     refs.streamingMsgRef = null;
     STATE.pending = false;
+    STATE.requestStartedAt = 0;
     render();
   }
 }

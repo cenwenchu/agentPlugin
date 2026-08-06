@@ -52,6 +52,8 @@ let observedJtv1Href = "";
 let pageWatchTimer = null;
 let skillBarTimer = null;
 let skillBarBroadcastTimer = null;
+let skillRuntimePaused = false;
+let lastScheduledSkillBars = [];
 let skillBarScrollQuietAt = 0;
 let skillBarScrollListenerInstalled = false;
 let skillValidationRunId = 0;
@@ -622,10 +624,15 @@ function frameHasMatchingSkill(skills = []) {
 }
 
 function scheduleSkillBars(skills = []) {
+  lastScheduledSkillBars = Array.isArray(skills) ? skills : [];
   if (skillBarTimer) clearInterval(skillBarTimer);
   if (skillBarBroadcastTimer) clearInterval(skillBarBroadcastTimer);
   skillBarTimer = null;
   skillBarBroadcastTimer = null;
+  // 测试/执行完成数据采集并提交模型后，页面定位已经没有业务价值。
+  // 请求期间彻底停止横条重建和跨 frame 重发，避免复杂页面的 DOM 扫描
+  // 与流式响应争用主线程；模型结束后再恢复低频维护。
+  if (skillRuntimePaused) return;
   // 技能条重建与按列分析运行期调度共用同一入口：
   // 前者兜底表格 DOM 替换、晚加载和跨 frame 同步，后者兜底结果列恢复与自动执行。
   renderSkillBars(skills);
@@ -651,9 +658,31 @@ function scheduleSkillBars(skills = []) {
     skillBarBroadcastTimer = setInterval(() => {
       sendRuntimeMessageSafely({
         type: "BROADCAST_TO_TAB",
-        payload: { message: { type: "SYNC_SKILL_BARS", skills } }
+        payload: {
+          message: { type: "SYNC_SKILL_BARS", skills },
+          excludeSenderFrame: true
+        }
       }).catch(() => void 0);
     }, 10000);
+  }
+}
+
+function setSkillRuntimePaused(paused = false) {
+  const next = Boolean(paused);
+  if (skillRuntimePaused === next) return;
+  skillRuntimePaused = next;
+  if (skillBarTimer) clearInterval(skillBarTimer);
+  if (skillBarBroadcastTimer) clearInterval(skillBarBroadcastTimer);
+  skillBarTimer = null;
+  skillBarBroadcastTimer = null;
+  SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-runtime]", JSON.stringify({
+    event: next ? "paused-for-model" : "resumed-after-model",
+    frame: IS_TOP_FRAME ? "top" : "child",
+    page: pageKey(location.href)
+  }));
+  if (!next) {
+    if (IS_TOP_FRAME) loadSkills().catch(() => void 0);
+    else scheduleSkillBars(lastScheduledSkillBars);
   }
 }
 
@@ -950,10 +979,16 @@ async function loadSkills() {
     Object.fromEntries(skill.sources.map((source) => [source.id, { status: "checking" }]))
   ]));
   renderCallback();
+  // storage/页签观察器在模型请求期间仍可能触发 loadSkills。目录状态可以更新，
+  // 但不要继续定位、校验或向子 frame 广播；恢复后会重新进入正常维护周期。
+  if (skillRuntimePaused) return;
   scheduleSkillBars(STATE.skills);
   chrome.runtime.sendMessage({
     type: "BROADCAST_TO_TAB",
-    payload: { message: { type: "SYNC_SKILL_BARS", skills: STATE.skills } }
+    payload: {
+      message: { type: "SYNC_SKILL_BARS", skills: STATE.skills },
+      excludeSenderFrame: true
+    }
   }).catch(() => void 0);
   await Promise.all(STATE.skills.map((skill) => validateSkillSource(skill, validationRunId)));
 }
@@ -1392,6 +1427,7 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
       let validated = null;
       for (let attempt = 0; attempt <= SKILL_SOURCE_VALIDATE_RETRY_DELAYS_MS.length; attempt++) {
         const businessTabs = readBusinessPageTabs();
+        const attemptStartedAt = performance.now();
         const response = await chrome.runtime.sendMessage({
           type: "VALIDATE_SKILL_SOURCE",
           source,
@@ -1400,6 +1436,7 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
             selectedColumns: skill.selectedColumns
           }
         });
+        const roundTripMs = performance.now() - attemptStartedAt;
         validated = response?.data || { status: "missing" };
         SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] validate-attempt", JSON.stringify({
           skillId: skill.id,
@@ -1417,7 +1454,9 @@ async function validateSkillSource(skill, validationRunId = skillValidationRunId
           similarity: Number(validated?.similarity || 0),
           candidateCount: Number(validated?.candidateCount || 0),
           frameMismatch: Boolean(validated?.frameMismatch),
-          ambiguous: Boolean(validated?.ambiguous)
+          ambiguous: Boolean(validated?.ambiguous),
+          roundTripMs: Number(roundTripMs.toFixed(2)),
+          backgroundTiming: validated?.validationTiming || null
         }));
         // 站点慢加载时，首轮常出现“表格尚未挂载”；给一个短暂重试窗口避免误报失效。
         if (validated.found || validated.status === "changed") break;
@@ -1636,7 +1675,7 @@ export {
   saveSkillDraft, rebindSkill, removeSkillDraftSource, deleteSkill, deleteAllSkills, resolveStoredSource, switchToSkillPage,
   renameCurrentSkillPage, buildAnalysisPrompt,
   extractStoredSourceData, extractStoredSourcePreviewData, inspectStoredSourcePagination, collectStoredSourceData, stopStoredSourceCollection, focusStoredSource,
-  saveSkillAnalysisMethod, updateSkillSourceHeaders, scheduleSkillBars,
+  saveSkillAnalysisMethod, updateSkillSourceHeaders, scheduleSkillBars, setSkillRuntimePaused,
   downloadSkillsExport, previewSkillsImport, applySkillsImport, getBusinessPageTabs
 };
 

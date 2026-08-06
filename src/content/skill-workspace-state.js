@@ -37,6 +37,10 @@ function createSkillWorkspaceSession({ skill = {}, method = "", mode = "test", c
     methodReview: "",
     error: "",
     pending: false,
+    requestStartedAt: 0,
+    enableThinking: false,
+    reasoningStartedAt: 0,
+    reasoningActive: false,
     methodSaving: false,
     attempts: 0,
     collectionId: "",
@@ -87,6 +91,9 @@ function invalidateSkillWorkspaceResult(session) {
   session.followupDraft = "";
   session.methodReview = "";
   session.submittedPrompt = "";
+  session.requestStartedAt = 0;
+  session.reasoningStartedAt = 0;
+  session.reasoningActive = false;
   session.resultTab = "result";
   session.derivedPreview = {
     headers: [],

@@ -8,7 +8,7 @@
  * 上下文和对话只保存在顶层 content script 内存中，页面刷新后清空。
  */
 
-import { DEBUG, uid, STATE, refs } from './state.js';
+import { DEBUG, uid, STATE, refs, web2aiDiagnosticsEnabled } from './state.js';
 import { showToast } from './toast.js';
 
 /**
@@ -43,6 +43,7 @@ function getChatPort() {
     if (!requestId) return;
     const handler = refs.streamHandlers.get(requestId);
     if (!handler) return;
+    if (msg.type === "AI_CHAT_STREAM_STATUS") handler.onStatus(msg);
     if (msg.type === "AI_CHAT_STREAM_CHUNK") handler.onChunk(msg.delta || "");
     if (msg.type === "AI_CHAT_STREAM_END") handler.onEnd();
     if (msg.type === "AI_CHAT_STREAM_ERROR") handler.onError({
@@ -73,8 +74,11 @@ function getChatPort() {
  * @param {{messages: Array, onChunk: Function}} params
  * @returns {Promise<void>}
  */
-function streamChatOnce({ messages, onChunk, debugLabel = "chat" }) {
+function streamChatOnce({ messages, onChunk, onStatus = () => void 0, debugLabel = "chat", thinkingEnabled } = {}) {
   const requestId = uid();
+  const traceEnabled = web2aiDiagnosticsEnabled();
+  const contentStartedAt = performance.now();
+  let firstChunkAt = 0;
   const port = getChatPort();
   return new Promise((resolve, reject) => {
     // Chrome MV3 会在约 30 秒没有扩展事件时回收 Service Worker。部分模型在
@@ -85,10 +89,41 @@ function streamChatOnce({ messages, onChunk, debugLabel = "chat" }) {
     const clearHeartbeat = () => clearInterval(heartbeat);
     refs.streamHandlers.set(requestId, {
       port,
-      onChunk: (delta) => onChunk(delta),
+      onStatus: (status) => {
+        traceEnabled && console.info("[web2ai.ai.pipeline] stage", JSON.stringify({
+          requestId,
+          label: debugLabel,
+          phase: status?.phase || "unknown",
+          elapsedMs: Number(status?.elapsedMs || 0),
+          ...(Number.isFinite(status?.httpStatus) ? { httpStatus: status.httpStatus } : {}),
+          ...(Number.isFinite(status?.chunkBytes) ? { chunkBytes: status.chunkBytes } : {}),
+          ...(Number.isFinite(status?.chunkLength) ? { chunkLength: status.chunkLength } : {}),
+          ...(typeof status?.enabled === "boolean" ? { enabled: status.enabled } : {}),
+          ...(status?.mode ? { mode: status.mode } : {})
+        }));
+        onStatus(status);
+      },
+      onChunk: (delta) => {
+        if (delta && !firstChunkAt) {
+          firstChunkAt = performance.now();
+          traceEnabled && console.info("[web2ai.ai.pipeline] content-first-chunk", JSON.stringify({
+            requestId,
+            label: debugLabel,
+            elapsedMs: Number((firstChunkAt - contentStartedAt).toFixed(2)),
+            firstChunkLength: String(delta).length
+          }));
+        }
+        onChunk(delta);
+      },
       onEnd: () => {
         clearHeartbeat();
         refs.streamHandlers.delete(requestId);
+        traceEnabled && console.info("[web2ai.ai.pipeline] content-end", JSON.stringify({
+          requestId,
+          label: debugLabel,
+          totalMs: Number((performance.now() - contentStartedAt).toFixed(2)),
+          firstChunkMs: firstChunkAt ? Number((firstChunkAt - contentStartedAt).toFixed(2)) : null
+        }));
         resolve();
       },
       onError: (err) => {
@@ -100,7 +135,23 @@ function streamChatOnce({ messages, onChunk, debugLabel = "chat" }) {
       }
     });
     try {
-    port.postMessage({ type: "AI_CHAT_STREAM", requestId, payload: { messages, modelId: STATE.activeModelId, debugLabel } });
+    port.postMessage({
+      type: "AI_CHAT_STREAM",
+      requestId,
+      payload: {
+        messages,
+        modelId: STATE.activeModelId,
+        debugLabel,
+        diagnosticsEnabled: traceEnabled,
+        thinkingEnabled: typeof thinkingEnabled === "boolean" ? thinkingEnabled : undefined
+      }
+    });
+    traceEnabled && console.info("[web2ai.ai.pipeline] content-posted", JSON.stringify({
+      requestId,
+      label: debugLabel,
+      elapsedMs: Number((performance.now() - contentStartedAt).toFixed(2)),
+      messageCount: messages.length
+    }));
     } catch (error) {
       clearHeartbeat();
       refs.streamHandlers.delete(requestId);
@@ -112,7 +163,7 @@ function streamChatOnce({ messages, onChunk, debugLabel = "chat" }) {
   });
 }
 
-async function streamChat({ messages, onChunk, debugLabel = "chat" }) {
+async function streamChat({ messages, onChunk, onStatus = () => void 0, debugLabel = "chat", thinkingEnabled } = {}) {
   const startedAt = Date.now();
   const totalTextLength = messages.reduce((sum, message) => {
     if (Array.isArray(message?.content)) {
@@ -139,7 +190,7 @@ async function streamChat({ messages, onChunk, debugLabel = "chat" }) {
     }));
     const response = await sendToBackground({
       type: "AI_CHAT",
-      payload: { messages, modelId: STATE.activeModelId, debugLabel: `${debugLabel}-compat` }
+      payload: { messages, modelId: STATE.activeModelId, debugLabel: `${debugLabel}-compat`, thinkingEnabled }
     });
     if (!response?.ok) {
       throw new Error(`流式连接不可用，兼容模式请求也失败：${response?.error || "未知错误"}`);
@@ -155,7 +206,7 @@ async function streamChat({ messages, onChunk, debugLabel = "chat" }) {
     }));
   };
   try {
-    await streamChatOnce({ messages, onChunk: handleChunk, debugLabel });
+    await streamChatOnce({ messages, onChunk: handleChunk, onStatus, debugLabel, thinkingEnabled });
   } catch (error) {
     DEBUG && console.warn("[web2ai.ai.request] content stream error", JSON.stringify({
       label: debugLabel,
@@ -174,7 +225,7 @@ async function streamChat({ messages, onChunk, debugLabel = "chat" }) {
     if (error?.code !== "STREAM_DISCONNECTED" || receivedContent) throw error;
     refs.chatPort = null;
     try {
-      await streamChatOnce({ messages, onChunk: handleChunk, debugLabel: `${debugLabel}-retry` });
+      await streamChatOnce({ messages, onChunk: handleChunk, onStatus, debugLabel: `${debugLabel}-retry`, thinkingEnabled });
     } catch (retryError) {
       DEBUG && console.warn("[web2ai.ai.request] content stream error", JSON.stringify({
         label: debugLabel,

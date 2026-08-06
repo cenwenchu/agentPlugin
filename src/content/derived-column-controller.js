@@ -1362,6 +1362,12 @@ function ensureRuntimeObserver() {
 function scheduleDerivedColumnRuntime(skills = []) {
   const derivedSkills = (Array.isArray(skills) ? skills : [])
     .filter((skill) => skillTypeOf(skill) === SKILL_TYPE_DERIVED_COLUMN);
+  // 整表分析技能不需要启动派生列运行期。仍先清理可能存在的旧 controller，
+  // 随后立即退出，避免一次技能同步在页面所有 iframe 中产生空调度和诊断日志。
+  if (!derivedSkills.length) {
+    clearDerivedRuntimeForMissingSkills([]);
+    return;
+  }
   logDerivedRuntime("schedule", {
     totalSkills: Array.isArray(skills) ? skills.length : 0,
     derivedSkillCount: derivedSkills.length

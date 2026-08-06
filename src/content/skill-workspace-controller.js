@@ -379,6 +379,7 @@ async function runDerivedColumnPreview() {
   test.status = "loading";
   test.error = "";
   test.response = "";
+  test.requestStartedAt = 0;
   test.submittedPrompt = "";
   test.derivedPreview = {
     headers: [],
@@ -514,6 +515,9 @@ async function runDerivedColumnPreview() {
     });
     test.submittedPrompt = request.prompt;
     test.status = "analyzing";
+    test.requestStartedAt = Date.now();
+    test.reasoningStartedAt = 0;
+    test.reasoningActive = false;
     renderWorkspace();
     const response = await sendToBackground({
       type: "AI_CHAT",
@@ -569,6 +573,7 @@ async function runDerivedColumnPreview() {
     test.status = "error";
   } finally {
     test.pending = false;
+    test.requestStartedAt = 0;
     renderWorkspace();
   }
 }
@@ -623,6 +628,7 @@ async function runSkillTest({ reuseData = false } = {}) {
     }
   }
   renderWorkspace();
+  let modelRuntimePaused = false;
   try {
     if (shouldLoadData) {
       for (let index = 0; index < dataSources.length; index++) {
@@ -762,13 +768,25 @@ async function runSkillTest({ reuseData = false } = {}) {
     }
     test.status = "submitting";
     renderWorkspace();
+    // 到这里所有网页数据已经采集完成。模型返回前不再需要定位数据源；暂停
+    // 所有 frame 的技能条轮询/校验，防止复杂 DOM 扫描拖慢首个流式分片。
+    await sendToBackground({
+      type: "BROADCAST_TO_TAB",
+      payload: { message: { type: "SET_SKILL_RUNTIME_PAUSED", paused: true } }
+    }).catch(() => null);
+    modelRuntimePaused = true;
+    const preparationStartedAt = performance.now();
+    const settingsStartedAt = performance.now();
     const settingsResponse = await sendToBackground({ type: "GET_SETTINGS", modelId: STATE.activeModelId }).catch(() => null);
+    const settingsMs = performance.now() - settingsStartedAt;
+    const promptStartedAt = performance.now();
     const requestBudget = calculateSkillRequestBudget({
       contextWindow: settingsResponse?.data?.contextWindow,
       maxOutputTokens: settingsResponse?.data?.maxOutputTokens,
       method: test.method
     });
     const prompt = buildSkillRequestPrompt({ method: test.method, dataSources }, requestBudget.maxChars);
+    const promptBuildMs = performance.now() - promptStartedAt;
     // 保存实际发送的文本快照；查看时不能重新组装，否则后续编辑会让
     // 展示内容与本次真实请求不一致。
     test.submittedPrompt = prompt;
@@ -784,6 +802,16 @@ async function runSkillTest({ reuseData = false } = {}) {
       requestBudgetChars: requestBudget.maxChars
     }));
     test.status = "analyzing";
+    test.requestStartedAt = Date.now();
+    SKILL_DIAGNOSTICS() && console.info("[web2ai.ai.pipeline] skill-prepared", JSON.stringify({
+      label: test.mode === "execute" ? "skill-execution" : "skill-test",
+      preparationMs: Number((performance.now() - preparationStartedAt).toFixed(2)),
+      settingsMs: Number(settingsMs.toFixed(2)),
+      promptBuildMs: Number(promptBuildMs.toFixed(2)),
+      promptLength: prompt.length,
+      sourceCount: dataSources.length,
+      submittedRowCount: dataSources.reduce((sum, item) => sum + (item.data?.rowCount || 0), 0)
+    }));
     test.conversationMessages = [{ role: "user", content: prompt }];
     test.followups = [];
     test.methodReview = "";
@@ -791,6 +819,17 @@ async function runSkillTest({ reuseData = false } = {}) {
     await streamChat({
       messages: [{ role: "user", content: prompt }],
       debugLabel: test.mode === "execute" ? "skill-execution" : "skill-test",
+      thinkingEnabled: test.enableThinking === true,
+      onStatus: (status) => {
+        if (status?.phase === "first-reasoning") {
+          test.reasoningStartedAt = Date.now();
+          test.reasoningActive = true;
+          scheduleWorkspaceRender();
+        } else if (status?.phase === "first-content") {
+          test.reasoningActive = false;
+          scheduleWorkspaceRender();
+        }
+      },
       onChunk: (delta) => {
         test.response += delta;
         scheduleWorkspaceRender();
@@ -825,7 +864,15 @@ async function runSkillTest({ reuseData = false } = {}) {
       test.status = "error";
     }
   } finally {
+    if (modelRuntimePaused) {
+      await sendToBackground({
+        type: "BROADCAST_TO_TAB",
+        payload: { message: { type: "SET_SKILL_RUNTIME_PAUSED", paused: false } }
+      }).catch(() => null);
+    }
     test.pending = false;
+    test.requestStartedAt = 0;
+    test.reasoningActive = false;
     renderWorkspace();
   }
 }

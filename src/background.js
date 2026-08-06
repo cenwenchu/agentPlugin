@@ -208,12 +208,25 @@ function buildChatCompletionsUrl(baseUrl) {
   return `${normalized}/v1/chat/completions`;
 }
 
+function thinkingRequestFields(settings, thinkingEnabled) {
+  if (typeof thinkingEnabled !== "boolean") return { fields: {}, mode: "default" };
+  const baseUrl = String(settings?.baseUrl || "").toLowerCase();
+  const model = String(settings?.model || "").toLowerCase();
+  if (baseUrl.includes("api.deepseek.com")) {
+    return { fields: { thinking: { type: thinkingEnabled ? "enabled" : "disabled" } }, mode: "deepseek-thinking" };
+  }
+  if (baseUrl.includes("dashscope") || /(?:qwen|qwq|kimi|glm|deepseek)/.test(model)) {
+    return { fields: { enable_thinking: thinkingEnabled }, mode: "enable-thinking" };
+  }
+  return { fields: {}, mode: "unsupported" };
+}
+
 /**
  * 发送非流式 AI 对话请求。
  * @param {{messages: Array}} params
  * @returns {Promise<{raw: Object, content: string}>}
  */
-async function chatCompletions({ messages, modelId = "", debugLabel = "chat" }) {
+async function chatCompletions({ messages, modelId = "", debugLabel = "chat", thinkingEnabled } = {}) {
   messages = sanitizeAiMessages(messages);
   const settings = await getSettings(modelId);
   const startedAt = Date.now();
@@ -231,6 +244,7 @@ async function chatCompletions({ messages, modelId = "", debugLabel = "chat" }) 
   }
 
   const url = buildChatCompletionsUrl(settings.baseUrl);
+  const thinkingRequest = thinkingRequestFields(settings, thinkingEnabled);
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -239,7 +253,8 @@ async function chatCompletions({ messages, modelId = "", debugLabel = "chat" }) 
     },
     body: JSON.stringify({
       model: settings.model,
-      messages
+      messages,
+      ...thinkingRequest.fields
     })
   });
 
@@ -264,9 +279,22 @@ async function chatCompletions({ messages, modelId = "", debugLabel = "chat" }) 
  * 逐行解析 data: 开头的 JSON 片段，提取 delta 内容。
  * @param {{messages: Array, signal: AbortSignal, onDelta: Function, onActivity?: Function}} params
  */
-async function streamChatCompletions({ messages, modelId = "", signal, onDelta, onActivity = () => void 0 }) {
+async function streamChatCompletions({
+  messages,
+  modelId = "",
+  thinkingEnabled,
+  signal,
+  onDelta,
+  onActivity = () => void 0,
+  onStatus = () => void 0,
+  trace = null
+}) {
+  const pipelineStartedAt = performance.now();
   messages = sanitizeAiMessages(messages);
+  if (trace) trace.sanitizeMs = performance.now() - pipelineStartedAt;
+  const settingsStartedAt = performance.now();
   const settings = await getSettings(modelId);
+  if (trace) trace.settingsMs = performance.now() - settingsStartedAt;
   if (!settings.apiKey) {
     throw new Error("Missing API Key. Please set it in the extension Options.");
   }
@@ -275,18 +303,41 @@ async function streamChatCompletions({ messages, modelId = "", signal, onDelta, 
   }
 
   const url = buildChatCompletionsUrl(settings.baseUrl);
+  const thinkingRequest = thinkingRequestFields(settings, thinkingEnabled);
+  const serializeStartedAt = performance.now();
+  const requestBody = JSON.stringify({
+    model: settings.model,
+    messages,
+    stream: true,
+    ...thinkingRequest.fields
+  });
+  if (trace) {
+    trace.serializeMs = performance.now() - serializeStartedAt;
+    trace.requestBytes = requestBody.length;
+    trace.fetchStartedMs = performance.now() - pipelineStartedAt;
+  }
+  onStatus("fetch-started", { elapsedMs: performance.now() - pipelineStartedAt });
+  onStatus("thinking-option", {
+    elapsedMs: performance.now() - pipelineStartedAt,
+    enabled: typeof thinkingEnabled === "boolean" ? thinkingEnabled : null,
+    mode: thinkingRequest.mode
+  });
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${settings.apiKey}`
     },
-    body: JSON.stringify({
-      model: settings.model,
-      messages,
-      stream: true
-    }),
+    body: requestBody,
     signal
+  });
+  if (trace) {
+    trace.responseHeadersMs = performance.now() - pipelineStartedAt;
+    trace.httpStatus = res.status;
+  }
+  onStatus("response-headers", {
+    elapsedMs: performance.now() - pipelineStartedAt,
+    httpStatus: res.status
   });
 
   if (!res.ok) {
@@ -298,15 +349,49 @@ async function streamChatCompletions({ messages, modelId = "", signal, onDelta, 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let doneReceived = false;
+  let firstSseEventSeen = false;
+  let firstReasoningSeen = false;
   const parser = createSseDataParser((data) => {
+    if (trace && !firstSseEventSeen) {
+      firstSseEventSeen = true;
+      trace.firstSseEventMs = performance.now() - pipelineStartedAt;
+      onStatus("first-sse-event", { elapsedMs: trace.firstSseEventMs });
+    }
     if (data === "[DONE]") {
       doneReceived = true;
       return;
     }
     try {
       const json = JSON.parse(data);
-      const delta = json?.choices?.[0]?.delta?.content ?? json?.choices?.[0]?.message?.content ?? json?.choices?.[0]?.text ?? "";
-      if (delta) onDelta(delta);
+      const choice = json?.choices?.[0] || {};
+      const reasoning = choice?.delta?.reasoning_content
+        ?? choice?.delta?.reasoning
+        ?? choice?.message?.reasoning_content
+        ?? "";
+      if (reasoning) {
+        if (trace) {
+          trace.reasoningChars = Number(trace.reasoningChars || 0) + String(reasoning).length;
+          if (trace.firstReasoningMs == null) trace.firstReasoningMs = performance.now() - pipelineStartedAt;
+        }
+        if (!firstReasoningSeen) {
+          firstReasoningSeen = true;
+          onStatus("first-reasoning", {
+            elapsedMs: performance.now() - pipelineStartedAt,
+            chunkLength: String(reasoning).length
+          });
+        }
+      }
+      const delta = choice?.delta?.content ?? choice?.message?.content ?? choice?.text ?? "";
+      if (delta) {
+        if (trace && trace.firstContentMs == null) {
+          trace.firstContentMs = performance.now() - pipelineStartedAt;
+          onStatus("first-content", {
+            elapsedMs: trace.firstContentMs,
+            chunkLength: String(delta).length
+          });
+        }
+        onDelta(delta);
+      }
     } catch {
       void 0;
     }
@@ -315,11 +400,19 @@ async function streamChatCompletions({ messages, modelId = "", signal, onDelta, 
   while (!doneReceived) {
     const { value, done } = await reader.read();
     if (done) break;
+    if (trace && trace.firstBodyChunkMs == null) {
+      trace.firstBodyChunkMs = performance.now() - pipelineStartedAt;
+      onStatus("first-body-chunk", {
+        elapsedMs: trace.firstBodyChunkMs,
+        chunkBytes: value?.byteLength || 0
+      });
+    }
     onActivity();
     parser.feed(decoder.decode(value, { stream: true }));
   }
   parser.feed(decoder.decode());
   parser.end();
+  if (trace) trace.totalMs = performance.now() - pipelineStartedAt;
 }
 
 // ========== Tab 消息通信 ==========
@@ -373,9 +466,12 @@ async function waitForTabPageKey(tabId, expectedPageKey, attempts = 12) {
   return false;
 }
 
-async function broadcastToTab(tabId, message) {
+async function broadcastToTab(tabId, message, { excludeFrameId = null } = {}) {
   const frames = await chrome.webNavigation.getAllFrames({ tabId });
-  return Promise.allSettled(frames.map((frame) => sendToFrame(tabId, frame.frameId, message)));
+  const targets = Number.isInteger(excludeFrameId)
+    ? frames.filter((frame) => frame.frameId !== excludeFrameId)
+    : frames;
+  return Promise.allSettled(targets.map((frame) => sendToFrame(tabId, frame.frameId, message)));
 }
 
 // ========== 安装 & 右键菜单 ==========
@@ -611,12 +707,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message?.type === "VALIDATE_SKILL_SOURCE") {
       if (!sender?.tab?.id) throw new Error("无法确定技能所在标签页");
+      const validationStartedAt = performance.now();
       const preferredFrameUrl = normalizedPageKey(message.source?.frameUrl || "");
       let best = null;
       let lastProbes = [];
       let lastFoundSignature = "";
       let stableFoundCount = 0;
+      let validationAttempts = 0;
       for (let attempt = 0; attempt < 12; attempt++) {
+        validationAttempts = attempt + 1;
         const frames = await chrome.webNavigation.getAllFrames({ tabId: sender.tab.id });
         const frameSelection = selectSourceFrames(frames, message.source, normalizedPageKey);
         if (frameSelection.ambiguous) {
@@ -625,6 +724,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         const ordered = frameSelection.frames;
         const frameResults = await Promise.all(ordered.map(async (frame) => {
+          const frameStartedAt = performance.now();
           try {
             const response = await sendToFrame(sender.tab.id, frame.frameId, {
               type: "CHECK_SKILL_SOURCE",
@@ -632,15 +732,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               options: message.options
             });
             return response?.ok
-              ? { ...(response.data || {}), frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url) }
-              : { found: false, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url), error: response?.error || "check failed" };
-          } catch (error) { return { found: false, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url), error: String(error?.message ?? error) }; }
+              ? { ...(response.data || {}), frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url), elapsedMs: performance.now() - frameStartedAt }
+              : { found: false, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url), elapsedMs: performance.now() - frameStartedAt, error: response?.error || "check failed" };
+          } catch (error) { return { found: false, frameId: frame.frameId, frameUrl: normalizedPageKey(frame.url), elapsedMs: performance.now() - frameStartedAt, error: String(error?.message ?? error) }; }
         }));
         lastProbes = frameResults.map((result) => ({
           frameId: result.frameId,
           frameUrl: result.frameUrl,
           found: Boolean(result.found),
           candidateCount: result.candidateCount || 0,
+          elapsedMs: Number((result.elapsedMs || 0).toFixed(2)),
           error: result.error || ""
         }));
         const preferredFramePresent = !preferredFrameUrl || lastProbes.some((probe) => probe.frameUrl === preferredFrameUrl);
@@ -675,13 +776,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (attempt < 11) await new Promise((resolve) => setTimeout(resolve, 500));
       }
       const targetFramePresent = Boolean(preferredFrameUrl && lastProbes.some((probe) => probe.frameUrl === preferredFrameUrl));
+      const validationTiming = {
+        totalMs: Number((performance.now() - validationStartedAt).toFixed(2)),
+        attempts: validationAttempts,
+        probeCount: lastProbes.length,
+        probes: lastProbes
+      };
       sendResponse({
         ok: true,
-        data: best || {
+        data: best ? { ...best, validationTiming } : {
           status: "missing",
           found: false,
           targetFramePresent,
-          probes: lastProbes
+          probes: lastProbes,
+          validationTiming
         }
       });
       return;
@@ -1031,7 +1139,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!tabId) throw new Error("Missing tabId");
       const msg = message.payload?.message;
       if (!msg) throw new Error("Missing payload.message");
-      await broadcastToTab(tabId, msg);
+      // 调用 frame 通常已经在本地应用了同一状态。允许它显式排除自身，避免
+      // scheduleSkillBars → broadcast → scheduleSkillBars 的同轮重复 DOM 定位。
+      const excludeFrameId = message.payload?.excludeSenderFrame === true
+        ? sender.frameId
+        : null;
+      await broadcastToTab(tabId, msg, { excludeFrameId });
       sendResponse({ ok: true });
       return;
     }
@@ -1086,8 +1199,25 @@ chrome.runtime.onConnect.addListener((port) => {
       };
       resetWatchdog();
       const debugLabel = String(message.payload?.debugLabel || "chat");
+      const traceEnabled = message.payload?.diagnosticsEnabled === true;
       const startedAt = Date.now();
       let firstChunkAt = 0;
+      const pipelineTrace = {};
+      const postPipelineStatus = (phase, details = {}) => {
+        if (!traceEnabled) return;
+        try {
+          port.postMessage({
+            type: "AI_CHAT_STREAM_STATUS",
+            requestId,
+            phase,
+            ...Object.fromEntries(Object.entries(details).map(([key, value]) => [
+              key,
+              typeof value === "number" ? Number(value.toFixed(2)) : value
+            ]))
+          });
+        } catch { void 0; }
+      };
+      postPipelineStatus("background-received", { elapsedMs: 0 });
       DIAGNOSTIC_LOGS && console.info("[web2ai.ai.request] stream start", JSON.stringify({
         requestId,
         label: debugLabel,
@@ -1099,13 +1229,25 @@ chrome.runtime.onConnect.addListener((port) => {
         await streamChatCompletions({
           messages: message.payload?.messages ?? [],
           modelId: message.payload?.modelId || "",
+          thinkingEnabled: typeof message.payload?.thinkingEnabled === "boolean" ? message.payload.thinkingEnabled : undefined,
           signal: abort.signal,
+          trace: pipelineTrace,
           onActivity: resetWatchdog,
+          onStatus: postPipelineStatus,
           onDelta: (delta) => {
             if (!firstChunkAt) firstChunkAt = Date.now();
             port.postMessage({ type: "AI_CHAT_STREAM_CHUNK", requestId, delta });
           }
         });
+        traceEnabled && console.info("[web2ai.ai.pipeline] background", JSON.stringify({
+          requestId,
+          label: debugLabel,
+          modelId: message.payload?.modelId || "",
+          ...Object.fromEntries(Object.entries(pipelineTrace).map(([key, value]) => [
+            key,
+            typeof value === "number" ? Number(value.toFixed(2)) : value
+          ]))
+        }));
         DIAGNOSTIC_LOGS && console.info("[web2ai.ai.request] stream end", JSON.stringify({
           requestId,
           label: debugLabel,
@@ -1114,6 +1256,19 @@ chrome.runtime.onConnect.addListener((port) => {
         }));
         port.postMessage({ type: "AI_CHAT_STREAM_END", requestId });
       } catch (e) {
+        traceEnabled && console.warn("[web2ai.ai.pipeline] background-error", JSON.stringify({
+          requestId,
+          label: debugLabel,
+          phase: pipelineTrace.responseHeadersMs == null ? "before-response-headers"
+            : pipelineTrace.firstBodyChunkMs == null ? "before-response-body"
+              : pipelineTrace.firstContentMs == null ? "before-first-content"
+                : "during-stream",
+          ...Object.fromEntries(Object.entries(pipelineTrace).map(([key, value]) => [
+            key,
+            typeof value === "number" ? Number(value.toFixed(2)) : value
+          ])),
+          error: String(e?.message ?? e)
+        }));
         DIAGNOSTIC_LOGS && console.warn("[web2ai.ai.request] stream error", JSON.stringify({
           requestId,
           label: debugLabel,

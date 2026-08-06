@@ -27,11 +27,12 @@ const SKILL_DIAGNOSTICS_VERBOSE = () => Boolean(globalThis.__WEB2AI_DEBUG_VERBOS
 const STORED_SOURCE_ACCEPT_HEADER_COVERAGE = 0.78;
 const STORED_SOURCE_CHANGED_HEADER_COVERAGE = 0.45;
 const STORED_SOURCE_AMBIGUOUS_SCORE_DELTA = 0.08;
-// 一个采集/渲染批次经常会在极短时间内为同一 source 连续查询表格。
-// 成功结果短暂复用，避免重复 querySelectorAll、表头读取和布局测量。
-// 只缓存成功结果；DOM 根节点被替换后 isConnected 会立即使缓存失效。
-const STORED_SOURCE_LOCATION_CACHE_MS = 500;
-const storedSourceLocationCache = new WeakMap();
+// 技能条每 3 秒维护一次，而复杂 nth-of-type selector 在大型 ERP DOM 上单次可能
+// 阻塞数秒。按稳定配置指纹跨 storage 反序列化对象复用成功结果；节点被 SPA
+// 替换后 isConnected 会立即失效，配置/表头/选中列变化也会生成不同 key。
+const STORED_SOURCE_LOCATION_CACHE_MS = 30 * 1000;
+const STORED_SOURCE_LOCATION_CACHE_MAX = 100;
+const storedSourceLocationCache = new Map();
 
 function storedSourceLocationCacheKey(source = {}, options = {}) {
   const resolved = resolveStoredSourceOptions(source, options);
@@ -46,22 +47,56 @@ function storedSourceLocationCacheKey(source = {}, options = {}) {
   });
 }
 
+function storedSourceLocationStableKey(source = {}, options = {}) {
+  return `${String(source?.id || "anonymous")}::${storedSourceLocationCacheKey(source, options)}`;
+}
+
 function readCachedStoredSourceLocation(source, options) {
   if (!source || typeof source !== "object" || options?.forceRefresh) return null;
-  const cached = storedSourceLocationCache.get(source);
-  if (!cached || cached.expiresAt < performance.now()) return null;
-  if (cached.key !== storedSourceLocationCacheKey(source, options)) return null;
-  if (!cached.result?.table?.isConnected) return null;
+  const key = storedSourceLocationStableKey(source, options);
+  const cached = storedSourceLocationCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt < performance.now() || !cached.result?.table?.isConnected) {
+    storedSourceLocationCache.delete(key);
+    return null;
+  }
   return cached.result;
 }
 
 function cacheStoredSourceLocation(source, options, result) {
   if (!source || typeof source !== "object" || !result?.table || result.status !== "available") return;
-  storedSourceLocationCache.set(source, {
-    key: storedSourceLocationCacheKey(source, options),
+  const key = storedSourceLocationStableKey(source, options);
+  storedSourceLocationCache.set(key, {
     expiresAt: performance.now() + STORED_SOURCE_LOCATION_CACHE_MS,
     result
   });
+  while (storedSourceLocationCache.size > STORED_SOURCE_LOCATION_CACHE_MAX) {
+    storedSourceLocationCache.delete(storedSourceLocationCache.keys().next().value);
+  }
+}
+
+function selectorNeedsCandidateScopedQuery(selector = "") {
+  const text = String(selector || "");
+  const structuralParts = text.match(/:nth-(?:of-type|child)\s*\(/gi) || [];
+  const hasStableAnchor = /#[\w-]+|\[(?:id|data-[\w-]+|aria-[\w-]+)\s*(?:=|\])/i.test(text);
+  return structuralParts.length >= 2 && !hasStableAnchor;
+}
+
+function candidateScopedSelectorMatches(selector, candidates = []) {
+  if (!selectorNeedsCandidateScopedQuery(selector) || !candidates.length) return null;
+  const targets = new Set();
+  for (const candidate of candidates) {
+    let node = candidate;
+    for (let depth = 0; node && depth < 12; depth++, node = node.parentElement) {
+      targets.add(node);
+      if (node === document.body || node === document.documentElement) break;
+    }
+  }
+  const matches = [];
+  for (const target of targets) {
+    if (target.matches?.(selector)) matches.push(target);
+  }
+  return matches;
 }
 
 function getStableTableRoot(rowEl) {
@@ -686,20 +721,69 @@ function sourceMatchesCurrentFrame(source) {
 }
 
 function locateStoredSource(source, options = {}) {
+  const locateStartedAt = performance.now();
+  const timing = {
+    cacheMs: 0,
+    candidatesMs: 0,
+    visibilityMs: 0,
+    selectorMs: 0,
+    scoringMs: 0,
+    finalizeMs: 0
+  };
+  const logTiming = (outcome, extra = {}) => {
+    if (!SKILL_DIAGNOSTICS()) return;
+    const rounded = Object.fromEntries(Object.entries(timing).map(([key, value]) => [key, Number(value.toFixed(2))]));
+    console.info("[web2ai.skill-source] locate-timing", JSON.stringify({
+      page: pageKey(location.href),
+      sourceId: source?.id || "",
+      outcome,
+      totalMs: Number((performance.now() - locateStartedAt).toFixed(2)),
+      ...rounded,
+      ...extra
+    }));
+  };
+  const cacheStartedAt = performance.now();
   const cached = readCachedStoredSourceLocation(source, options);
-  if (cached) return cached;
+  timing.cacheMs = performance.now() - cacheStartedAt;
+  if (cached) {
+    logTiming("cache-hit", { candidateCount: cached.candidateCount || 0 });
+    return cached;
+  }
   if (!sourceMatchesCurrentFrame(source)) {
+    logTiming("frame-mismatch");
     return { table: null, status: "missing", frameMismatch: true, candidateCount: 0 };
   }
+  const candidatesStartedAt = performance.now();
   const candidates = tableCandidates();
+  timing.candidatesMs = performance.now() - candidatesStartedAt;
+  const visibilityStartedAt = performance.now();
   const visibleCandidates = preferVisibleTables(candidates);
+  timing.visibilityMs = performance.now() - visibilityStartedAt;
   const resolvedOptions = resolveStoredSourceOptions(source, options);
   const versioned = Number(source?.locatorVersion) >= SOURCE_LOCATOR_VERSION;
   let selectorTables = [];
+  let selectorQueryMode = "none";
+  const selectorStartedAt = performance.now();
   try {
+    const scopedMatches = source?.selector && versioned
+      ? candidateScopedSelectorMatches(source.selector, candidates)
+      : null;
+    // 复杂结构 selector 先在少量候选表祖先上验证。若没有命中，回退原查询，
+    // 保留 selector 指向特殊子节点或旧页面结构时的兼容行为。
     const matches = source?.selector
-      ? (versioned ? Array.from(document.querySelectorAll(source.selector)) : [document.querySelector(source.selector)].filter(Boolean))
+      ? (scopedMatches?.length
+          ? scopedMatches
+          : versioned
+            ? Array.from(document.querySelectorAll(source.selector))
+            : [document.querySelector(source.selector)].filter(Boolean))
       : [];
+    selectorQueryMode = !source?.selector
+      ? "none"
+      : scopedMatches?.length
+        ? "candidate-scoped"
+        : versioned
+          ? "document-all"
+          : "document-first";
     const resolvedTables = matches.map(resolveTableFromTarget);
     selectorTables = preferVisibleTables(resolvedTables.filter((table) => table && (candidates.includes(table) || (isJtv1LikePage() && table.querySelector?.("#_jt_row_head, #_jt_body, ._jt_row._jt_rh")))));
     // 诊断：selector 匹配详情
@@ -730,12 +814,14 @@ function locateStoredSource(source, options = {}) {
     }));
     selectorTables = [];
   }
+  timing.selectorMs = performance.now() - selectorStartedAt;
   const indexedTable = Number.isInteger(source?.tableIndex) ? candidates[source.tableIndex] || null : null;
   const preferredIndexedTable = indexedTable && !isVisibleElement(indexedTable) && visibleCandidates.length === 1
     ? visibleCandidates[0]
     : indexedTable;
   const selectorSet = new Set(selectorTables);
   const headerCache = new Map();
+  const scoringStartedAt = performance.now();
   const scoredCandidates = preferVisibleTables(candidates).map((table, candidateIndex) => (
     buildStoredSourceCandidate(table, source, resolvedOptions, {
       candidateIndex,
@@ -745,6 +831,7 @@ function locateStoredSource(source, options = {}) {
     })
   ));
   const chosen = pickBestStoredSourceCandidate(scoredCandidates, source, resolvedOptions);
+  timing.scoringMs = performance.now() - scoringStartedAt;
   // 轻量摘要：每次渲染都跑，保持低开销
   SKILL_DIAGNOSTICS() && console.info("[web2ai.skill-source] locate", JSON.stringify({
     page: pageKey(location.href),
@@ -752,6 +839,7 @@ function locateStoredSource(source, options = {}) {
     sourceName: source?.displayName || source?.tableTitle || "",
     sourceBusinessTabTitle: compactOneLine(source?.businessTabTitle || ""),
     selectorCandidateCount: selectorTables.length,
+    selectorQueryMode,
     visibleCandidateCount: visibleCandidates.length,
     candidateCount: candidates.length,
     chosenMatchMethod: chosen.matchMethod,
@@ -789,8 +877,10 @@ function locateStoredSource(source, options = {}) {
       bestHeaders: chosen.candidates?.[0]?.headers?.slice(0, 3),
       secondHeaders: chosen.candidates?.[1]?.headers?.slice(0, 3)
     }));
+    logTiming("ambiguous", { candidateCount: candidates.length, visibleCandidateCount: visibleCandidates.length });
     return { table: null, status: "ambiguous", ambiguous: true, candidateCount: candidates.length };
   }
+  const finalizeStartedAt = performance.now();
   const table = resolveStoredSourceDataTable(chosen.table, source);
   if (!table) {
     SKILL_DIAGNOSTICS() && typeof console?.warn === "function" && console.warn("[web2ai.skill-source] locate-table-not-found", JSON.stringify({
@@ -799,6 +889,8 @@ function locateStoredSource(source, options = {}) {
       matchMethod: chosen.matchMethod,
       candidateCount: candidates.length
     }));
+    timing.finalizeMs = performance.now() - finalizeStartedAt;
+    logTiming("table-not-found", { candidateCount: candidates.length, visibleCandidateCount: visibleCandidates.length });
     return { table: null, status: chosen.status || "missing", candidateCount: candidates.length };
   }
   const identityWarnings = [];
@@ -826,6 +918,7 @@ function locateStoredSource(source, options = {}) {
     actualHeaders: headers.slice(0, 80),
     candidate: chosen.candidate || null
   };
+  timing.finalizeMs = performance.now() - finalizeStartedAt;
   if (locateResult.status !== "available" && SKILL_DIAGNOSTICS() && typeof console?.warn === "function") {
     console.warn("[web2ai.skill-source] locate-status-not-available", JSON.stringify({
       sourceId: source?.id?.substring(0, 12),
@@ -847,6 +940,13 @@ function locateStoredSource(source, options = {}) {
     }));
   }
   cacheStoredSourceLocation(source, options, locateResult);
+  logTiming(locateResult.status || "available", {
+    candidateCount: candidates.length,
+    visibleCandidateCount: visibleCandidates.length,
+    selectorCandidateCount: selectorTables.length,
+    selectorQueryMode,
+    matchMethod: locateResult.matchMethod
+  });
   return locateResult;
 }
 
