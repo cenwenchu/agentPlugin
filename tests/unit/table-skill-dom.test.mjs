@@ -544,6 +544,59 @@ test("scored locator keeps only the active tab table when tab panes coexist in t
   }
 });
 
+test("stored source cache invalidates when its table becomes hidden by a tab switch", () => {
+  const cleanup = installDom(`
+    <section id="plan-pane">
+      <div class="art-table" id="cached-plan-table">
+        <table>
+          <thead><tr><th>序号</th><th>计划预算及消耗</th><th>计划转化 更多指标</th></tr></thead>
+          <tbody><tr><td>1</td><td>100</td><td>9</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="link-pane" style="display:none">
+      <div class="art-table" id="cached-link-table">
+        <table>
+          <thead><tr><th>序号</th><th>店铺链接</th><th>成交转化 更多指标</th></tr></thead>
+          <tbody><tr><td>1</td><td>链接A</td><td>12</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  `);
+  try {
+    const source = {
+      id: "cache-tab-visibility-source",
+      selector: "#cached-plan-table",
+      selectorStrength: "positional",
+      tableIndex: 0,
+      headers: ["序号", "计划预算及消耗", "计划转化 更多指标"],
+      componentType: "art-table",
+      locatorVersion: 2
+    };
+    const options = {
+      skillType: "derived-column",
+      selectedColumns: [
+        { header: "计划预算及消耗", occurrence: 1 },
+        { header: "计划转化 更多指标", occurrence: 1 }
+      ]
+    };
+
+    const beforeSwitch = locateStoredSource(source, options);
+    assert.equal(beforeSwitch.status, "available");
+    assert.equal(beforeSwitch.table?.id, "cached-plan-table");
+
+    // jsdom 没有真实布局，直接把 display 写到缓存节点上来模拟浏览器中
+    // 祖先隐藏后 getBoundingClientRect 归零的效果。
+    document.querySelector("#cached-plan-table").style.display = "none";
+    document.querySelector("#link-pane").style.display = "block";
+    const afterSwitch = locateStoredSource(source, options);
+    assert.notEqual(afterSwitch.table?.id, "cached-plan-table");
+    assert.notEqual(afterSwitch.status, "available");
+  } finally {
+    cleanup();
+  }
+});
+
 test("scored locator returns ambiguous when multiple visible tables are equally valid", () => {
   const cleanup = installDom(`
     <div class="art-table" id="orders-a">

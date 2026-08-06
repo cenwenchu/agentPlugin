@@ -223,9 +223,10 @@ src/
 # 如需开发调试，将 state.js 中的 DEBUG 设为 true
 npm test
 npm run test:e2e  # 启动有界面 Google Chrome，并加载临时扩展副本
+npm run test:e2e:all # 顺序执行主套件和全部独立正式 E2E 场景
 ```
 
-`npm test` 是默认提交门槛，会检查全部 `src/**/*.js` 的语法、Manifest 显式入口、调试日志规范、诊断日志隐私约束、禁止提交 `.log/.txt` 调试产物、demo HTML 结构以及纯逻辑单元测试。单元测试包括多数据源请求分区、空单元格对齐、模型感知预算、完整性判断、工作台会话派生状态、单次推理参数适配、多分页器按当前页绑定、末页禁用判定、运行时文件装载、CSV/TSV 解析、按列分析频控 / 缓存 / 指纹 / 关注标记，以及表格资源上限。`npm run test:e2e` 会先验证扩展 service worker 已启动，再覆盖技能创建、修改、按列分析运行时、页面访问频控、技能目录交互、CSV/XLSX 临时上传和刷新持久化，以及 document/父 frame 承载滚动的 100 条 ArtTable 虚拟分页采集。
+`npm test` 是默认提交门槛，会检查全部 `src/**/*.js` 的语法、Manifest 显式入口、调试日志规范、诊断日志隐私约束、禁止提交 `.log/.txt` 调试产物、demo HTML 结构以及纯逻辑单元测试。单元测试包括多数据源请求分区、空单元格对齐、模型感知预算、完整性判断、工作台会话派生状态、单次推理参数适配、多分页器按当前页绑定、末页禁用判定、数据源定位缓存随业务 Tab 可见性变化失效、运行时文件装载、CSV/TSV 解析、按列分析频控 / 缓存 / 指纹 / 关注标记，以及表格资源上限。`npm run test:e2e` 会先验证扩展 service worker 已启动，再覆盖技能创建、修改、按列分析运行时、页面访问频控、技能目录交互、CSV/XLSX 临时上传和刷新持久化，以及 document/父 frame 承载滚动的 100 条 ArtTable 虚拟分页采集。提交或发布前使用 `npm run test:e2e:all`，额外覆盖业务 Tab 数据源状态、JTV1 Tab 技能分组、JTV1 表格识别和多表 selector 漂移回退；诊断脚本 `test:e2e:diag` 与手工复现脚本不计入通过门禁。
 
 ### 技能采集排障
 

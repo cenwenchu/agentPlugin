@@ -56,7 +56,10 @@ function readCachedStoredSourceLocation(source, options) {
   const key = storedSourceLocationStableKey(source, options);
   const cached = storedSourceLocationCache.get(key);
   if (!cached) return null;
-  if (cached.expiresAt < performance.now() || !cached.result?.table?.isConnected) {
+  const table = cached.result?.table;
+  // SPA 的业务 Tab 通常只切换祖先节点的 display/hidden，表节点仍然连接在 DOM。
+  // 缓存命中时复核一次可见性，避免把刚被隐藏的数据源继续报告为“可用”。
+  if (cached.expiresAt < performance.now() || !table?.isConnected || !isVisibleElement(table)) {
     storedSourceLocationCache.delete(key);
     return null;
   }
