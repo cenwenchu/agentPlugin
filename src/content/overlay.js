@@ -1943,6 +1943,12 @@ function render() {
   if (skillExecutionResultPanel && STATE.skillTest?.pending) {
     skillExecutionResultPanel.scrollTop = skillExecutionResultPanel.scrollHeight;
   }
+  // 推理流持续追加时，始终露出最新内容。推理结束后移除 active，便不再
+  // 干预用户手动滚动查看前文。工作台会按分片重绘，因此在每次 render
+  // 完成后重新定位当前容器比保存旧 DOM 引用更可靠。
+  for (const reasoningContent of refs.overlayShadow.querySelectorAll(".skillReasoningPanel.active .skillReasoningContent")) {
+    reasoningContent.scrollTop = reasoningContent.scrollHeight;
+  }
   const currentSkillsPanel = refs.overlayShadow.getElementById("web2ai_skills_body");
   if (currentSkillsPanel && STATE.activePanelTab === "skills") {
     currentSkillsPanel.scrollTop = Math.max(0, Number(STATE.skillsPanelScrollTop) || 0);

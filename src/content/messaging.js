@@ -44,6 +44,7 @@ function getChatPort() {
     const handler = refs.streamHandlers.get(requestId);
     if (!handler) return;
     if (msg.type === "AI_CHAT_STREAM_STATUS") handler.onStatus(msg);
+    if (msg.type === "AI_CHAT_STREAM_REASONING") handler.onReasoning(msg.delta || "");
     if (msg.type === "AI_CHAT_STREAM_CHUNK") handler.onChunk(msg.delta || "");
     if (msg.type === "AI_CHAT_STREAM_END") handler.onEnd();
     if (msg.type === "AI_CHAT_STREAM_ERROR") handler.onError({
@@ -74,7 +75,7 @@ function getChatPort() {
  * @param {{messages: Array, onChunk: Function}} params
  * @returns {Promise<void>}
  */
-function streamChatOnce({ messages, onChunk, onStatus = () => void 0, debugLabel = "chat", thinkingEnabled } = {}) {
+function streamChatOnce({ messages, onChunk, onReasoning = () => void 0, onStatus = () => void 0, debugLabel = "chat", thinkingEnabled } = {}) {
   const requestId = uid();
   const traceEnabled = web2aiDiagnosticsEnabled();
   const contentStartedAt = performance.now();
@@ -103,6 +104,7 @@ function streamChatOnce({ messages, onChunk, onStatus = () => void 0, debugLabel
         }));
         onStatus(status);
       },
+      onReasoning,
       onChunk: (delta) => {
         if (delta && !firstChunkAt) {
           firstChunkAt = performance.now();
@@ -163,7 +165,7 @@ function streamChatOnce({ messages, onChunk, onStatus = () => void 0, debugLabel
   });
 }
 
-async function streamChat({ messages, onChunk, onStatus = () => void 0, debugLabel = "chat", thinkingEnabled } = {}) {
+async function streamChat({ messages, onChunk, onReasoning = () => void 0, onStatus = () => void 0, debugLabel = "chat", thinkingEnabled } = {}) {
   const startedAt = Date.now();
   const totalTextLength = messages.reduce((sum, message) => {
     if (Array.isArray(message?.content)) {
@@ -206,7 +208,7 @@ async function streamChat({ messages, onChunk, onStatus = () => void 0, debugLab
     }));
   };
   try {
-    await streamChatOnce({ messages, onChunk: handleChunk, onStatus, debugLabel, thinkingEnabled });
+    await streamChatOnce({ messages, onChunk: handleChunk, onReasoning, onStatus, debugLabel, thinkingEnabled });
   } catch (error) {
     DEBUG && console.warn("[web2ai.ai.request] content stream error", JSON.stringify({
       label: debugLabel,
@@ -225,7 +227,7 @@ async function streamChat({ messages, onChunk, onStatus = () => void 0, debugLab
     if (error?.code !== "STREAM_DISCONNECTED" || receivedContent) throw error;
     refs.chatPort = null;
     try {
-      await streamChatOnce({ messages, onChunk: handleChunk, onStatus, debugLabel: `${debugLabel}-retry`, thinkingEnabled });
+      await streamChatOnce({ messages, onChunk: handleChunk, onReasoning, onStatus, debugLabel: `${debugLabel}-retry`, thinkingEnabled });
     } catch (retryError) {
       DEBUG && console.warn("[web2ai.ai.request] content stream error", JSON.stringify({
         label: debugLabel,

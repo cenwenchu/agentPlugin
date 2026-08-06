@@ -285,6 +285,7 @@ async function streamChatCompletions({
   thinkingEnabled,
   signal,
   onDelta,
+  onReasoning = () => void 0,
   onActivity = () => void 0,
   onStatus = () => void 0,
   trace = null
@@ -380,6 +381,7 @@ async function streamChatCompletions({
             chunkLength: String(reasoning).length
           });
         }
+        onReasoning(String(reasoning));
       }
       const delta = choice?.delta?.content ?? choice?.message?.content ?? choice?.text ?? "";
       if (delta) {
@@ -1234,6 +1236,9 @@ chrome.runtime.onConnect.addListener((port) => {
           trace: pipelineTrace,
           onActivity: resetWatchdog,
           onStatus: postPipelineStatus,
+          onReasoning: (delta) => {
+            port.postMessage({ type: "AI_CHAT_STREAM_REASONING", requestId, delta });
+          },
           onDelta: (delta) => {
             if (!firstChunkAt) firstChunkAt = Date.now();
             port.postMessage({ type: "AI_CHAT_STREAM_CHUNK", requestId, delta });

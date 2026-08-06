@@ -698,22 +698,35 @@ async function collectStoredSourcePage(source, { collectionId, control, page, ma
   }
 }
 
-function findStoredSourcePagination(table) {
+function findStoredSourcePagination(table, expectedPage = 0) {
   // 适配器声明的分页器优先（如 _jtv1 聚水潭：#_jt_pagebar）
   const adapterPagination = resolveTableRootAdapter(table)?.pagination?.(table);
   if (adapterPagination) return adapterPagination;
   let scope = table;
   for (let depth = 0; depth < 9 && scope; depth++, scope = scope.parentElement) {
     const candidates = Array.from(scope.querySelectorAll?.(SKILL_PAGINATION_SELECTOR) || []);
-    const pagination = candidates.find((candidate) => {
+    const matching = candidates.filter((candidate) => {
       const text = compactOneLine(candidate.innerText || candidate.textContent || "");
       return /(^|\s)1(\s|$)/.test(text) || candidate.querySelector(
         "[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active,.vxe-pager--num-btn.is--active,.is--active[class*='num-btn']"
       );
     });
+    const pagination = expectedPage > 0
+      ? matching.find((candidate) => paginationPageState(candidate).current === expectedPage)
+      : matching[0];
     if (pagination) return pagination;
   }
   return null;
+}
+
+function paginationNextInRoot(pagination) {
+  if (!pagination) return null;
+  return pagination.querySelector?.(
+    ".ant-pagination-next button,.ant-pagination-next a,.ant-pagination-next .ant-pagination-item-link," +
+    ".arco-pagination-item-next button,.arco-pagination-item-next a,.arco-pagination-next button," +
+    ".vxe-pager--next-btn,.vxe-pager .btn-next,#_jt_pagebar ._jt_next," +
+    "button[aria-label*='下一页'],a[aria-label*='下一页'],button[aria-label*='next' i],a[aria-label*='next' i]"
+  ) || null;
 }
 
 function paginationIsOnFirstPage(pagination) {
@@ -731,6 +744,31 @@ function paginationIsOnFirstPage(pagination) {
     if (/(^|\s)1\s*\/\s*\d+\s*页/.test(label) && firstBtn?.classList?.contains("_jt_pagebtn_disabled")) return true;
   }
   return false;
+}
+
+function paginationRootForControl(control) {
+  return control?.closest?.(
+    ".ant-pagination,.arco-pagination,.vxe-pager,#_jt_pagebar,[role='navigation'],[class*='pager']"
+  ) || null;
+}
+
+function paginationPageState(pagination) {
+  if (!pagination) return { current: 0, last: 0, isLast: false };
+  const active = pagination.querySelector?.(
+    "[aria-current='page'],.ant-pagination-item-active,.arco-pagination-item-active,.vxe-pager--num-btn.is--active,.is--active[class*='num-btn'],#_jt_pagebar .cur"
+  );
+  const current = Number.parseInt(compactOneLine(active?.innerText || active?.textContent || ""), 10) || 0;
+  const pageNodes = pagination.querySelectorAll?.(
+    ".ant-pagination-item:not(.ant-pagination-item-ellipsis),.arco-pagination-item:not(.arco-pagination-item-ellipsis),.vxe-pager--num-btn,[class*='num-btn']"
+  ) || [];
+  let last = 0;
+  for (const node of pageNodes) {
+    const page = Number.parseInt(compactOneLine(node.innerText || node.textContent || ""), 10) || 0;
+    if (page > last) last = page;
+  }
+  // 常见 Ant/Arco 在末页仍保留全部页码；当前页等于最大可见页码时，
+  // 可以弥补某些业务封装未给 next 设置 disabled 的缺陷。
+  return { current, last, isLast: current > 0 && last > 0 && current >= last };
 }
 
 async function restoreStoredSourceTableTop(source, reason = "restore") {
@@ -877,14 +915,20 @@ async function collectStoredSourceData(source, options = {}) {
       if (page >= maxPages) { reason = "page-limit"; break; }
       const table = findStoredSourceTable(runtimeSource);
       const anchorRow = dataRowsInTable(table)[0] || null;
-      const next = findPaginationNextButton(anchorRow);
-      const pagination = next?.closest?.(".ant-pagination,.arco-pagination,#_jt_pagebar,[class*='pagination'],[role='navigation']");
+      // 页面可能同时存在多个分页器。优先绑定“激活页等于当前采集页”的分页器，
+      // 再从它内部取下一页按钮，不能先全局找按钮后反推分页器。
+      const matchedPagination = findStoredSourcePagination(table, page);
+      const next = paginationNextInRoot(matchedPagination) || findPaginationNextButton(anchorRow);
+      const pagination = matchedPagination || paginationRootForControl(next) || findStoredSourcePagination(table);
+      const pageState = paginationPageState(pagination);
       const nextContainer = next?.closest?.(".ant-pagination-next,.arco-pagination-item-next,.arco-pagination-next");
       const disabled = !next || next.disabled || next.getAttribute?.("aria-disabled") === "true" ||
         nextContainer?.classList?.contains("ant-pagination-disabled") ||
-        nextContainer?.classList?.contains("arco-pagination-item-disabled");
+        nextContainer?.classList?.contains("arco-pagination-item-disabled") ||
+        pageState.isLast;
       logSkillCollection("pagination next", {
-        collectionId, page, next: describeCollectionElement(next), pagination: describeCollectionElement(pagination), disabled
+        collectionId, page, next: describeCollectionElement(next), pagination: describeCollectionElement(pagination),
+        disabled, currentPage: pageState.current, lastVisiblePage: pageState.last, isLastPage: pageState.isLast
       });
       if (disabled) { reason = "last-page"; break; }
       const beforeDigest = getTableContentDigest(table);
@@ -897,8 +941,18 @@ async function collectStoredSourceData(source, options = {}) {
       if (control.stopped) { reason = "stopped"; break; }
       const changed = await waitForTableChange(table, beforeDigest, 8000, beforeRows, tableIndex);
       if (!changed) {
-        logSkillCollection("page turn", { collectionId, page, success: false, reason: "table-not-changed" });
-        reason = "page-timeout";
+        const latestTable = findStoredSourceTable(runtimeSource);
+        const latestPagination = findStoredSourcePagination(latestTable, page)
+          || findStoredSourcePagination(latestTable);
+        const latestPageState = paginationPageState(latestPagination);
+        const reachedLastPage = latestPageState.isLast;
+        logSkillCollection("page turn", {
+          collectionId, page, success: false,
+          reason: reachedLastPage ? "last-page-confirmed-after-click" : "table-not-changed",
+          currentPage: latestPageState.current,
+          lastVisiblePage: latestPageState.last
+        });
+        reason = reachedLastPage ? "last-page" : "page-timeout";
         break;
       }
       const ready = await waitForTableDataReady(

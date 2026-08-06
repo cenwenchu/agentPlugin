@@ -61,6 +61,9 @@ const SKILL_WORKSPACE_CSS = `
     .skillThinkingToggle input { width: 15px; height: 15px; margin: 0; accent-color: #2563eb; }
     .skillThinkingToggle .skillMeta { margin-left: auto; color: #64748b; font-size: 10px; }
     .skillThinkingToggle:has(input:disabled) { cursor: default; opacity: .7; }
+    .skillReasoningPanel { margin: 0 0 12px; border: 1px solid #c4b5fd; border-radius: 9px; background: #faf5ff; color: #5b21b6; }
+    .skillReasoningPanel summary { padding: 9px 11px; font-size: 11px; font-weight: 700; cursor: pointer; user-select: none; }
+    .skillReasoningContent { max-height: 240px; overflow: auto; padding: 0 11px 10px; border-top: 1px solid #ddd6fe; color: #4c1d95; font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
     .skillTestResult { color: #111827; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
     .skillTestResult.waiting { color: #64748b; }
     /* 仅强调运行中的阶段反馈；空状态说明和最终模型结果沿用正文排版。 */

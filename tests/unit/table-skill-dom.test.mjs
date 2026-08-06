@@ -111,6 +111,24 @@ test("pagination lookup stays scoped to the row container and skips disabled Ant
   }
 });
 
+test("pagination lookup returns null when the only Ant next button is disabled on its parent", () => {
+  const cleanup = installDom(`
+    <div id="scope">
+      <table><tbody><tr id="row"><td>A</td></tr></tbody></table>
+      <ul class="ant-pagination">
+        <li class="ant-pagination-next ant-pagination-disabled" aria-disabled="true">
+          <button class="ant-pagination-item-link">下一页</button>
+        </li>
+      </ul>
+    </div>
+  `);
+  try {
+    assert.equal(findPaginationNextButton(document.querySelector("#row")), null);
+  } finally {
+    cleanup();
+  }
+});
+
 test("pagination lookup recognizes VXE pager next button", () => {
   const cleanup = installDom(`
     <section>

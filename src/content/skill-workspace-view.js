@@ -25,15 +25,17 @@ const SKILL_DIAGNOSTICS = web2aiDiagnosticsEnabled;
 function renderWorkspaceRequestStatus(session) {
   const message = skillWorkspaceResultStatusMessage(session);
   if (!session?.requestStartedAt || !["submitting", "analyzing"].includes(session.status)) return message;
+  const reasoning = session.reasoningActive && session.reasoningStartedAt;
+  const elapsedStartedAt = reasoning ? session.reasoningStartedAt : session.requestStartedAt;
+  const elapsedSeconds = Math.max(0, Date.now() - Number(elapsedStartedAt || Date.now())) / 1000;
+  const elapsedLabel = reasoning ? "已推理" : "已等待";
   return el("span", {}, [
     session.reasoningActive ? "模型正在推理" : message,
     el("span", {
       style: { marginLeft: "6px", color: "#6b7280", fontSize: "11px" },
-      "data-web2ai-request-started-at": String(session.reasoningActive && session.reasoningStartedAt
-        ? session.reasoningStartedAt
-        : session.requestStartedAt),
-      "data-web2ai-elapsed-label": session.reasoningActive ? "已推理" : "已等待"
-    }, [session.reasoningActive ? "已推理 0.0 秒" : "已等待 0.0 秒"])
+      "data-web2ai-request-started-at": String(elapsedStartedAt),
+      "data-web2ai-elapsed-label": elapsedLabel
+    }, [`${elapsedLabel} ${elapsedSeconds < 10 ? elapsedSeconds.toFixed(1) : Math.round(elapsedSeconds)} 秒`])
   ]);
 }
 
@@ -56,6 +58,15 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
     el("span", {}, ["启用模型推理"]),
     el("span", { class: "skillMeta" }, ["仅本次测试或运行有效；推理通常更准确，但首字更慢"])
   ]);
+  const renderReasoningPanel = (session) => normalizeText(session?.reasoningResponse)
+    ? el("details", {
+        class: `skillReasoningPanel${session.reasoningActive ? " active" : ""}`,
+        open: session.reasoningActive === true
+      }, [
+        el("summary", {}, [session.reasoningActive ? "模型正在推理…" : "查看模型推理过程"]),
+        el("div", { class: "skillReasoningContent" }, [session.reasoningResponse])
+      ])
+    : null;
 
   function renderSkillTestPanel() {
     const test = STATE.skillTest;
@@ -236,7 +247,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
           ]),
           test.resultTab === "method"
             ? methodReviewContent
-            : el("div", {}, [resultActions, resultContent])
+            : el("div", {}, [resultActions, renderReasoningPanel(test), resultContent])
         ])
       ])
     ]);
@@ -422,6 +433,7 @@ function renderSkillWorkspace({ analysisModelControl, modelConfigReady = true, r
         ]),
         el("div", { id: "web2ai_skill_execution_result_panel", class: "skillExecutionPanel" }, [
           el("div", { class: "skillBlockTitle" }, [execution.pending ? "正在生成分析结果" : "分析结果"]),
+          renderReasoningPanel(execution),
           finished && execution.response ? el("div", { class: "skillResultActions" }, [
             el("button", { class: "btn", onClick: () => copySkillText(execution.response, "分析结果已复制") }, ["复制结果"]),
             el("button", { class: "btn", onClick: () => downloadSkillResult(execution) }, ["下载结果"])

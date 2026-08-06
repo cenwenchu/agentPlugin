@@ -288,12 +288,14 @@ function findPaginationNextButton(anchorRowEl) {
       p.querySelector?.(`.ant-pagination-next:not(.${ANT_PAGINATION_DISABLED}) .ant-pagination-item-link`) ||
       p.querySelector?.(`.ant-pagination-next button:not([disabled])`) ||
       p.querySelector?.(`.ant-pagination-next a`);
-    if (ant && (!drawerContainer || drawerContainer.contains(ant))) return ant;
+    // 某些 Ant 版本只把禁用态放在父级 li 上，内部 button 仍没有 disabled。
+    // 后面的兼容选择器可能命中这个 button，因此返回前必须统一检查祖先状态。
+    if (ant && !paginationControlIsDisabled(ant) && (!drawerContainer || drawerContainer.contains(ant))) return ant;
     const arco =
       p.querySelector?.(`.arco-pagination-item-next:not(.${ARCO_PAGINATION_DISABLED}) button`) ||
       p.querySelector?.(`.arco-pagination-item-next:not(.${ARCO_PAGINATION_DISABLED}) a`) ||
       p.querySelector?.(`.arco-pagination-next:not(.${ARCO_PAGINATION_DISABLED}) button`);
-    if (arco && (!drawerContainer || drawerContainer.contains(arco))) return arco;
+    if (arco && !paginationControlIsDisabled(arco) && (!drawerContainer || drawerContainer.contains(arco))) return arco;
     const vxe =
       p.querySelector?.(`.vxe-pager--next-btn:not(.${VXE_PAGER_DISABLED})`) ||
       p.querySelector?.(`.vxe-pager .btn-next:not(.${VXE_PAGER_DISABLED})`);

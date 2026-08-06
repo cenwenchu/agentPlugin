@@ -46,6 +46,31 @@ function initSkillWorkspaceController({ render, scheduleRender } = {}) {
   if (typeof scheduleRender === "function") scheduleWorkspaceRender = scheduleRender;
 }
 
+// 流式分片只更新右侧结果 DOM，不能为每个 token 重建整个工作台。
+// 否则左侧数据预览/配置面板的滚动位置和用户操作会持续被打断。
+function appendWorkspaceReasoning(delta) {
+  const root = refs.overlayShadow;
+  const content = root?.querySelector?.(".skillReasoningPanel.active .skillReasoningContent");
+  if (!content) return false;
+  content.append(document.createTextNode(String(delta || "")));
+  content.scrollTop = content.scrollHeight;
+  return true;
+}
+
+function updateWorkspaceStreamingResponse(response) {
+  const root = refs.overlayShadow;
+  const panel = root?.getElementById?.("web2ai_skill_test_result_panel")
+    || root?.getElementById?.("web2ai_skill_execution_result_panel");
+  const result = panel?.querySelector?.(".skillTestResult");
+  if (!result) return false;
+  result.className = "skillTestResult bubble assistant";
+  // 流式阶段使用纯文本，避免每个 token 都重新解析 Markdown；请求结束后的
+  // 正常 render 会一次性转换为最终 Markdown 展示。
+  result.textContent = String(response || "");
+  if (panel) panel.scrollTop = panel.scrollHeight;
+  return true;
+}
+
 async function ensureSkillModelConfigured() {
   const settingsResponse = await sendToBackground({ type: "GET_SETTINGS", modelId: STATE.activeModelId }).catch(() => null);
   const models = Array.isArray(settingsResponse?.data?.models) ? settingsResponse.data.models : [];
@@ -518,6 +543,7 @@ async function runDerivedColumnPreview() {
     test.requestStartedAt = Date.now();
     test.reasoningStartedAt = 0;
     test.reasoningActive = false;
+    test.reasoningResponse = "";
     renderWorkspace();
     const response = await sendToBackground({
       type: "AI_CHAT",
@@ -820,6 +846,10 @@ async function runSkillTest({ reuseData = false } = {}) {
       messages: [{ role: "user", content: prompt }],
       debugLabel: test.mode === "execute" ? "skill-execution" : "skill-test",
       thinkingEnabled: test.enableThinking === true,
+      onReasoning: (delta) => {
+        test.reasoningResponse += delta;
+        if (!appendWorkspaceReasoning(delta)) scheduleWorkspaceRender();
+      },
       onStatus: (status) => {
         if (status?.phase === "first-reasoning") {
           test.reasoningStartedAt = Date.now();
@@ -832,7 +862,7 @@ async function runSkillTest({ reuseData = false } = {}) {
       },
       onChunk: (delta) => {
         test.response += delta;
-        scheduleWorkspaceRender();
+        if (!updateWorkspaceStreamingResponse(test.response)) scheduleWorkspaceRender();
       }
     });
     test.response = normalizeText(test.response) || "模型未返回内容";
