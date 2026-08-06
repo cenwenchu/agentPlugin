@@ -1022,5 +1022,6 @@ function findStoredSourceTable(source) {
 
 
 export {
-  collectStoredSourceData, stopStoredSourceCollection, findStoredSourceTable
+  collectStoredSourceData, stopStoredSourceCollection, findStoredSourceTable,
+  findStoredSourcePagination, paginationNextInRoot, paginationPageState
 };

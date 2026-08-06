@@ -28,6 +28,9 @@ const {
   locateStoredSource, resolveStoredSource, tableCandidates
 } = await import("../../src/content/skill-source-dom.js");
 const { extractTableRowText } = await import("../../src/content/context.js");
+const {
+  findStoredSourcePagination, paginationNextInRoot, paginationPageState
+} = await import("../../src/content/skill-collector.js");
 
 function installDom(html) {
   document.body.innerHTML = html;
@@ -124,6 +127,32 @@ test("pagination lookup returns null when the only Ant next button is disabled o
   `);
   try {
     assert.equal(findPaginationNextButton(document.querySelector("#row")), null);
+  } finally {
+    cleanup();
+  }
+});
+
+test("skill collection binds the pager whose active page matches the collected page", () => {
+  const cleanup = installDom(`
+    <section id="scope">
+      <div id="table" role="table"><div role="row"><span role="cell">A</span></div></div>
+      <ul class="ant-pagination" id="other-pager">
+        <li class="ant-pagination-item ant-pagination-item-active">1</li>
+        <li class="ant-pagination-item">4</li>
+        <li class="ant-pagination-next"><button>下一页</button></li>
+      </ul>
+      <ul class="ant-pagination" id="table-pager">
+        <li class="ant-pagination-item">1</li>
+        <li class="ant-pagination-item ant-pagination-item-active">2</li>
+        <li class="ant-pagination-next ant-pagination-disabled"><button>下一页</button></li>
+      </ul>
+    </section>
+  `);
+  try {
+    const pagination = findStoredSourcePagination(document.querySelector("#table"), 2);
+    assert.equal(pagination?.id, "table-pager");
+    assert.deepEqual(paginationPageState(pagination), { current: 2, last: 2, isLast: true });
+    assert.equal(paginationNextInRoot(pagination)?.textContent, "下一页");
   } finally {
     cleanup();
   }

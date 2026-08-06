@@ -26,6 +26,9 @@ test("creates a workspace session without changing the existing STATE.skillTest 
   assert.equal(session.skillId, "skill-1");
   assert.equal(session.returnBusinessTabTitle, "订单");
   assert.equal(session.savedMethod, "分析异常订单");
+  assert.equal(session.enableThinking, false, "reasoning is opt-in for each new workspace session");
+  assert.equal(session.reasoningActive, false);
+  assert.equal(session.reasoningResponse, "");
   assert.deepEqual(session.dataSources.map((item) => [item.sourceType, item.name, item.status]), [
     ["web", "订单明细", "ready"],
     ["web", "售后页面", "ready"]
@@ -38,6 +41,8 @@ test("invalidates only derived results when runtime sources change", () => {
   session.response = "旧结果";
   session.submittedPrompt = "旧请求";
   session.methodReview = "旧建议";
+  session.reasoningActive = true;
+  session.reasoningResponse = "旧推理";
   session.attempts = 2;
   session.dataSources[0].data = { rows: [["A"]] };
   invalidateSkillWorkspaceResult(session);
@@ -45,6 +50,8 @@ test("invalidates only derived results when runtime sources change", () => {
   assert.equal(session.response, "");
   assert.equal(session.submittedPrompt, "");
   assert.equal(session.attempts, 0);
+  assert.equal(session.reasoningActive, false);
+  assert.equal(session.reasoningResponse, "");
   assert.deepEqual(session.dataSources[0].data.rows, [["A"]], "loaded source data remains available");
 });
 

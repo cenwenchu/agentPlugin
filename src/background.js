@@ -10,6 +10,7 @@
  */
 
 import { DEFAULT_MODEL_PROFILE, DEFAULT_SETTINGS } from "./shared.js";
+import { thinkingRequestFields } from "./content/thinking-request-model.js";
 import { createSseDataParser } from "./sse.js";
 import { MAX_SKILL_COLLECTION_PAGES, MAX_SKILL_COLLECTION_ROWS } from "./content/skill-collection-model.js";
 import { applySkillMutation } from "./content/skill-storage-model.js";
@@ -206,19 +207,6 @@ function buildChatCompletionsUrl(baseUrl) {
   const normalized = baseUrl.replace(/\/+$/, "");
   if (normalized.endsWith("/v1")) return `${normalized}/chat/completions`;
   return `${normalized}/v1/chat/completions`;
-}
-
-function thinkingRequestFields(settings, thinkingEnabled) {
-  if (typeof thinkingEnabled !== "boolean") return { fields: {}, mode: "default" };
-  const baseUrl = String(settings?.baseUrl || "").toLowerCase();
-  const model = String(settings?.model || "").toLowerCase();
-  if (baseUrl.includes("api.deepseek.com")) {
-    return { fields: { thinking: { type: thinkingEnabled ? "enabled" : "disabled" } }, mode: "deepseek-thinking" };
-  }
-  if (baseUrl.includes("dashscope") || /(?:qwen|qwq|kimi|glm|deepseek)/.test(model)) {
-    return { fields: { enable_thinking: thinkingEnabled }, mode: "enable-thinking" };
-  }
-  return { fields: {}, mode: "unsupported" };
 }
 
 /**

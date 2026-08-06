@@ -35,8 +35,11 @@
 - 技能测试和执行会依次采集所有数据源，实时展示每个数据源的页数、滚动次数与累计行数；每个数据源最多 30 页或 1000 行，采集后恢复第一页和表格顶部。任何数据源未完成时不会把不完整数据提交给模型
 - 技能分页和虚拟滚动采集采用自适应稳定等待：根据可见行内容及页面 loading 状态决定何时继续，快速页面不再为每次翻页或滚动固定等待两秒；普通表格跨页选择仍保留原有保守等待策略。ArtTable 在 100 条/页等大页容量下可能只渲染少量行，并用 `.art-virtual-blank` 表示剩余高度；采集器会等待虚拟结构稳定，并在纵向滚动由当前 document 或同源父 frame 承载时，将滚动范围限制在表格区域内逐段采集
 - 测试和执行的分析结果框会区分处理阶段：采集期间醒目显示“正在采集数据...”，请求提交后改为“已经提交给大模型，正在等待模型返回...”，避免把模型等待时间误认为仍在采集
+- 整表分析的测试与执行页提供“启用模型推理”复选框，只控制本次请求且默认关闭，不写入技能或模型配置。DeepSeek 官方接口使用 `thinking.type`，已知 Qwen/Kimi/GLM/阿里云兼容模型使用 `enable_thinking`；未知兼容服务不注入非标准字段
+- 开启推理且服务端返回 `reasoning_content` 时，右侧以独立可折叠区域实时展示推理过程和累计推理耗时；推理区自动跟随最新内容，最终答案保持独立。流式分片采用局部 DOM 更新，不重建左侧数据预览和配置面板
 - 采集结果区分完整、有界完整、用户取消、翻页失败和翻页状态不确定；部分数据仍可预览和排障，但停止、失败或不确定结果不会被静默提交给模型
 - 测试和执行都在用户点击开始后检查每个数据源是否分页。可输入 0–30，输入框默认 1，其中 0 表示全部；为兼容旧习惯仍接受“全部”文本。全部最多采集 30 页。取消页数选择只终止本次载入，工作台保持打开并提示本次未提交，可直接重新开始
+- 同一页面存在多个分页器时，技能采集器按“分页器当前激活页必须等于正在采集的页码”绑定目标分页器，并只点击该分页器内部的下一页。最后一页同时检查按钮/祖先禁用态和当前页/最大可见页码，避免串到其他表格分页器或把正常末页误判为 `page-timeout`
 - 测试模式只有当本次工作台里的所有数据源都已完整载入时才会复用缓存；如果上一次采集因用户停止、翻页失败或结果不确定而未完整结束，再次点击“开始测试/再次测试”会重新采集，不需要退出工作台重进
 - 测试页和执行页可分页查看本次载入的全部数据，每页 10 条；预览翻页仅切换内存数据，不会再次操作业务页面或重复请求模型。按列分析测试最多向模型提交 20 个唯一字段指纹（并继续受模型上下文预算限制）；AI 结果区只展示已实际提交指纹对应的行，完整采集数据仍在数据预览区分页查看
 - 测试和执行全屏页面可上传 CSV、TSV 或 XLSX 作为临时数据源；Excel 多工作表时选择其中一个。文件只在当前全屏会话内存中使用，不写入技能、导入导出或浏览器存储，退出后释放
@@ -130,6 +133,7 @@ src/
     ├── skill-source-model.js    # 版本化数据源定位、frame 路径提示与歧义判断
     ├── skill-storage-model.js   # 技能 mutation、revision 与导入合并规则
     ├── skill-request-model.js   # 单表/多表技能请求装配与完整性判断
+    ├── thinking-request-model.js # 单次请求的供应商推理开关参数适配
     ├── derived-column-model.js  # 按列分析数据模型、兼容归一化与默认值
     ├── derived-column-fingerprint.js # 按列分析分析指纹 / 行指纹
     ├── derived-column-request-model.js # 按列分析测试预览与运行时请求装配
@@ -221,17 +225,21 @@ npm test
 npm run test:e2e  # 启动有界面 Google Chrome，并加载临时扩展副本
 ```
 
-`npm test` 是默认提交门槛，会检查全部 `src/**/*.js` 的语法、Manifest 显式入口、调试日志规范、诊断日志隐私约束、禁止提交 `.log/.txt` 调试产物、demo HTML 结构以及纯逻辑单元测试。单元测试包括多数据源请求分区、空单元格对齐、模型感知预算、完整性判断、工作台会话派生状态、运行时文件装载、CSV/TSV 解析、按列分析频控 / 缓存 / 指纹 / 关注标记，以及表格资源上限。`npm run test:e2e` 会先验证扩展 service worker 已启动，再覆盖技能创建、修改、按列分析运行时、页面访问频控、技能目录交互、CSV/XLSX 临时上传和刷新持久化，以及 document/父 frame 承载滚动的 100 条 ArtTable 虚拟分页采集。
+`npm test` 是默认提交门槛，会检查全部 `src/**/*.js` 的语法、Manifest 显式入口、调试日志规范、诊断日志隐私约束、禁止提交 `.log/.txt` 调试产物、demo HTML 结构以及纯逻辑单元测试。单元测试包括多数据源请求分区、空单元格对齐、模型感知预算、完整性判断、工作台会话派生状态、单次推理参数适配、多分页器按当前页绑定、末页禁用判定、运行时文件装载、CSV/TSV 解析、按列分析频控 / 缓存 / 指纹 / 关注标记，以及表格资源上限。`npm run test:e2e` 会先验证扩展 service worker 已启动，再覆盖技能创建、修改、按列分析运行时、页面访问频控、技能目录交互、CSV/XLSX 临时上传和刷新持久化，以及 document/父 frame 承载滚动的 100 条 ArtTable 虚拟分页采集。
 
 ### 技能采集排障
 
 AI 和基础表格诊断日志默认仍跟随 `background.js` 的 `DIAGNOSTIC_LOGS` 与内容脚本 `state.js` 的 `DEBUG`。技能与派生列排障日志（`web2ai.skill-bar`、`web2ai.skill-source`、`web2ai.skill-panel`、`web2ai.skill-workspace`、`web2ai.derived-runtime`）**统一走全局诊断开关，默认关闭**，避免后台常驻刷屏与额外的 DOM 扫描/序列化开销。开启方式（任一为真即生效）：扩展面板"诊断日志"开关（持久化到 `chrome.storage.sync`，由 `STATE.diagnosticsEnabled` 读取），或控制台 `window.__WEB2AI_DEBUG = true`（页面级临时，刷新失效）。所有日志都只允许包含 frame、DOM 特征、页码、滚动尺寸、行数和消息长度，不得输出业务单元格、完整提示词或 API Key；定位细节（候选表逐项 innerText/选择器/尺寸）需再开 `window.__WEB2AI_DEBUG_VERBOSE`。排障后如无必要应继续收敛到结果级日志。
 
+模型请求排障使用 `[web2ai.ai.pipeline] stage`：`response-headers` 表示 API 已响应，`first-body-chunk` / `first-sse-event` 表示流已到达，`first-reasoning` 表示模型开始推理，`first-content` 表示正式答案开始输出；`thinking-option` 记录本次开关是否应用以及使用的供应商参数模式，但不记录请求正文或推理正文。技能采集到模型结束期间会暂停技能条定位与数据源校验，结束后再恢复。
+
+分页排障重点查看 `[web2ai.skill-collection] pagination next` 的 `page`、`currentPage`、`lastVisiblePage`、`isLastPage` 和 `disabled`。正常情况下 `page` 必须等于 `currentPage`；若不等，说明页面存在多个分页器且绑定错误。到达末页应以 `reason: "last-page"` 完成，只有目标分页器仍显示可继续但目标表格在超时内未变化时才返回 `page-timeout`，并阻止不完整数据提交模型。
+
 ### 技能渲染的性能约束
 
 技能横条（`renderSkillBars`）与按列分析运行期调度（`scheduleDerivedColumnRuntime`）按 frame 隔离：当前 frame 无任何技能数据源的 `frameUrl` 匹配时（`frameHasMatchingSkill`，仅字符串比较、不定位表格），该 frame 不做全文档表格定位，也不启动 3s 低频重建定时器——避免"在 A 页建了技能后，B 页/顶层/空 frame 也每 1.5s 空转扫描"。frameUrl 匹配的技能所在 frame 仍保留 3s 重建，用于兜底业务框架整块替换表格 DOM 导致横条丢失的场景（这是正确性兜底，不能按"技能/页面无变化"跳过）。顶层 frame 的跨 frame 广播定时器与"本 frame 是否匹配"无关，始终保留以确保子 frame 收到技能列表。
 
-成功的数据源定位结果只在同一 source 对象上短暂复用 500ms，用于合并一次采集/渲染批次中的重复 DOM 扫描；表格节点断开、定位参数变化、缓存过期或显式 `forceRefresh` 都会重新定位。技能横条的低频维护轮询会避开滚动过程，并在滚动安静 600ms 后由下一轮补做，不改变首次渲染和采集逻辑。
+成功的数据源定位结果使用 source ID 与完整定位配置指纹缓存 30 秒（最多 100 项），用于合并技能条、校验和采集中的重复 DOM 扫描；表格节点断开、定位参数变化、缓存过期或显式 `forceRefresh` 都会重新定位。复杂的版本化 `nth-of-type` selector 优先在候选表及有限祖先上做 `matches()`，必要时才回退全文档查询。技能横条的低频维护轮询会避开滚动过程，并在滚动安静 600ms 后由下一轮补做；模型请求期间暂停定位、校验和跨 frame 技能条维护，结束后恢复。
 
 - jtv1 业务页面首次加载时，`pageWatchTimer` 额外监控 `location.href` 以检测 SPA 页签切换（query 参数变化）。业务页签检测使用两阶段 MutationObserver：Phase 1 监听 childList 触发首次 `loadSkills`，Phase 2 监听 Ant Design 页签的 `aria-selected` 属性变化，在页签切换时自动刷新技能列表。
 - 按列分析运行时新增同步占位渲染（`renderDerivedRuntimePlaceholders`）：LLM 请求期间新行通过缓存渲染选项立即获得列 DOM，实现"列先出现、内容后填充"。关闭分析时通过表格根元素 MutationObserver 实时清理虚拟滚动回收产生的残留单元格，采用 [1500ms, 4000ms, 10000ms] 多轮延迟 + 30s 自动断开，若技能被重新启用则跳过清理。
